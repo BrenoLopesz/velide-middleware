@@ -36,25 +36,17 @@ jobs:
         run: echo "${{ github.ref_name }}" > installer/resources/version.txt
         shell: bash
 
-      - name: "DEBUG: List generated files"
-        run: |
-          echo "Listing contents of the entire 'output' directory..."
-          dir ".\output" /s
-        shell: cmd
-        # 'if: always()' garante que este passo rode mesmo se o anterior falhar
-        if: always()
-
       - name: "06. Compile 32-bit Inno Setup Installer"
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
           path: output/installer/resources/installer.iss
-          options: "/DMyArch=x86 /UPDATE=1"
+          options: "\DMyArch=x86 \UPDATE=1"
 
       - name: "07. Compile 64-bit Inno Setup Installer"
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
           path: output/installer/resources/installer.iss
-          options: "/DMyArch=x64 /UPDATE=1"
+          options: "\DMyArch=x64 \UPDATE=1"
 
       - name: "08. Clean up build artifacts"
         run: Remove-Item -Path './output/installer', './output/middleware' -Recurse -Force -ErrorAction SilentlyContinue
