@@ -209,6 +209,7 @@ __marimo__/
 
 token.txt
 velide.lock
+requirements.in
 
 # Update signature
 private.pem
