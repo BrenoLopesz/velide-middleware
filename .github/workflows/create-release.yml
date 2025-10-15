@@ -39,7 +39,7 @@ jobs:
       - name: "06. Compile 32-bit Inno Setup Installer"
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
-          path: 'output\installer\resources\installer.iss'
+          path: ./output/installer/resources/installer.iss
           options: |
             \DMyArch=x86
             \DUPDATE=1
@@ -47,7 +47,7 @@ jobs:
       - name: "07. Compile 64-bit Inno Setup Installer"
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
-          path: 'output\installer\resources\installer.iss'
+          path: ./output/installer/resources/installer.iss
           options: |
             \DMyArch=x64
             \DUPDATE=1
