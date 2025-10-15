@@ -36,6 +36,14 @@ jobs:
         run: echo "${{ github.ref_name }}" > installer/resources/version.txt
         shell: bash
 
+      - name: "DEBUG: List generated files"
+        run: |
+          echo "Listing contents of the entire 'output' directory..."
+          dir ./output /s
+        shell: cmd
+        # 'if: always()' garante que este passo rode mesmo se o anterior falhar
+        if: always()
+
       - name: "06. Compile 32-bit Inno Setup Installer"
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
