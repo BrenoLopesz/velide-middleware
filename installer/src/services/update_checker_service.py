@@ -1,3 +1,4 @@
+from packaging.version import Version
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QThreadPool
 
 from models.config import InstallerConfig
@@ -18,7 +19,7 @@ class UpdateCheckerService(QObject):
         parent (QObject, optional): The parent QObject. Defaults to None.
     """
     # Public signals that users of this class can connect to
-    update_found = pyqtSignal(str, str)
+    update_found = pyqtSignal(str, str, str)
     no_update_found = pyqtSignal()
     error = pyqtSignal(str, object)
     checking_for_update = pyqtSignal()
@@ -29,7 +30,7 @@ class UpdateCheckerService(QObject):
         self.threadpool = QThreadPool.globalInstance()
         
     @pyqtSlot()
-    def check_for_update(self, config: InstallerConfig):
+    def check_for_update(self, config: InstallerConfig, current_version: Version):
         """
         Starts the update check in a background thread.
         """
@@ -38,7 +39,7 @@ class UpdateCheckerService(QObject):
             f"Max threads: {self.threadpool.maxThreadCount()}"
         )
 
-        worker = UpdateCheckWorker(config)
+        worker = UpdateCheckWorker(config, current_version)
         
         # Connect worker signals to this class's public signals
         worker.signals.update_found.connect(self.update_found)

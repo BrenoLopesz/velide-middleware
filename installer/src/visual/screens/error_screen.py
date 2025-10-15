@@ -28,7 +28,7 @@ class ErrorScreen(QWidget):
         # Set the horizontal policy to Preferred and the VERTICAL policy to Fixed.
         # This tells the layout: "You can manage my width, but my height is
         # fixed to whatever my content requires. DO NOT shrink me vertically."
-        self.error_description.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.error_description.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
         self.button = QPushButton('Tentar Novamente')
         self.button.setFont(fonts["bold"])

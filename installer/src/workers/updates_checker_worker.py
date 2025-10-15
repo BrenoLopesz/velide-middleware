@@ -13,18 +13,32 @@ Install dependencies with:
 pip install PyQt5 httpx
 """
 import logging
+import sys
 import traceback
 from typing import Tuple, Optional
 
 import httpx
+from packaging.version import Version, parse, InvalidVersion
 from PyQt5.QtCore import pyqtSignal, QRunnable, QObject, pyqtSlot
 
 from models.config import InstallerConfig
 
 class UpdateCheckerSignals(QObject):
-    update_found = pyqtSignal(str, str)
+    """
+    Defines the signals available from the UpdateCheckWorker.
+    """
+    # Emitted when a new version with the required assets is found.
+    # Provides: installer_url, signatures_url, new_version_string
+    update_found = pyqtSignal(str, str, str)
+
+    # Emitted when the current version is the latest.
     no_update_found = pyqtSignal()
-    error = pyqtSignal(str, object) # (str, str | None)
+
+    # Emitted when an error occurs.
+    # Provides: user-friendly_message, technical_details
+    error = pyqtSignal(str, object)
+
+    # Emitted when the check process starts.
     checking = pyqtSignal()
 
 
@@ -36,30 +50,13 @@ class UpdateCheckWorker(QRunnable):
     Inherits from QRunnable to handle the execution in a separate thread.
     """
 
-    def __init__(self, config: InstallerConfig):
+    def __init__(self, config: InstallerConfig, current_version: Version):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self._config = config
+        self._current_version = current_version
         self.signals = UpdateCheckerSignals()
-
-    @staticmethod
-    def _parse_version(version_str: str, logger: Optional[logging.Logger] = None) -> Optional[Tuple[int, ...]]:
-        """
-        Parses a semantic version string into a tuple of integers for comparison.
-        Handles an optional 'v' prefix. e.g., 'v1.2.3' -> (1, 2, 3).
-        Returns None if the format is invalid.
-        """
-        if version_str.startswith('v'):
-            version_str = version_str[1:]
-        try:
-            parts = tuple(map(int, version_str.split('.')))
-            return parts
-        except (ValueError, TypeError):
-            if logger is not None:
-                logger.error(f"Formato de versão inválida encontrada: {version_str}")
-            return None
-
-    @pyqtSlot()
+        
     def run(self):
         """
         The main logic for the worker thread. Fetches release data from GitHub API.
@@ -67,21 +64,15 @@ class UpdateCheckWorker(QRunnable):
         self.signals.checking.emit()
         owner = self._config.owner
         repo = self._config.repo
-        current_version = self._config.current_version
+        current_version = self._current_version
 
         self.logger.info(
-            f"Checking for updates for {owner}/{repo}..."
-            f" Current version: {current_version}"
+            f"Verificando atualizações em {owner}/{repo}..."
+            f" Versão atual: {current_version}"
         )
 
         api_url = f"https://api.github.com/repos/{owner}/{repo}/releases"
         
-        current_version_tuple = self._parse_version(current_version, self.logger)
-        if not current_version_tuple:
-            error_msg = f"Versão atual '{current_version}' está mal formatada."
-            self.signals.error.emit(error_msg, None)
-            return
-
         try:
             # Using a context manager for the httpx client ensures cleanup
             with httpx.Client(timeout=15.0) as client:
@@ -95,8 +86,16 @@ class UpdateCheckWorker(QRunnable):
                 self.logger.info("Não há versões disponíveis no repositório.")
                 self.signals.no_update_found.emit()
                 return
+            
+            # Filter out pre-releases
+            stable_releases = [r for r in releases if not r.get('prerelease', False)]
 
-            latest_release = releases[0]
+            if not stable_releases:
+                self.logger.info("Não há versões estáveis disponíveis no repositório.")
+                self.signals.no_update_found.emit()
+                return
+
+            latest_release = stable_releases[0]
             latest_version_str = latest_release.get('tag_name')
             
             if not latest_version_str:
@@ -106,33 +105,54 @@ class UpdateCheckWorker(QRunnable):
 
             self.logger.info(f"Última versão encontrada no GitHub: {latest_version_str}")
             
-            latest_version_tuple = self._parse_version(latest_version_str, self.logger)
-            if not latest_version_tuple:
-                msg = f"Tag da última versão '{latest_version_str}' está mal formatada."
-                self.signals.error.emit(msg, "Não foi possível formatar a tag do GitHub.")
-                return
+            
+            latest_version = parse(latest_version_str)
 
-            if latest_version_tuple > current_version_tuple:
+            if latest_version > current_version:
                 self.logger.info(f"Nova versão encontrada: {latest_version_str}")
-                zip_url = latest_release.get('zipball_url')
-                if not zip_url:
-                    msg = f"Nova versão {latest_version_str} não há 'zipball_url'."
-                    self.signals.error.emit(msg, "Resposta da API está faltando 'zipball_url'.")
+
+                # Determine system architecture to find the correct installer
+                is_64bit = sys.maxsize > 2**32
+                installer_name = "velide_install_x64.exe" if is_64bit else "velide_install_x86.exe"
+                self.logger.info(f"Procurando por assets: '{installer_name}' e 'signatures.json'")
+
+                installer_url = None
+                signatures_url = None
+
+                assets = latest_release.get('assets', [])
+                for asset in assets:
+                    asset_name = asset.get('name')
+                    if asset_name == installer_name:
+                        installer_url = asset.get('browser_download_url')
+                    elif asset_name == 'signatures.json':
+                        signatures_url = asset.get('browser_download_url')
+
+                if installer_url and signatures_url:
+                    self.logger.info("Assets do instalador e de assinaturas encontrados.")
+                    self.signals.update_found.emit(installer_url, signatures_url, latest_version_str)
                 else:
-                    self.signals.update_found.emit(zip_url, latest_version_str)
+                    msg = f"Nova versão {latest_version_str} não possui os assets necessários."
+                    details = f"Instalador encontrado: {bool(installer_url)}. Assinatura encontrada: {bool(signatures_url)}."
+                    self.logger.error(f"{msg} ({details})")
+                    self.signals.error.emit(msg, details)
             else:
                 self.logger.info("Versão já está atualizada.")
                 self.signals.no_update_found.emit()
 
-        except httpx.RequestError as exc:
-            msg = f"Erro de conexão: Falha ao conectar com o servidor."
+        except InvalidVersion:
+            msg = "O conteúdo não corresponde a um formato de versão válido (SemVer)."
             self.logger.error(msg, exc_info=True)
             self.signals.error.emit(msg, traceback.format_exc())
-        
+
+        except httpx.RequestError as exc:
+            msg = "Erro de conexão: Falha ao conectar com o servidor."
+            self.logger.error(msg, exc_info=True)
+            self.signals.error.emit(msg, traceback.format_exc())
+
         except httpx.HTTPStatusError as exc:
             code = exc.response.status_code
             if code == 404:
-                msg = f"Repositório não encontrado."
+                msg = "Repositório não encontrado."
             elif code == 403:
                 msg = "Tentativas excedidas. Por favor tente novamente depois."
             else:

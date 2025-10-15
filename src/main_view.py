@@ -10,13 +10,15 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
 )
 from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import QStateMachine, QState
 from screeninfo import get_monitors
-from datetime import datetime
 
+from services.auth_service import AuthService
 from utils.bundle_dir import BUNDLE_DIR
-from visual.screens.finished_screen import FinishedScreen
-from visual.screens.update_screen import UpdateScreen
-from visual.screens.error_screen import ErrorScreen
+from visual.screens.cds_screen import CdsScreen
+from visual.screens.device_code_screen import DeviceCodeScreen
+from visual.screens.initial_screen import InitialScreen
+from visual.screens.device_code_error_screen import DeviceCodeErrorScreen
 
 WINDOW_SIZE = [600, 600]
 
@@ -28,7 +30,7 @@ class MainView(QWidget):
         self._create_screens()
 
     def _initialize_window(self):
-        self.setWindowTitle("Instalador Velide Middleware")
+        self.setWindowTitle("Velide Middleware")
 
          # Set the window icon
         icon_path = os.path.join(BUNDLE_DIR, "resources", "velide.png")  # Use an appropriate icon path
@@ -40,13 +42,15 @@ class MainView(QWidget):
     def _create_screens(self):
         self.stack = QStackedWidget()
 
-        self.update_screen = UpdateScreen()
-        self.finished_screen = FinishedScreen()
-        self.error_screen = ErrorScreen()
-        
-        self.stack.addWidget(self.update_screen)
-        self.stack.addWidget(self.finished_screen) 
-        self.stack.addWidget(self.error_screen) 
+        self.initial_screen = InitialScreen()
+        self.device_code_screen = DeviceCodeScreen()
+        self.device_code_error_screen = DeviceCodeErrorScreen()
+        self.cds_screen = CdsScreen()
+
+        self.stack.addWidget(self.initial_screen)
+        self.stack.addWidget(self.device_code_screen) 
+        self.stack.addWidget(self.device_code_error_screen) 
+        self.stack.addWidget(self.cds_screen) 
 
         self._layout = QVBoxLayout(self) # 'self' sets the layout on MainView
         self._layout.setContentsMargins(0, 0, 0, 0) # Optional: remove padding

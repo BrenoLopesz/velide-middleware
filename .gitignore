@@ -215,3 +215,5 @@ private.pem
 signatures.json
 
 resources/logs/
+resources/config.yml
+output/

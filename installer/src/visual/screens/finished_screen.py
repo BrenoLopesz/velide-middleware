@@ -1,10 +1,13 @@
 from typing import Optional
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 
 from visual.fonts import get_fonts
 
 class FinishedScreen(QWidget):
+    # Signal to tell the application to quit
+    quit_app = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         self._fonts = get_fonts()
@@ -34,10 +37,17 @@ class FinishedScreen(QWidget):
         main_layout.addWidget(self.new_version_label, alignment=Qt.AlignHCenter)
         main_layout.addSpacing(48)
 
-
         self.setLayout(main_layout)
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(2000)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.quit_app)
 
     def set_versions(self, new_version: str, new_version_date: str, old_version: Optional[str]):
         self.error_description.setText(f"Nova versão adquirida:<br/><b>{new_version}</b><br/>{new_version_date}<br/><br/>Versão anterior:<br/><b>{old_version if old_version else "Nenhuma"}</b>")
         self.error_description.adjustSize()
         self.adjustSize() 
+
+    def wait_to_quit(self):
+        self._timer.start()

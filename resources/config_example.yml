@@ -1,0 +1,13 @@
+## Authentication ###
+auth:
+  domain: "login.velide.com.br"
+  client_id: "S89fszfvMnU3WrVulijNCO7FokD1Lktz"
+  scope: "offline_access openid email profile"
+  audience: "https://velide.com.br/"
+
+api:
+  velide_server: "https://api.velide.com.br/"
+  use_ssl: false
+
+target_system: "{{ TARGET_SYSTEM }}"
+folder_to_watch: "{{ FOLDER_TO_WATCH }}"

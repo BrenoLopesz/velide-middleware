@@ -1,7 +1,13 @@
 from enum import Enum
-from typing import Optional
+import os
+from pathlib import Path
+from typing import Optional, Type, TypeVar
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import yaml
+
+from utils.bundle_dir import BUNDLE_DIR
+
+T = TypeVar('T', bound='Settings')
 
 class TargetSystem(str, Enum):
     CDS = "CDS"
@@ -40,13 +46,35 @@ class AuthenticationConfig(BaseModel):
     )
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__")
-
+class Settings(BaseModel):
     target_system: Optional[TargetSystem] = Field(default=TargetSystem.FARMAX, description="Application to integrate with.")
     auth: AuthenticationConfig
     api: ApiConfig
     folder_to_watch: Optional[str] = Field(default=None, description="Used to listen for new files when using CDS.")
 
+    @classmethod
+    def from_yaml(cls: Type[T], path: str) -> T:
+        """
+        Loads configuration from a YAML file.
 
-config = Settings()
+        Args:
+            path: The path to the YAML configuration file.
+
+        Returns:
+            An instance of the AppConfig class.
+        """
+        config_path = Path(path)
+        if not config_path.is_file():
+            raise FileNotFoundError(f"Arquivo de configuração não encontrado: {path}")
+
+        with open(config_path, 'r', encoding="utf-8") as f:
+            # Load YAML file into a Python dictionary
+            config_data = yaml.safe_load(f)
+            if not isinstance(config_data, dict):
+                raise TypeError("Não foi possível converter o conteúdo do arquivo de configuração.")
+
+            # Create an instance of the class (cls) using the loaded data
+            return cls(**config_data)
+
+config_path = os.path.join(BUNDLE_DIR, "resources", "config.yml")
+config = Settings.from_yaml(config_path)

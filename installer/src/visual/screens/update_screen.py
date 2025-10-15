@@ -80,9 +80,10 @@ class UpdateScreen(QWidget):
         self.timer.setParent(self.parent)
         self.timer.start(5000)
 
-    def on_new_version_found(self, version: str):
-        self.update_label.setText("Instalando Atualização...")
+    def set_status_text(self, text: str):
+        self.update_label.setText(text)
         self.update_label.adjustSize()
-        self.new_version_label.setText(version)
+
+    def set_version_text(self, text: str):
+        self.new_version_label.setText(text)
         self.new_version_label.adjustSize()
-        self.adjustSize()
