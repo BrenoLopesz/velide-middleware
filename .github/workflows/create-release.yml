@@ -37,7 +37,7 @@ jobs:
         shell: bash
 
       - name: "06. Compile 32-bit Inno Setup Installer"
-        uses: Minionguyjpro/Inno-Setup-Action@1.2.7
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.7
         with:
           path: "output/installer/resources/installer.iss"
           options: |
@@ -45,7 +45,7 @@ jobs:
             \UPDATE=1
 
       - name: "07. Compile 64-bit Inno Setup Installer"
-        uses: Minionguyjpro/Inno-Setup-Action@1.2.7
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.7
         with:
           path: "output/installer/resources/installer.iss"
           options: |
