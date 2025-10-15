@@ -1,0 +1,83 @@
+# .github/workflows/create-release.yml
+
+name: "Create Release"
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  build-and-release:
+    name: "Build Project"
+    # Inno Setup requires a Windows environment
+    runs-on: "windows-latest"
+    permissions:
+      contents: write
+
+    steps:
+      - name: "01. Checkout code"
+        uses: "actions/checkout@v4"
+
+      - name: "02. Set up Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.8" # Required to work in Windows 7
+          cache: "pip"
+
+      - name: "03. Install Python requirements"
+        run: pip install -r requirements.txt
+
+      - name: "04. Build Python executables"
+        run: python installer/src/cli/setup_installer.py build && python installer/src/cli/setup.py build
+
+      - name: "05. Create version.txt file"
+        # Saves version to a file. The 'shell: bash' is needed for this syntax.
+        run: echo "${{ github.ref_name }}" > installer/resources/version.txt
+        shell: bash
+
+      - name: "06. Compile 32-bit Inno Setup Installer"
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: output/installer/resources/installer.iss
+          options: "/DMyArch=x86 /UPDATE=1"
+
+      - name: "07. Compile 64-bit Inno Setup Installer"
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: output/installer/resources/installer.iss
+          options: "/DMyArch=x64 /UPDATE=1"
+
+      - name: "08. Clean up build artifacts"
+        run: Remove-Item -Path './output/installer', './output/middleware' -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: "09. Generate and Sign Hashes"
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_PRIVATE_KEY }}
+        shell: pwsh # Use PowerShell for its robust error handling
+        run: |
+          try {
+            # Write the key to a temporary file
+            Set-Content -Path "private_key.pem" -Value "$env:SIGNING_KEY"
+
+            # Run your signing script
+            python installer/src/cli/prepare_update.py output --key private_key.pem --output output/signatures.json
+          }
+          finally {
+            # This will always run, even if the python script fails
+            Remove-Item -Path "private_key.pem" -ErrorAction SilentlyContinue
+          }
+
+      - name: "10. Create Release and Upload Assets"
+        uses: softprops/action-gh-release@v1
+        with:
+          # The release name will be the tag name
+          name: "Atualização ${{ github.ref_name }}"
+          body: |
+            Nova versão: ${{ github.ref_name }}.
+            Arquivos de instalação estão listados abaixo.
+          # Use a glob pattern to find all your assets in the output directory
+          files: |
+            ./output/velide_install_x86.exe
+            ./output/velide_install_x64.exe
+            ./output/signatures.json
