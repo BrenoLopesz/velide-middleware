@@ -39,7 +39,7 @@ jobs:
       - name: "DEBUG: List generated files"
         run: |
           echo "Listing contents of the entire 'output' directory..."
-          dir ./output /s
+          dir ".\output" /s
         shell: cmd
         # 'if: always()' garante que este passo rode mesmo se o anterior falhar
         if: always()
