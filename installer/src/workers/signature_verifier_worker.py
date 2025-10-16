@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 from cryptography.exceptions import InvalidSignature
 
-from src.utils.cryptography import get_file_hash, load_public_key
+from utils.cryptography import get_file_hash, load_public_key
 
 class SignatureVerifierSignals(QObject):
     """

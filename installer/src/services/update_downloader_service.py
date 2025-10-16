@@ -44,7 +44,7 @@ class UpdateDownloaderService(QObject):
         self.threadpool = QThreadPool.globalInstance()
         self.worker: Optional[UpdateDownloaderWorker] = None
 
-    @pyqtSlot(List[Tuple[str, str, bool]])
+    @pyqtSlot(list)
     def start_download(self, files_to_download: List[Tuple[str, str, bool]]):
         """
         Starts the file downloads in a background thread.
