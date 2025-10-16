@@ -484,7 +484,7 @@ begin
         end;
         
         // Save the modified content to the new config.yml file as UTF-8
-        if SaveStringsToFile(ConfigPath, FileContent, True) then
+        if SaveStringsToUTF8File(ConfigPath, FileContent, True) then
         begin
           Log(Format('Successfully created config.yml with system: %s', [SelectedSystem]));
           if SelectedSystem = CustomMessage('SystemCDS') then

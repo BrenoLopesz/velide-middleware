@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import binascii
+from typing import Optional
 from utils.bundle_dir import BUNDLE_DIR
 from models.exceptions import TokenStorageError
 
@@ -53,7 +54,7 @@ def store_token_at_file(token: dict):
         # Catch cases where the token dictionary isn't serializable to JSON
         raise TokenStorageError(message="Token não é um JSON válido.", original_exception=e) from e
 
-def read_token_from_file() -> dict | None:
+def read_token_from_file() -> Optional[dict]:
     """
     Reads, decodes, and returns the token dictionary from a file.
     

@@ -1,6 +1,6 @@
 import collections
 import logging
-from typing import Dict
+from typing import Dict, Optional
 import uuid
 from PyQt5.QtCore import QObject, pyqtSignal, Qt
 
@@ -22,9 +22,9 @@ class DeliveriesService(QObject):
         self.logger = logging.getLogger(__name__)
         self._api_config = api_config
         self._target_system = target_system
-        self._active_strategy: IDeliverySourceStrategy | None = None
+        self._active_strategy: Optional[IDeliverySourceStrategy] = None
         self._active_deliveries: Dict[str, Order] = {}
-        self._velide_api: Velide | None = None
+        self._velide_api: Optional[Velide] = None
         self._delivery_queue = collections.deque()
         self._is_processing = False
     

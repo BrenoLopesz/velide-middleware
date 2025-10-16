@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Optional
+from typing import Optional, Union
 from packaging.version import Version, parse
 from PyQt5.QtCore import QObject, QStateMachine, QState, QFinalState, pyqtSignal
 from PyQt5.QtWidgets import QApplication
@@ -45,10 +45,10 @@ class AppPresenter(QObject):
         self._machine = QStateMachine(self)
 
         # Will be found later on
-        self._config: InstallerConfig | None = None
-        self._current_version: object | None = None
+        self._config: Optional[InstallerConfig] = None
+        self._current_version: Optional[object] = None
 
-        self._new_version: str | None = None
+        self._new_version: Optional[str] = None
         self._current_progress = 0
 
         self._destination_folder = os.path.join(BUNDLE_DIR, "..", "output")  

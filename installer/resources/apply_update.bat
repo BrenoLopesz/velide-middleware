@@ -126,7 +126,7 @@ if defined MAIN_EXECUTABLE (
         :: that need to find their own files (configs, DLLs, etc.).
         start "Restarting Application" /D "%~dp0" "%AppPath%"
         echo Start command issued for ""%AppPath%""
-        goto EndScript
+        goto End
     ) else (
         echo [WARNING] Could not find '%MAIN_EXECUTABLE%' to restart.
         goto End
