@@ -28,13 +28,13 @@ jobs:
       - name: "03. Install Python requirements"
         run: pip install -r requirements.txt
 
-      - name: "04. Build Python executables"
-        run: python installer/src/cli/setup_installer.py build && python installer/src/cli/setup.py build
-
-      - name: "05. Create version.txt file"
+      - name: "04. Create version.txt file"
         # Saves version to a file. The 'shell: bash' is needed for this syntax.
         run: echo "${{ github.ref_name }}" > installer/resources/version.txt
         shell: bash
+
+      - name: "05. Build Python executables"
+        run: python installer/src/cli/setup_installer.py build && python installer/src/cli/setup.py build
 
       - name: "06. Compile 32-bit Inno Setup Installer"
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.7
