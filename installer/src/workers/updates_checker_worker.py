@@ -96,7 +96,10 @@ class UpdateCheckWorker(QRunnable):
                 return
 
             latest_release = stable_releases[0]
-            latest_version_str = latest_release.get('tag_name')
+            latest_tag = latest_release.get('tag_name', '')
+    
+            # Clean up tag name (remove 'v' prefix)
+            latest_version_str = latest_tag.lstrip('v')
             
             if not latest_version_str:
                 msg = "Última versão encontrada mas não possui 'tag_name'."
