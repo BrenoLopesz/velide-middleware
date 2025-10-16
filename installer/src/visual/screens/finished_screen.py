@@ -45,7 +45,8 @@ class FinishedScreen(QWidget):
         self._timer.timeout.connect(self.quit_app)
 
     def set_versions(self, new_version: str, new_version_date: str, old_version: Optional[str]):
-        self.error_description.setText(f"Nova versão adquirida:<br/><b>{new_version}</b><br/>{new_version_date}<br/><br/>Versão anterior:<br/><b>{old_version if old_version else "Nenhuma"}</b>")
+        old_version_text = old_version or "Nenhuma"
+        self.error_description.setText(f"Nova versão adquirida:<br/><b>{new_version}</b><br/>{new_version_date}<br/><br/>Versão anterior:<br/><b>{old_version_text}</b>")
         self.error_description.adjustSize()
         self.adjustSize() 
 
