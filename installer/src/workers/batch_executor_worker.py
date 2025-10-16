@@ -38,6 +38,8 @@ class BatchExecutorWorker(QRunnable):
             if not self.bat_path.lower().endswith('.bat'):
                 raise ValueError("O arquivo fornecido não é um script .bat.")
 
+            normalized_path = os.path.normpath(self.bat_path)
+
             self.logger.info(f"Iniciando a execução do arquivo batch: {self.bat_path}")
 
             # Flags for Windows:
@@ -47,8 +49,14 @@ class BatchExecutorWorker(QRunnable):
             creation_flags = 0
             if sys.platform == "win32":
                 creation_flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
-
-            subprocess.Popen([self.bat_path], shell=False, creationflags=creation_flags)
+            
+            subprocess.Popen(
+                [normalized_path], 
+                creationflags=creation_flags,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL
+            )
 
             self.logger.info("Script batch iniciado com sucesso. A aplicação principal pode fechar.")
             self.signals.launched.emit()

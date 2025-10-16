@@ -90,7 +90,7 @@ class AppPresenter(QObject):
         self.version_ready.emit()
 
     def _on_new_version_found(self, installer_url: str, manifest_url: str, signature_url: str, new_version: str):
-        self._view.update_screen.set_status_text("Instalando Atualização...")
+        self._view.update_screen.set_status_text("Baixando Atualização...")
         self._view.update_screen.set_version_text(f"v{new_version}")
         self._new_version = new_version
         
