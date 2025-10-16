@@ -3,9 +3,11 @@
 QRunnable worker to perform asynchronous downloads of the installer and its
 signature file, with progress reports and error handling.
 """
+import os
 import time
 import logging
 import traceback
+from typing import List, Tuple
 
 import httpx
 from PyQt5.QtCore import QObject, pyqtSignal, QRunnable, pyqtSlot
@@ -18,8 +20,7 @@ class UpdateDownloaderSignals(QObject):
     progress = pyqtSignal(int, int)
 
     # Signal emitted on successful completion of ALL downloads
-    # Provides: installer_path, signatures_path
-    finished = pyqtSignal(str, str)
+    finished = pyqtSignal()
 
     # Signal emitted in case of error, sending (friendly_message, traceback_string)
     error = pyqtSignal(str, object)
@@ -38,16 +39,12 @@ class UpdateDownloaderWorker(QRunnable):
     # Throttle progress updates to a maximum of once every 100ms
     PROGRESS_THROTTLE_INTERVAL = 0.1  # seconds
 
-    def __init__(self, installer_url: str, installer_path: str, signatures_url: str, signatures_path: str):
+    def __init__(self, files_to_download: List[Tuple[str, str, bool]]):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.signals = UpdateDownloaderSignals()
 
-        self.installer_url = installer_url
-        self.installer_path = installer_path
-        self.signatures_url = signatures_url
-        self.signatures_path = signatures_path
-        
+        self._files_to_download = files_to_download
         self.is_cancelled = False
 
     def _download_file(self, url: str, destination_path: str, report_progress: bool = False):
@@ -74,6 +71,9 @@ class UpdateDownloaderWorker(QRunnable):
 
             if report_progress:
                 self.logger.info(f"Tamanho total do arquivo do instalador: {total_size} bytes.")
+
+            # Create parent directories if they don't exist
+            os.makedirs(os.path.dirname(destination_path), exist_ok=True)
 
             with open(destination_path, "wb") as f:
                 for chunk in response.iter_bytes(chunk_size=8192):
@@ -107,23 +107,17 @@ class UpdateDownloaderWorker(QRunnable):
         self.signals.started.emit()
 
         try:
-            # 1. Download the installer file (with progress reporting)
-            self._download_file(
-                self.installer_url, self.installer_path, report_progress=True
-            )
-            if self.is_cancelled:
-                return
-
-            # 2. Download the signatures file (without progress reporting)
-            self._download_file(
-                self.signatures_url, self.signatures_path, report_progress=False
-            )
-            if self.is_cancelled:
-                return
+            for _file in self._files_to_download:
+                # 1. Download the installer file (with progress reporting)
+                self._download_file(
+                    *_file
+                )
+                if self.is_cancelled:
+                    return
 
             # 3. If both succeed, emit the finished signal
-            self.logger.info("Download do instalador e das assinaturas concluído com sucesso.")
-            self.signals.finished.emit(self.installer_path, self.signatures_path)
+            self.logger.info("Download dos arquivos concluído com sucesso.")
+            self.signals.finished.emit()
 
         except httpx.RequestError:
             msg = "Erro de conexão: Não foi possível alcançar o servidor de download."

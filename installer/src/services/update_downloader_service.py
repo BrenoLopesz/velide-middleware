@@ -4,7 +4,7 @@ A service class to manage the file download process in a non-blocking way,
 following the MVPS (Model-View-Presenter-Service) pattern.
 """
 import logging
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QThreadPool
 
@@ -24,7 +24,7 @@ class UpdateDownloaderService(QObject):
 
     # Emitted on success with the paths to both downloaded files
     # Provides: installer_path, signatures_path
-    finished = pyqtSignal(str, str)
+    finished = pyqtSignal()
 
     # Emitted on error with a user-friendly message and technical details
     error = pyqtSignal(str, object)
@@ -44,8 +44,8 @@ class UpdateDownloaderService(QObject):
         self.threadpool = QThreadPool.globalInstance()
         self.worker: Optional[UpdateDownloaderWorker] = None
 
-    @pyqtSlot(str, str, str, str)
-    def start_download(self, installer_url: str, installer_path: str, signatures_url: str, signatures_path: str):
+    @pyqtSlot(List[Tuple[str, str, bool]])
+    def start_download(self, files_to_download: List[Tuple[str, str, bool]]):
         """
         Starts the file downloads in a background thread.
 
@@ -63,11 +63,11 @@ class UpdateDownloaderService(QObject):
             return
 
         self.logger.info(
-            f"Serviço de download inicializado para o instalador '{installer_url}' e assinaturas '{signatures_url}'"
+            f"Serviço de download inicializado."
         )
 
         self.worker = UpdateDownloaderWorker(
-            installer_url, installer_path, signatures_url, signatures_path
+            files_to_download
         )
 
         # Connect the worker's internal signals to this service's public signals

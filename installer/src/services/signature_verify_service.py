@@ -20,7 +20,7 @@ class SignatureVerifyService(QObject):
         self.thread_pool = QThreadPool.globalInstance()
         self.logger = logging.getLogger(__name__)
 
-    def start_verification(self, directory: str, signature_file: str, public_key_path: str):
+    def start_verification(self, directory: str, manifest_path: str, public_key_path: str):
         """
         Creates and starts a new verification worker.
         
@@ -29,14 +29,14 @@ class SignatureVerifyService(QObject):
             signature_file: The signature file to verify against.
             public_key_path: Path to the public key file for verification.
         """
-        if not all([os.path.isdir(directory), os.path.isfile(signature_file), os.path.isfile(public_key_path)]):
+        if not all([os.path.isdir(directory), os.path.isfile(manifest_path), os.path.isfile(public_key_path)]):
             err_msg = "Um ou mais caminhos são inválidos. Por favor, verifique os caminhos do diretório, da assinatura e do arquivo de chave."
             self.logger.warning(err_msg)
             # Emit error directly without starting worker for invalid startup conditions
             self.verification_error.emit(err_msg, "")
             return
             
-        worker = SignatureVerifierWorker(directory, signature_file, public_key_path)
+        worker = SignatureVerifierWorker(directory, manifest_path, public_key_path)
 
         # Connect worker signals to the service's signals
         worker.signals.started.connect(self.verification_started)

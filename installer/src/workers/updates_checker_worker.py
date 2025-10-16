@@ -28,8 +28,8 @@ class UpdateCheckerSignals(QObject):
     Defines the signals available from the UpdateCheckWorker.
     """
     # Emitted when a new version with the required assets is found.
-    # Provides: installer_url, signatures_url, new_version_string
-    update_found = pyqtSignal(str, str, str)
+    # Provides: installer_url, manifest_url, signature_url, new_version_string
+    update_found = pyqtSignal(str, str, str, str)
 
     # Emitted when the current version is the latest.
     no_update_found = pyqtSignal()
@@ -117,25 +117,30 @@ class UpdateCheckWorker(QRunnable):
                 # Determine system architecture to find the correct installer
                 is_64bit = sys.maxsize > 2**32
                 installer_name = "velide_install_x64.exe" if is_64bit else "velide_install_x86.exe"
-                self.logger.info(f"Procurando por assets: '{installer_name}' e 'signatures.json'")
+                self.logger.info(f"Procurando por assets: '{installer_name}', 'manifest.json' e 'manifest.sig'")
 
                 installer_url = None
-                signatures_url = None
+                manifest_url = None
+                signature_url = None
 
                 assets = latest_release.get('assets', [])
                 for asset in assets:
                     asset_name = asset.get('name')
                     if asset_name == installer_name:
                         installer_url = asset.get('browser_download_url')
-                    elif asset_name == 'signatures.json':
-                        signatures_url = asset.get('browser_download_url')
+                    elif asset_name == 'manifest.json':
+                        manifest_url = asset.get('browser_download_url')
+                    elif asset_name == 'manifest.sig':
+                        signature_url = asset.get('browser_download_url')
 
-                if installer_url and signatures_url:
-                    self.logger.info("Assets do instalador e de assinaturas encontrados.")
-                    self.signals.update_found.emit(installer_url, signatures_url, latest_version_str)
+                if installer_url and manifest_url and signature_url:
+                    self.logger.info("Assets do instalador, manifesto e assinatura encontrados.")
+                    self.signals.update_found.emit(installer_url, manifest_url, signature_url, latest_version_str)
                 else:
                     msg = f"Nova versão {latest_version_str} não possui os assets necessários."
-                    details = f"Instalador encontrado: {bool(installer_url)}. Assinatura encontrada: {bool(signatures_url)}."
+                    details = (f"Instalador encontrado: {bool(installer_url)}. "
+                               f"Manifesto encontrado: {bool(manifest_url)}. "
+                               f"Assinatura encontrada: {bool(signature_url)}.")
                     self.logger.error(f"{msg} ({details})")
                     self.signals.error.emit(msg, details)
             else:

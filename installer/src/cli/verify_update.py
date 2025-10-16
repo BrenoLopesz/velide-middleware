@@ -9,130 +9,119 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.exceptions import InvalidSignature
 import base64
 
+from src.utils.cryptography import get_file_hash, load_public_key
+
 # --- Basic Logging Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def load_public_key(public_key_path: str):
+def verify_directory(directory: str, manifest_path: str, public_key_path: str):
     """
-    Loads an existing public key from a PEM file.
-    """
-    logging.info(f"Loading public key from {public_key_path}...")
-    try:
-        with open(public_key_path, "rb") as key_file:
-            public_key = serialization.load_pem_public_key(
-                key_file.read()
-            )
-        return public_key
-    except FileNotFoundError:
-        logging.error(f"Public key file not found at {public_key_path}")
-        return None
-    except Exception as e:
-        logging.error(f"Failed to load public key: {e}")
-        return None
-
-def get_file_hash(file_path: str) -> bytes:
-    """
-    Calculates the SHA-256 hash of a file.
-    Reads the file in chunks to handle large files efficiently.
-    """
-    sha256_hash = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        # Read and update hash in chunks of 4K
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
-    return sha256_hash.digest()
-
-def verify_directory(directory: str, signature_file: str, public_key_path: str):
-    """
-    Verifies all files in a directory against a signature file.
+    Verifies files in a directory against a signed manifest.
     """
     # Step 1: Load public key
     public_key = load_public_key(public_key_path)
     if not public_key:
         logging.critical("Could not load public key. Aborting verification.")
-        return
+        return False, []
 
-    # Step 2: Load signatures from file
+    # Step 2: Verify the manifest file itself
+    signature_path = manifest_path.rsplit('.', 1)[0] + ".sig"
+    logging.info(f"Attempting to verify manifest '{manifest_path}' with signature '{signature_path}'...")
+    
     try:
-        with open(signature_file, 'r') as f:
-            signatures = json.load(f)
-        logging.info(f"Loaded {len(signatures)} signatures from {signature_file}")
-    except FileNotFoundError:
-        logging.critical(f"Signature file not found: {signature_file}")
-        return
-    except json.JSONDecodeError:
-        logging.critical(f"Error decoding JSON from {signature_file}. Is the file valid?")
-        return
+        with open(manifest_path, "rb") as f:
+            manifest_bytes = f.read()
+        
+        with open(signature_path, 'r') as f:
+            signature = base64.b64decode(f.read())
+
+        manifest_hash = hashlib.sha256(manifest_bytes).digest()
+
+        public_key.verify(
+            signature,
+            manifest_hash,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        logging.info("✅ Manifest signature is valid. The manifest is trusted.")
+    except FileNotFoundError as e:
+        logging.critical(f"Required file not found: {e.filename}. Cannot trust the manifest.")
+        return False, []
+    except InvalidSignature:
+        logging.critical("❌ MANIFEST TAMPERED: Signature mismatch. The manifest file cannot be trusted.")
+        return False, []
     except Exception as e:
-        logging.critical(f"Failed to read signature file: {e}")
-        return
+        logging.critical(f"An unexpected error occurred during manifest verification: {e}")
+        return False, []
+
+    # Step 3: Load the (now trusted) manifest data
+    try:
+        manifest_data = json.loads(manifest_bytes)
+        # Create a lookup dictionary of hash -> filename for efficient checking
+        manifest_hashes = {item['hash']: item['filename'] for item in manifest_data['files']}
+        all_manifest_files = set(manifest_hashes.values())
+    except (json.JSONDecodeError, KeyError) as e:
+        logging.critical(f"Manifest file is corrupted or has an invalid format: {e}")
+        return False, []
         
     inconsistencies = []
+    found_and_valid_files = set()
 
-    # Step 3: Verify each file listed in the signature file
-    signed_files_on_disk = set()
-    for relative_path in tqdm(signatures.keys(), desc="Verifying signatures"):
-        file_path = os.path.join(directory, relative_path)
-        signed_files_on_disk.add(relative_path)
-
-        if not os.path.exists(file_path):
-            inconsistencies.append(f"'{relative_path}': FAILED (File is missing)")
-            continue
-        
-        try:
-            # Calculate current hash
-            current_hash = get_file_hash(file_path)
-            
-            # Decode the signature from Base64
-            signature = base64.b64decode(signatures[relative_path])
-
-            # Verify the signature
-            public_key.verify(
-                signature,
-                current_hash,
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashes.SHA256()
-            )
-        except InvalidSignature:
-            inconsistencies.append(f"'{relative_path}': FAILED (Signature mismatch - file may be tampered)")
-        except Exception as e:
-            inconsistencies.append(f"'{relative_path}': FAILED (An error occurred: {e})")
+    # Step 4: Walk the local directory and verify files against the manifest hashes
+    logging.info("Verifying local files against the trusted manifest...")
     
-    # Step 4: Check for any unsigned files in the directory
-    all_files_on_disk = set()
+    # Files to ignore during verification walk
+    ignore_files = {os.path.basename(manifest_path), os.path.basename(signature_path)}
+    
+    local_files_to_check = []
     for root, _, files in os.walk(directory):
         for name in files:
-            full_path = os.path.join(root, name)
-            relative_path = os.path.relpath(full_path, directory)
-            all_files_on_disk.add(relative_path)
-    
-    unsigned_files = all_files_on_disk - signed_files_on_disk
-    for unsigned_file in unsigned_files:
-        inconsistencies.append(f"'{unsigned_file}': FAILED (File is not signed)")
+            if name not in ignore_files:
+                local_files_to_check.append(os.path.join(root, name))
 
-    # Step 5: Report the results
+    for file_path in tqdm(local_files_to_check, desc="Verifying files"):
+        relative_path = os.path.relpath(file_path, directory).replace('\\', '/')
+        try:
+            current_hash = get_file_hash(file_path)
+            if current_hash in manifest_hashes:
+                # The hash is valid, so this file is trusted.
+                original_filename = manifest_hashes[current_hash]
+                found_and_valid_files.add(original_filename)
+            else:
+                # This file exists locally but its hash is not in the manifest.
+                inconsistencies.append(f"'{relative_path}': UNTRUSTED (File is not listed in the manifest)")
+        except Exception as e:
+            inconsistencies.append(f"'{relative_path}': FAILED (Could not process file: {e})")
+
+    # Step 5: Identify any files that were in the manifest but not found locally
+    missing_files = all_manifest_files - found_and_valid_files
+    
+    # --- Reporting ---
     logging.info("Verification complete.")
     if not inconsistencies:
-        print("\n✅ Success: All files verified successfully. No inconsistencies found.")
+        print("\n✅ Success: All local files have been verified successfully against the manifest.")
+        if missing_files:
+            print("\nℹ️ The following files from the manifest were not found locally:")
+            for missing in sorted(list(missing_files)):
+                print(f"  - {missing}")
+        return True, []
     else:
         total = len(inconsistencies)
-        print(f"\n❌ Verification Failed: Found {total} total inconsistencies.")
-        
-        # Print up to 3 examples
-        print("Some of the inconsistencies found:")
-        for issue in inconsistencies[:3]:
+        print(f"\n❌ Verification Failed: Found {total} critical inconsistencies.")
+        print("Details:")
+        for issue in inconsistencies:
             print(f"  - {issue}")
-        if total > 3:
-            print(f"  ...and {total - 3} more.")
+        return False, inconsistencies
+
 
 def main():
     """
     Main function to parse arguments and initiate the verification process.
     """
-    parser = argparse.ArgumentParser(description="A CLI tool to verify file signatures in a directory.")
+    parser = argparse.ArgumentParser(description="A CLI tool to verify files in a directory against a signed manifest.")
     parser.add_argument("folder", type=str, help="The path to the folder to verify.")
     parser.add_argument(
         "--key",
@@ -141,10 +130,10 @@ def main():
         help="Path to the public key file for verification."
     )
     parser.add_argument(
-        "--signatures",
+        "--manifest",
         type=str,
-        default="signatures.json",
-        help="The signature file to verify against. (Default: signatures.json)"
+        default="manifest.json",
+        help="The manifest file to verify against. (Default: manifest.json)"
     )
 
     args = parser.parse_args()
@@ -153,11 +142,11 @@ def main():
         logging.critical(f"Error: The specified folder '{args.folder}' does not exist.")
         return
         
-    if not os.path.isfile(args.signatures):
-        logging.critical(f"Error: The signatures file '{args.signatures}' does not exist.")
+    if not os.path.isfile(args.manifest):
+        logging.critical(f"Error: The manifest file '{args.manifest}' does not exist.")
         return
 
-    verify_directory(args.folder, args.signatures, args.key)
+    verify_directory(args.folder, args.manifest, args.key)
 
 
 if __name__ == "__main__":

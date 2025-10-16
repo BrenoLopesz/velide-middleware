@@ -53,7 +53,8 @@ class AppPresenter(QObject):
 
         self._destination_folder = os.path.join(BUNDLE_DIR, "..", "output")  
         self._installer_path = os.path.join(self._destination_folder, "installer", "velide_installer.exe")
-        self._signature_path = os.path.join(self._destination_folder, "signatures.json")
+        self._manifest_path = os.path.join(self._destination_folder, "manifest.json")
+        self._signature_path = os.path.join(self._destination_folder, "manifest.sig")
 
         self._create_states()
         self._connect_actions()
@@ -88,13 +89,17 @@ class AppPresenter(QObject):
         self._current_version = parse("0.0.0") # Still treat it as a valid "found" version
         self.version_ready.emit()
 
-    def _on_new_version_found(self, installer_url: str, signature_url: str, new_version: str):
+    def _on_new_version_found(self, installer_url: str, manifest_url: str, signature_url: str, new_version: str):
         self._view.update_screen.set_status_text("Instalando Atualização...")
         self._view.update_screen.set_version_text(f"v{new_version}")
         self._new_version = new_version
         
         # Trigger the download
-        self._downloader_service.start_download(installer_url, self._installer_path, signature_url, self._signature_path)
+        self._downloader_service.start_download([
+            (installer_url, self._installer_path, True), # Report progress for installer
+            (manifest_url, self._manifest_path, False), 
+            (signature_url, self._signature_path, False)
+        ])
 
     def _on_no_update_found(self):
         # TODO: Start app
@@ -110,17 +115,17 @@ class AppPresenter(QObject):
         if round(old_progress * 100) != round(new_progress * 100):
             self._view.update_screen.set_version_text(f"v{self._new_version} ({round(new_progress * 100)}%)")
 
-    def _on_download_finished(self, installer_path: str, signature_path: str):
+    def _on_download_finished(self):
         self._view.update_screen.set_status_text("Download completo. Verificando...")
         self._view.update_screen.set_version_text(f"v{self._new_version}")
 
-        installer_dir = os.path.dirname(installer_path)
+        installer_dir = os.path.dirname(self._installer_path)
         public_key_path = os.path.join(BUNDLE_DIR, "resources", "private_public.pem")
 
         # Trigger the verification
         self._signature_verify_service.start_verification(
             directory=installer_dir, 
-            signature_file=signature_path, 
+            manifest_path=self._manifest_path, 
             public_key_path=public_key_path
         )
 

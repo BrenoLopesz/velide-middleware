@@ -19,7 +19,7 @@ class UpdateCheckerService(QObject):
         parent (QObject, optional): The parent QObject. Defaults to None.
     """
     # Public signals that users of this class can connect to
-    update_found = pyqtSignal(str, str, str)
+    update_found = pyqtSignal(str, str, str, str)
     no_update_found = pyqtSignal()
     error = pyqtSignal(str, object)
     checking_for_update = pyqtSignal()

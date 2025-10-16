@@ -6,7 +6,6 @@ import json
 from tqdm import tqdm
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.exceptions import InvalidSignature
 import base64
 
 # --- Basic Logging Configuration ---
@@ -19,7 +18,7 @@ def generate_keys(private_key_path: str, public_key_path: str):
     logging.info("Generating new RSA key pair...")
     private_key = rsa.generate_private_key(
         public_exponent=65537,
-        key_size=2048,
+        key_size=4096,  # Increased key size for better security
     )
 
     # Serialize and save the private key
@@ -61,9 +60,9 @@ def load_private_key(private_key_path: str):
         logging.error(f"Failed to load private key: {e}")
         return None
 
-def get_file_hash(file_path: str) -> bytes:
+def get_file_hash(file_path: str) -> str:
     """
-    Calculates the SHA-256 hash of a file.
+    Calculates the SHA-256 hash of a file and returns it as a hex string.
     Reads the file in chunks to handle large files efficiently.
     """
     sha256_hash = hashlib.sha256()
@@ -71,11 +70,12 @@ def get_file_hash(file_path: str) -> bytes:
         # Read and update hash in chunks of 4K
         for byte_block in iter(lambda: f.read(4096), b""):
             sha256_hash.update(byte_block)
-    return sha256_hash.digest()
+    return sha256_hash.hexdigest()
 
-def sign_directory(directory: str, private_key_path: str, output_file: str):
+def sign_directory(directory: str, private_key_path: str, manifest_path: str):
     """
-    Walks a directory, hashes each file, signs the hash, and saves the results.
+    Walks a directory, hashes each file, creates a manifest file,
+    and then signs the manifest file itself.
     """
     public_key_path = private_key_path.replace(".pem", "_public.pem")
 
@@ -90,57 +90,80 @@ def sign_directory(directory: str, private_key_path: str, output_file: str):
         logging.critical("Could not obtain a private key. Aborting.")
         return
 
-    # Step 2: Find all files to sign
-    files_to_sign = []
+    # Step 2: Find all files to include in the manifest
+    files_to_hash = []
+    # Exclude manifest and signature files themselves from the list
+    exclude_files = [os.path.basename(manifest_path), os.path.basename(manifest_path).replace('.json', '.sig')]
     for root, _, files in os.walk(directory):
         for name in files:
-            files_to_sign.append(os.path.join(root, name))
+            if name not in exclude_files:
+                files_to_hash.append(os.path.join(root, name))
 
-    if not files_to_sign:
+    if not files_to_hash:
         logging.warning(f"No files found in directory '{directory}'. Nothing to do.")
         return
 
-    logging.info(f"Found {len(files_to_sign)} files to sign in '{directory}'.")
+    logging.info(f"Found {len(files_to_hash)} files to include in the manifest from '{directory}'.")
 
-    # Step 3: Hash and sign each file
-    signatures = {}
-    for file_path in tqdm(files_to_sign, desc="Signing files"):
+    # Step 3: Hash all files and build the manifest data structure
+    manifest_files = []
+    for file_path in tqdm(files_to_hash, desc="Hashing files"):
         try:
-            # Calculate hash
             file_hash = get_file_hash(file_path)
-
-            # Sign the hash
-            signature = private_key.sign(
-                file_hash,
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashes.SHA256()
-            )
-            
-            # Store the signature as a base64 encoded string
-            relative_path = os.path.relpath(file_path, directory)
-            signatures[relative_path] = base64.b64encode(signature).decode('utf-8')
-
+            relative_path = os.path.relpath(file_path, directory).replace('\\', '/') # Normalize path separators
+            manifest_files.append({"filename": relative_path, "hash": file_hash})
         except Exception as e:
-            logging.error(f"Could not sign file {file_path}: {e}")
+            logging.error(f"Could not hash file {file_path}: {e}")
 
-    # Step 4: Save signatures to the output file
+    manifest_data = {
+        "manifest_version": "1.0",
+        "hash_algorithm": "sha256",
+        "files": manifest_files
+    }
+
+    # Step 4: Write the manifest JSON file to disk
     try:
-        with open(output_file, 'w') as f:
-            json.dump(signatures, f, indent=4)
-        logging.info(f"Successfully signed {len(signatures)} files. Signatures saved to {output_file}")
+        with open(manifest_path, 'w') as f:
+            json.dump(manifest_data, f, indent=4, sort_keys=True)
+        logging.info(f"Manifest for {len(manifest_files)} files successfully created at {manifest_path}")
     except Exception as e:
-        logging.error(f"Could not write signatures to {output_file}: {e}")
+        logging.error(f"Could not write manifest to {manifest_path}: {e}")
+        return
+
+    # Step 5: Sign the manifest file itself
+    logging.info(f"Signing the manifest file: {manifest_path}")
+    try:
+        with open(manifest_path, "rb") as f:
+            manifest_bytes = f.read()
+
+        manifest_hash = hashlib.sha256(manifest_bytes).digest()
+
+        signature = private_key.sign(
+            manifest_hash,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        
+        # Step 6: Save the signature to a .sig file
+        signature_path = manifest_path.rsplit('.', 1)[0] + ".sig"
+        with open(signature_path, 'w') as f:
+            f.write(base64.b64encode(signature).decode('utf-8'))
+        
+        logging.info(f"Manifest signature saved to {signature_path}")
+
+    except Exception as e:
+        logging.error(f"Failed to sign the manifest file: {e}")
 
 
 def main():
     """
-    Main function to parse arguments and initiate the signing process.
+    Main function to parse arguments and initiate the manifest creation and signing process.
     """
-    parser = argparse.ArgumentParser(description="A CLI tool to sign all files in a directory recursively.")
-    parser.add_argument("folder", type=str, help="The path to the folder whose contents will be signed.")
+    parser = argparse.ArgumentParser(description="A CLI tool to create and sign a manifest of all files in a directory.")
+    parser.add_argument("folder", type=str, help="The path to the folder to be scanned.")
     parser.add_argument(
         "--key",
         type=str,
@@ -150,8 +173,8 @@ def main():
     parser.add_argument(
         "--output",
         type=str,
-        default="signatures.json",
-        help="The file where the signatures will be stored. (Default: signatures.json)"
+        default="manifest.json",
+        help="The file where the manifest will be stored. A corresponding .sig file will be created. (Default: manifest.json)"
     )
 
     args = parser.parse_args()
