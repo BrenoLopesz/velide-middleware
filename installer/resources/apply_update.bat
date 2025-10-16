@@ -51,7 +51,7 @@ timeout /t 5 /nobreak >nul
 
 :: Get the path of the current directory and the name of this script.
 :: Get the path of the current directory and the name of this script.
-set "DESTINATION_FOLDER=%~dp0\.."
+set "DESTINATION_FOLDER=%~dp0..\"
 :: Remove the trailing backslash from the path to prevent quoting errors.
 if "%DESTINATION_FOLDER:~-1%"=="\" set "DESTINATION_FOLDER=%DESTINATION_FOLDER:~0,-1%"
 
