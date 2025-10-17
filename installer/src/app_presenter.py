@@ -1,5 +1,6 @@
 import logging
 import os
+import subprocess
 from typing import Optional, Union
 from packaging.version import Version, parse
 from PyQt5.QtCore import QObject, QStateMachine, QState, QFinalState, pyqtSignal
@@ -55,6 +56,7 @@ class AppPresenter(QObject):
         self._installer_path = os.path.join(self._destination_folder, "installer", "velide_installer.exe")
         self._manifest_path = os.path.join(self._destination_folder, "manifest.json")
         self._signature_path = os.path.join(self._destination_folder, "manifest.sig")
+        self._main_exe_path = os.path.join(BUNDLE_DIR, "..", "main.exe")
 
         self._create_states()
         self._connect_actions()
@@ -141,6 +143,14 @@ class AppPresenter(QObject):
     
     def _on_installation_finished(self):
         self._batch_executor_service.execute()
+
+    def quit_application(self):
+        # Opens main application if there's no update.
+        if self._new_version is None:
+            subprocess.Popen(
+                [self._main_exe_path, "--is-update-checked"]
+            )
+        QApplication.instance().quit()
 
     def _create_states(self):
         # State for when we are gathering initial data
