@@ -13,17 +13,20 @@ LOG_LEVEL_MAP = {
 
 class PackageFilter(logging.Filter):
     """
-    A filter that allows log records only from a specific package and its children.
+    A filter that blocks log records from specific third-party packages.
     """
-    def __init__(self, package_name):
+    def __init__(self, excluded_packages):
         super().__init__()
-        self.package_name = package_name
+        if isinstance(excluded_packages, str):
+            self.excluded_packages = [excluded_packages]
+        else:
+            self.excluded_packages = excluded_packages
 
     def filter(self, record):
-        # The `logging` module uses dot-notation for logger names.
-        # record.name for a logger from "src.views.main" will be "src.views.main".
-        # We check if the record's name starts with our desired package name.
-        return record.name.startswith(self.package_name)
+        """
+        Blocks a log record if its name starts with any excluded package.
+        """
+        return not any(record.name.startswith(name) for name in self.excluded_packages)
 
 class QLogHandler(logging.Handler, QObject):
     # Define a new signal that emits a list of strings

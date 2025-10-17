@@ -66,7 +66,7 @@ if __name__ == '__main__':
 
         # Set up all loggers
         log_handler = QLogHandler()
-        src_filter = PackageFilter('src')
+        src_filter = PackageFilter(['httpx', 'httpcore', 'urllib3', 'requests', 'pydantic', 'watchdog', 'PyYAML'])
         log_handler.addFilter(src_filter)
         log_handler.new_log.connect(view.cds_screen.log_table.add_row)
         logger = setup_logging(log_handler)
