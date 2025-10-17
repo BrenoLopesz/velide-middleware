@@ -458,6 +458,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   TemplatePath, ConfigPath, SelectedSystem: String;
   FileContent: TArrayOfString;
+  EscapedPath: String;
   i: Integer;
 begin
   if CurStep = ssPostInstall then
@@ -483,7 +484,12 @@ begin
           // Only perform this replacement if the selected system was CDS
           if SelectedSystem = CustomMessage('SystemCDS') then
           begin
-            FileContent[i] := StringReplace(FileContent[i], '{{ FOLDER_TO_WATCH }}', SelectedFolderPath);
+            EscapedPath := SelectedFolderPath;
+
+            // 2. Modify the new variable IN-PLACE to escape the backslashes
+            //    Pass 'True' for SupportDBCS as recommended for file paths.
+            StringChangeEx(EscapedPath, '\', '\\', True);
+            FileContent[i] := StringReplace(FileContent[i], '{{ FOLDER_TO_WATCH }}', EscapedPath);
           end;
         end;
         
