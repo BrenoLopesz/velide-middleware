@@ -48,11 +48,21 @@ class CdsStrategy(IDeliverySourceStrategy):
 
     def _transform(self, cds_order: CdsOrder) -> Order:
         """Transforms a source-specific CdsOrder into the common Order model."""
+        splitted_address = cds_order.endereco.split(" - ")
+        formatted_address = splitted_address[0]
+        neighbourhood = None
+        if len(splitted_address) == 6:
+            neighbourhood = splitted_address[2]
+        else: 
+            self.logger.warning("O endereço está formatado incorretamente. Resultado final pode ser impreciso.")
+
+
         return Order(
             customerName=cds_order.nome_cliente,
             customerContact=cds_order.contato_cliente,
-            address=cds_order.endereco, 
+            address=formatted_address, 
             createdAt=cds_order.horario_pedido,
             address2=cds_order.complemento,
-            reference=cds_order.referencia
+            reference=cds_order.referencia,
+            neighbourhood=neighbourhood
         )
