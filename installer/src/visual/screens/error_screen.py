@@ -23,12 +23,11 @@ class ErrorScreen(QWidget):
         self.error_description.setObjectName("error")
         self.error_description.setAlignment(Qt.AlignCenter)
         self.error_description.setWordWrap(True)
-        self.error_description.setMaximumWidth(600-256)
 
-        # Set the horizontal policy to Preferred and the VERTICAL policy to Fixed.
-        # This tells the layout: "You can manage my width, but my height is
-        # fixed to whatever my content requires. DO NOT shrink me vertically."
-        self.error_description.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self.error_description.setSizePolicy(
+            QSizePolicy.Expanding, 
+            QSizePolicy.Expanding
+        )
 
         self.button = QPushButton('Tentar Novamente')
         self.button.setFont(fonts["bold"])
