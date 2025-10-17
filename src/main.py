@@ -55,7 +55,7 @@ if __name__ == '__main__':
 
         if not is_update_checked() and getattr(sys, 'frozen', False):
             installer_path = os.path.join(BUNDLE_DIR, "installer", "main.exe")
-            open_installer(open_installer)
+            open_installer(installer_path)
             sys.exit(0)
         
         app = QApplication(sys.argv)
