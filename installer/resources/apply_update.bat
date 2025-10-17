@@ -114,23 +114,31 @@ echo   Update applied successfully!
 echo =================================================
 echo.
 
-:: 5. Restart the main application.
-if defined MAIN_EXECUTABLE (
-    set "AppPath=%~dp0%MAIN_EXECUTABLE%"
-    echo Checking for application to restart at: ""%AppPath%""
+:: NEW METHOD: Navigate to the correct directory to resolve the path
+pushd "%~dp0"
+cd ..\..
+
+:: After navigating, %CD% holds the fully resolved, clean path to the app's directory
+set "AppWorkDir=%CD%"
+set "ResolvedAppPath=%CD%\%MAIN_EXECUTABLE%"
+
+:: Return to the original directory the script was called from
+popd
+
+if exist "%ResolvedAppPath%" (
+    echo Application found.
+    echo Resolved Path: "%ResolvedAppPath%"
+    echo Working Dir: "%AppWorkDir%"
+    echo Restarting...
+
+    :: Use the new reliable paths
+    start "Restarting Application" /D "%AppWorkDir%" "%ResolvedAppPath%" --is-update-checked
     
-    if exist "%AppPath%" (
-        echo Application found. Restarting...
-        :: Use start to launch the app independently of the cmd window.
-        :: /D sets the "Start In" directory, which is crucial for apps
-        :: that need to find their own files (configs, DLLs, etc.).
-        start "Restarting Application" /D "%~dp0" "%AppPath%" --is-update-checked
-        echo Start command issued for ""%AppPath%""
-        goto End
-    ) else (
-        echo [WARNING] Could not find '%MAIN_EXECUTABLE%' to restart.
-        goto End
-    )
+    echo Start command issued.
+    goto End
+) else (
+    echo [WARNING] Could not find '%ResolvedAppPath%' to restart.
+    goto End
 )
 
 :End

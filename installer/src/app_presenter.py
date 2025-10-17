@@ -1,6 +1,7 @@
 import logging
 import os
 import subprocess
+import sys
 from typing import Optional, Union
 from packaging.version import Version, parse
 from PyQt5.QtCore import QObject, QStateMachine, QState, QFinalState, pyqtSignal
@@ -147,9 +148,18 @@ class AppPresenter(QObject):
     def quit_application(self):
         # Opens main application if there's no update.
         if self._new_version is None:
+            creation_flags = 0
+            if sys.platform == "win32":
+                creation_flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+            
             subprocess.Popen(
-                [self._main_exe_path, "--is-update-checked"]
+                [self._main_exe_path, "--is-upgrade-checked"], 
+                creationflags=creation_flags,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL
             )
+            
         QApplication.instance().quit()
 
     def _create_states(self):
