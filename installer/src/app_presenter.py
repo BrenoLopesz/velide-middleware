@@ -217,7 +217,7 @@ class AppPresenter(QObject):
         self._installer_service.finished.connect(self._on_installation_finished)
 
         # Close application on finished
-        self._view.finished_screen.quit_app.connect(QApplication.instance().quit)
+        self._view.finished_screen.quit_app.connect(self.quit_application)
 
         # --- UI Screen Switching ---
         self.update_chain_state.entered.connect(lambda: self._view.show_screen_by_index(0))
