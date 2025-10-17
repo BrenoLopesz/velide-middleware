@@ -1,3 +1,5 @@
+import argparse
+import subprocess
 import sys
 import os
 from PyQt5.QtWidgets import QApplication
@@ -19,6 +21,30 @@ def loadCSS():
     with open(os.path.join(BUNDLE_DIR, 'resources', 'style.css'), 'r') as f:
         return f.read()
 
+def is_update_checked():
+    parser = argparse.ArgumentParser(description="Middleware to connect various different softwares to Velide.")
+    parser.add_argument(
+        "--is-update-checked",
+        action="store_true",
+        help="If update wasn't checked, it will close and run the update auto-installer first instead."
+    )
+
+    args = parser.parse_args()
+    return args.is_update_checked
+
+def open_installer(installer_path: str):
+    creation_flags = 0
+    if sys.platform == "win32":
+        creation_flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+            
+    subprocess.Popen(
+        [installer_path], 
+        creationflags=creation_flags,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL
+    )
+
 if __name__ == '__main__':
     try:
         # Apply the fix for asyncio on Python 3.8 and Windows 7
@@ -26,6 +52,11 @@ if __name__ == '__main__':
 
         # Attempt to acquire the instance lock before starting the app
         acquire_lock()
+
+        if not is_update_checked() and getattr(sys, 'frozen', False):
+            installer_path = os.path.join(BUNDLE_DIR, "installer", "main.exe")
+            open_installer(open_installer)
+            sys.exit(0)
         
         app = QApplication(sys.argv)
         app.setStyleSheet(loadCSS())

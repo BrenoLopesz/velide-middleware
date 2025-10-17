@@ -124,7 +124,7 @@ if defined MAIN_EXECUTABLE (
         :: Use start to launch the app independently of the cmd window.
         :: /D sets the "Start In" directory, which is crucial for apps
         :: that need to find their own files (configs, DLLs, etc.).
-        start "Restarting Application" /D "%~dp0" "%AppPath%"
+        start "Restarting Application" /D "%~dp0" "%AppPath%" --is-update-checked
         echo Start command issued for ""%AppPath%""
         goto End
     ) else (
