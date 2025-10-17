@@ -67,4 +67,4 @@ def setup_logging(log_handler: QLogHandler):
     error_handler.setFormatter(default_formatter) # Use the standard default formatter
     logger.addHandler(error_handler)
 
-    logging.info("Logging setup is complete.")
+    logging.debug("Setup do logging está completo.")
