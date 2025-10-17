@@ -86,10 +86,13 @@
 #endif
 
 #define MyAppName "Velide Middleware"
-#define MyAppVersion "v3.0.0"
 #define MyAppPublisher "Velide"
 #define MyAppURL "https://velide.com.br/"
 #define MyAppExeName "main.exe"
+
+#ifndef MyAppVersion
+  #define MyAppVersion "v3.0.0"
+#endif
 
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application. Do not use the same AppId value in installers for other applications.
@@ -193,6 +196,7 @@ es.BrowseCaption=Explorar...
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "startup"; Description: "{cm:AutoStartProgram,{#MyAppName}}"; GroupDescription: "{cm:AutoStartProgramGroupDescription}"; Flags: unchecked
 
 [Files]
 ; Copy all files AND subdirectories from 'middleware' to the installation folder.
