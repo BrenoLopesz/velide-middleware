@@ -51,11 +51,12 @@ class BatchExecutorWorker(QRunnable):
                 creation_flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
             
             subprocess.Popen(
-                [normalized_path], 
+                normalized_path, 
                 creationflags=creation_flags,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL
+                stdin=subprocess.DEVNULL,
+                shell=True
             )
 
             self.logger.info("Script batch iniciado com sucesso. A aplicação principal pode fechar.")
