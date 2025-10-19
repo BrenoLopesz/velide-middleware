@@ -13,6 +13,12 @@ class TargetSystem(str, Enum):
     CDS = "CDS"
     FARMAX = "Farmax"
 
+class FarmaxConfig(BaseModel):
+    host: str = Field(..., description="Address that host the Firebird.")
+    file: str = Field(..., description="Firebird database file.")
+    user: str = Field(..., description="Firebird user.")
+    password: str = Field(..., description="Firebird password.")
+
 class ApiConfig(BaseModel):
     velide_server: str = Field(description="API URL to make requests to.")
     use_neighbourhood: Optional[bool] = Field(default=False, description="Enables sending neighbourhood details.")
@@ -50,6 +56,7 @@ class Settings(BaseModel):
     target_system: Optional[TargetSystem] = Field(default=TargetSystem.FARMAX, description="Application to integrate with.")
     auth: AuthenticationConfig
     api: ApiConfig
+    farmax: Optional[FarmaxConfig] = None
     folder_to_watch: Optional[str] = Field(default=None, description="Used to listen for new files when using CDS.")
 
     @classmethod
