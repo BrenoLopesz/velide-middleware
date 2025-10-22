@@ -3,7 +3,6 @@ from textwrap import dedent
 
 from sqlalchemy import text, Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
-from config import FarmaxConfig
 
 class FarmaxSetup:
     SEQUENCE_NAME = "DELIVERYLOG_ID_AUTOINCREMENT"
@@ -11,9 +10,8 @@ class FarmaxSetup:
     INCREMENT_TRIGGER_NAME = "TRG_DELIVERY_LOGID_INCREMENT"
     ADD_DELIVERY_TRIGGER_NAME = "TRG_ADD_DELIVERY"
 
-    def __init__(self, farmax_config: FarmaxConfig, engine: Engine):
+    def __init__(self, engine: Engine):
         self.logger = logging.getLogger(__name__)
-        self._config = farmax_config
         self._engine = engine
 
     def _check_if_object_exists(self, conn: Connection, object_name: str, rdb_table: str):

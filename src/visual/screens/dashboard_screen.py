@@ -4,7 +4,7 @@ from visual.fonts import get_fonts
 from visual.components.deliveries_table import DeliveriesTable
 from visual.components.log_table import LogTable
 
-class CdsScreen(QWidget):
+class DashboardScreen(QWidget):
     def __init__(self):
         super().__init__()
         fonts = get_fonts()

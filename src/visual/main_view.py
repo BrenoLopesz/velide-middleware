@@ -1,28 +1,26 @@
 import os
 from PyQt5.QtWidgets import (
-    QApplication,
-    QMainWindow,
     QWidget,
     QVBoxLayout,
-    QPushButton,
-    QLabel,
     QStackedWidget,
-    QHBoxLayout,
 )
+from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import QStateMachine, QState
 from screeninfo import get_monitors
 
-from services.auth_service import AuthService
 from utils.bundle_dir import BUNDLE_DIR
-from visual.screens.cds_screen import CdsScreen
+from utils.device_code import DeviceCodeDict
+from visual.screens.dashboard_screen import DashboardScreen
+from visual.screens.deliverymen_mapping_screen import DeliverymenMappingScreen
 from visual.screens.device_code_screen import DeviceCodeScreen
 from visual.screens.initial_screen import InitialScreen
-from visual.screens.device_code_error_screen import DeviceCodeErrorScreen
+from visual.screens.device_code_error_screen import ErrorScreen
 
 WINDOW_SIZE = [600, 600]
 
 class MainView(QWidget):
+    device_code_expired = pyqtSignal()
+
     def __init__(self):
         super().__init__()
 
@@ -44,17 +42,25 @@ class MainView(QWidget):
 
         self.initial_screen = InitialScreen()
         self.device_code_screen = DeviceCodeScreen()
-        self.device_code_error_screen = DeviceCodeErrorScreen()
-        self.cds_screen = CdsScreen()
+        self.device_code_error_screen = ErrorScreen()
+        self.dashboard_screen = DashboardScreen()
+        self.deliverymen_mapping_screen = DeliverymenMappingScreen()
+
+        self.device_code_screen.expired.connect(self.device_code_expired.emit)
 
         self.stack.addWidget(self.initial_screen)
         self.stack.addWidget(self.device_code_screen) 
         self.stack.addWidget(self.device_code_error_screen) 
-        self.stack.addWidget(self.cds_screen) 
+        self.stack.addWidget(self.dashboard_screen) 
+        self.stack.addWidget(self.deliverymen_mapping_screen) 
 
         self._layout = QVBoxLayout(self) # 'self' sets the layout on MainView
         self._layout.setContentsMargins(0, 0, 0, 0) # Optional: remove padding
         self._layout.addWidget(self.stack)
+
+    def set_device_code_and_qr(self, device_code: DeviceCodeDict):
+        self.device_code_screen.set_device_code(device_code)
+        self.device_code_screen.display_qr_code()
 
     def show_screen_by_index(self, index: int):
         """A simple method the Presenter can call to switch screens."""

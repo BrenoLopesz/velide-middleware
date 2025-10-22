@@ -1,89 +1,132 @@
-# src/presenters/app_presenter.py
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-from PyQt5.QtCore import QObject, QStateMachine, QState
-from services.deliveries_service import DeliveriesService
-from presenters.dashboard_presenter import DashboardPresenter
+"""
+src/presenters/app_presenter.py
+
+This module contains the main application presenter, AppPresenter.
+It controls the overall application flow, switching between different
+views (like authentication, dashboard, and setup) using a finite state machine.
+"""
+
+# ----------------------------------------------------------------------------
+# Imports
+# ----------------------------------------------------------------------------
+
+# Third-party imports
+from typing import Optional
+from PyQt5.QtCore import QObject
 from presenters.device_code_presenter import DeviceCodePresenter
-from visual.main_view import MainView
 from services.auth_service import AuthService
-from services.restart_service import restart_application
+from services.deliverymen_retriever_service import DeliverymenRetrieverService
+from states.main_state_machine import MainStateMachine
+from visual.main_view import MainView
+
+# ----------------------------------------------------------------------------
+# Class Definition
+# ----------------------------------------------------------------------------
 
 class AppPresenter(QObject):
-    def __init__(self, view: MainView, auth_service: AuthService, delivery_service: DeliveriesService):
+    """
+    The main application presenter.
+
+    This class orchestrates the high-level application logic. It uses a
+    QStateMachine to manage the application's state, such as 'showing device code',
+    'showing dashboard', or 'handling errors'. It coordinates multiple
+    services and sub-presenters (like DeviceCodePresenter and DashboardPresenter)
+    to build the complete application flow.
+    """
+
+
+    # ------------------------------------------------------------------------
+    # Initialization
+    # ------------------------------------------------------------------------
+
+    def __init__(
+            self,
+            view: MainView,
+            state_machine: MainStateMachine,
+            auth_service: AuthService,
+            deliverymen_retriever_service: DeliverymenRetrieverService,
+            device_code_presenter: DeviceCodePresenter
+    ):
+        """
+        Initializes the AppPresenter.
+
+        Args:
+            view: The main application window (MainView).
+        """
         super().__init__()
+
+        # --- Dependency Injection ---
         self._view = view
         self._auth_service = auth_service
-        self._delivery_service = delivery_service
-        self._machine = QStateMachine(self)
+        self._deliverymen_retriever_service = deliverymen_retriever_service
+        self._device_code_presenter = device_code_presenter
 
-        self._last_error_message = ""
+        self._last_error_title: Optional[str] = None
+        self._last_error_message: Optional[str] = None
 
-        self._device_code_presenter = DeviceCodePresenter(self._auth_service, self._view)
-        self._dashboard_presenter = DashboardPresenter(self._view.cds_screen, self._delivery_service)
+        # --- State Machine ---
+        self._machine = state_machine
 
-        self._create_states()
+        # --- Setup ---
         self._connect_actions()
-        self._build_state_machine()
-    
+
     def run(self):
+        """
+        Starts the application logic.
+
+        This method starts the state machine and shows the main application window.
+        """
         self._machine.start()
         self._view.show()
 
-    def _create_states(self):
-        self.initial_state = QState()
-        self.device_flow_state = QState()
-        self.dashboard_state = QState()
-        self.error_state = QState()
-        self.restart_state = QState() # Renamed for clarity
-    
     def _connect_actions(self):
-        self._device_code_presenter.authenticated.connect(self._dashboard_presenter.on_authenticate)
+        """
+        Connects state entry/exit signals and other signals to slots (methods).
+        
+        This defines *what happens* when a state is entered or a signal is emitted.
+        """
+        self._machine.device_flow_state.entered.connect(self._device_code_presenter.on_start)
+
+        self._machine.check_mapping_state.entered.connect(
+            self._deliverymen_retriever_service.check_if_mapping_is_required
+        )
+        self._machine.gathering_deliverymen_state.entered.connect(
+            self._deliverymen_retriever_service.fetch_deliverymen
+        )
 
         # --- UI Screen Switching ---
-        self.initial_state.entered.connect(lambda: self._view.show_screen_by_index(0))
-        self.device_flow_state.entered.connect(lambda: self._view.show_screen_by_index(1))
-        self.dashboard_state.entered.connect(lambda: self._view.show_screen_by_index(3))
-        self.dashboard_state.entered.connect(self._dashboard_presenter.start)
+        # When a state is entered, show the corresponding screen in the MainView.
+        self._machine.initial_state.entered.connect(lambda: self._view.show_screen_by_index(0))
+        self._machine.device_flow_state.entered.connect(lambda: self._view.show_screen_by_index(1))
+        self._machine.dashboard_state.entered.connect(lambda: self._view.show_screen_by_index(3))
+        self._machine.deliverymen_mapping_state.entered.connect(lambda: self._view.show_screen_by_index(4))
 
-        # --- Logic Triggers ---
-        self.device_flow_state.entered.connect(self._device_code_presenter.on_start)
-        self.restart_state.entered.connect(restart_application)
+        self._auth_service.error.connect(lambda err: self._cache_error(err, "Não foi possível realizar<br/>a autenticação."))
+        self._deliverymen_retriever_service.error.connect(
+            lambda err: self._cache_error(err, "Não foi possível buscar<br/>os entregadores.")
+        )
 
-        # Add a direct connection to CATCH the error message data
-        self._device_code_presenter.error.connect(self._cache_error_message)
-        # The state machine uses this to show the screen
-        self.error_state.entered.connect(self._show_error_screen)
+        # The error state's 'entered' signal has no arguments.
+        # It triggers the method to show the screen using the cached message.
+        self._machine.error_state.entered.connect(self._show_error_screen)
 
-    def _build_state_machine(self):
-        """Adds states and transitions to the state machine."""
-        states = [
-            self.initial_state, self.device_flow_state, self.dashboard_state, 
-            self.error_state, self.restart_state
-        ]
-        for state in states:
-            self._machine.addState(state)
-            
-        self._machine.setInitialState(self.initial_state)
-
-        # --- Transitions ---
-        self.initial_state.addTransition(self._view.initial_screen.start_device_flow, self.device_flow_state)
-
-        # Move to dashboard whenever authenticated
-        self.initial_state.addTransition(self._device_code_presenter.authenticated, self.dashboard_state)
-        self.device_flow_state.addTransition(self._device_code_presenter.authenticated, self.dashboard_state)
-        
-        # The transition to the error state is triggered by the presenter's signal
-        self.device_flow_state.addTransition(self._device_code_presenter.error, self.error_state)
-
-        self.error_state.addTransition(self._view.device_code_error_screen.retry, self.restart_state)
-
-    def _cache_error_message(self, message: str):
-        self._last_error_message = message
+    def _cache_error(self, error_description: str, error_title: Optional[str]):
+        self._last_error_message = error_description
+        if error_title is not None:
+            self._last_error_title = error_title
 
     def _show_error_screen(self):
         """
-        This slot is connected to error_state.entered and has NO arguments.
-        It uses the cached message to update the view.
+        Displays the error screen using the cached error message.
+        This slot is connected to `error_state.entered` (which has no arguments).
         """
-        self._view.device_code_error_screen.set_error_description(self._last_error_message)
-        self._view.show_screen_by_index(2)
+        if self._last_error_title is not None:
+            self._view.device_code_error_screen.set_error_title(self._last_error_title)
+            self._last_error_title = None
+        if self._last_error_message is not None:
+            self._view.device_code_error_screen.set_error_description(self._last_error_message)
+            self._last_error_message = None
+        self._view.show_screen_by_index(2)  # Index 2 is the error screen

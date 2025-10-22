@@ -20,7 +20,8 @@ certifi==2025.10.5
     #   httpcore
     #   httpx
     #   requests
-cffi==1.17.1
+cffi
+# cffi==1.17.1
     # via
     #   -r requirements.in
     #   cryptography

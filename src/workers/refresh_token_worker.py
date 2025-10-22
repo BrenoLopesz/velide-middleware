@@ -1,4 +1,4 @@
-from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QObject, pyqtSignal, QRunnable
 import requests
 import json
 import logging
@@ -7,14 +7,51 @@ from config import AuthenticationConfig
 from models.exceptions import TokenStorageError
 from utils.token_storage import store_token_at_file
 
-class RefreshTokenWorker(QObject):
+class RefreshTokenSignals(QObject):
+    """
+    Defines the signals available from the RefreshTokenRunnable.
+    
+    Inherits from QObject to provide signal/slot capabilities.
+    """
     token = pyqtSignal(str)
-    finished = pyqtSignal()
+    """Signal emitted on successful token refresh.
+    
+    Sends the new access_token (str).
+    """
 
-    def __init__(self, refresh_token, auth_config: AuthenticationConfig):
+    finished = pyqtSignal()
+    """Signal emitted when the task is complete, regardless of outcome."""
+
+    # Note: A signal for failure is not strictly needed here because
+    # the 'finished' signal implies the end, and 'token' not being
+    # emitted implies failure. The calling code can connect 'finished'
+    # and then check if it received a new token.
+
+class RefreshTokenWorker(QRunnable):
+    """
+    A QRunnable task to refresh an expired access token using a 
+    refresh token in a worker thread.
+    
+    Results are communicated via a separate 'signals' object.
+    """
+
+    def __init__(self, refresh_token: str, auth_config: AuthenticationConfig):
+        """
+        Initializes the runnable worker.
+        
+        Args:
+            refresh_token: The refresh token to use for the request.
+            auth_config: The AuthenticationConfig object with domain, 
+                         client_id, etc.
+        """
         super().__init__()
         self.logger = logging.getLogger(__name__)
+        
+        # Store dependencies
         self._refresh_token = refresh_token
+        self.signals = RefreshTokenSignals()
+        
+        # Prepare request details
         self.url = f'https://{auth_config.domain}/oauth/token'
         self.headers = {
             'Content-Type': 'application/x-www-form-urlencoded'
@@ -23,30 +60,47 @@ class RefreshTokenWorker(QObject):
             'client_id': auth_config.client_id,
             'grant_type': "refresh_token",
             'scope': auth_config.scope,
-            'refresh_token': refresh_token
+            'refresh_token': self._refresh_token
         }
 
-    @pyqtSlot()
     def run(self):
+        """
+        The main execution method for the QRunnable.
+        
+        Attempts to fetch a new access token using the refresh token.
+        On success, it emits the new token and stores the full response.
+        On failure, it logs the error. It always emits 'finished'
+        when the task is complete.
+        """
         try:
             response = requests.post(self.url, headers=self.headers, data=self.data, verify=False)
 
+            # Raise an exception for 4xx or 5xx status codes
             response.raise_for_status()
             
             jsonResponse = json.loads(response.text)
+            
+            # The response for a refresh token grant might not include a 
+            # new refresh token. We must re-add the one we just used
+            # to ensure it's stored correctly for future use.
             jsonResponse["refresh_token"] = self._refresh_token
+            
             access_token = jsonResponse["access_token"]
-            self.token.emit(access_token)
+            
+            # Emit success signal
+            self.signals.token.emit(access_token)
 
-
+            # Store the new token bundle
             store_token_at_file(jsonResponse)
+            
         except requests.HTTPError:
-            # This catches non-2xx responses from raise_for_status()
-            self.logger.exception("Ocorreu um erro no servidor durante a solitação para recarregar token de acesso.")
+            # Catches non-2xx responses from raise_for_status()
+            self.logger.exception("Ocorreu um erro no servidor during a solitação para recarregar token de acesso.")
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            # This catches non-2xx responses from raise_for_status()
+            # Catches network-level errors
             self.logger.exception("Falha ao conectar com o servidor para recarregar token de acesso.")
         except requests.RequestException:
+            # A catch-all for other 'requests' library errors
             self.logger.exception("Falha ao solicitar recarregamento do token de acesso.")
         except json.JSONDecodeError:
             self.logger.exception("Servidor não retornou um JSON válido.")
@@ -55,4 +109,5 @@ class RefreshTokenWorker(QObject):
         except Exception:
             self.logger.exception("Erro inesperado ao recarregar o token de acesso.")
         finally:
-            self.finished.emit()
+            # Always emit the 'finished' signal
+            self.signals.finished.emit()

@@ -164,7 +164,7 @@ class AppPresenter(QObject):
 
     def _create_states(self):
         # State for when we are gathering initial data
-        self.gathering_data_state = QState(QState.ParallelStates) # This is the key!
+        self.gathering_data_state = QState(QState.ChildMode.ParallelStates)
 
         # Sub-state for config loading
         self.config_process_state = QState(self.gathering_data_state)

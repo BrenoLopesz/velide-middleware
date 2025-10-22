@@ -5,15 +5,13 @@ from typing import List, Tuple
 
 from sqlalchemy import text, Engine
 from sqlalchemy.exc import SQLAlchemyError
-from config import FarmaxConfig
 from models.farmax_models import DeliveryLog, FarmaxDelivery, FarmaxDeliveryman, FarmaxSale
 
 class FarmaxRepository:
     LOG_TABLE_NAME = "DELIVERYLOG"
 
-    def __init__(self, farmax_config: FarmaxConfig, engine: Engine):
+    def __init__(self, engine: Engine):
         self.logger = logging.getLogger(__name__)
-        self._config = farmax_config
         self._engine = engine
         # self._engine = create_engine(
         #     get_farmax_engine_string(farmax_config),
@@ -201,4 +199,13 @@ class FarmaxRepository:
         with self._engine.connect() as conn:
             result = conn.execute(query)
             rows = result.fetchall()
-            return [FarmaxDeliveryman.model_validate(row) for row in rows]
+
+            deliverymen = []
+            for row in rows:
+                # Manually create a dictionary.
+                data_dict = {
+                    'CD_VENDEDOR': row[0],
+                    'NOME': row[1]
+                }
+                deliverymen.append(FarmaxDeliveryman.model_validate(data_dict))
+            return deliverymen

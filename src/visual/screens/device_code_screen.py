@@ -3,7 +3,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from utils.device_code import DeviceCodeDict
 from visual.fonts import get_fonts
 from config import config
-from visual.screens.device_code_loading import DeviceCodeLoading
+from visual.screens.loading_screen import LoadingScreen
 from visual.screens.device_code_display import DeviceCodeDisplay
 
 class DeviceCodeScreen(QWidget):
@@ -26,7 +26,7 @@ class DeviceCodeScreen(QWidget):
         self.main_layout.addSpacing(24)
         self.main_layout.addWidget(self.stack, alignment=Qt.AlignHCenter)
 
-        self.device_code_loading = DeviceCodeLoading()
+        self.device_code_loading = LoadingScreen("Solicitando código de autenticação,<br/>por favor aguarde...")
 
         # self.main_layout.setSpacing(4)
         self.stack.addWidget(self.device_code_loading)

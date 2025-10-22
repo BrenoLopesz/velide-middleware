@@ -2,14 +2,13 @@ import collections
 import logging
 from typing import Dict, Optional
 import uuid
-from PyQt5.QtCore import QObject, pyqtSignal, Qt
+from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
 
 from config import ApiConfig, TargetSystem
 from api.velide import Velide
 from models.delivery_table_model import DeliveryRowStatus
-from services.strategies.deliveries_source_strategy import IDeliverySourceStrategy
+from services.strategies.connectable_strategy import IConnectableStrategy
 from models.velide_delivery_models import Order
-from utils.run_in_thread import run_in_thread
 from workers.velide_worker import VelideWorker
 
 class DeliveriesService(QObject):
@@ -22,16 +21,17 @@ class DeliveriesService(QObject):
         self.logger = logging.getLogger(__name__)
         self._api_config = api_config
         self._target_system = target_system
-        self._active_strategy: Optional[IDeliverySourceStrategy] = None
+        self._active_strategy: Optional[IConnectableStrategy] = None
         self._active_deliveries: Dict[str, Order] = {}
         self._velide_api: Optional[Velide] = None
         self._delivery_queue = collections.deque()
         self._is_processing = False
+        self._thread_pool = QThreadPool.globalInstance()
     
     def set_access_token(self, access_token: str):
-        self._velide_api = Velide(access_token, self._api_config, self._target_system) # Only CDS uses this class
+        self._velide_api = Velide(access_token, self._api_config, self._target_system)
 
-    def set_strategy(self, strategy: IDeliverySourceStrategy):
+    def set_strategy(self, strategy: IConnectableStrategy):
         """Sets the active delivery source strategy."""
         if self._active_strategy:
             self._active_strategy.stop_listening() # Stop the old one
@@ -67,7 +67,6 @@ class DeliveriesService(QObject):
         self._delivery_queue.append((order_id, order))
         self._try_process_next() # Changed: Call the central dispatcher
 
-    @run_in_thread("velide_api_call")
     def _process_delivery_queue(self):
         """
         MODIFIED: This method now only processes ONE item. It no longer
@@ -78,7 +77,7 @@ class DeliveriesService(QObject):
             return None
 
         order_id, order = self._delivery_queue.popleft()
-        worker = VelideWorker(self._velide_api, order)
+        worker = VelideWorker.for_add_delivery(self._velide_api, order)
 
         worker.delivery_added.connect(
             lambda resp, oid=order_id: self._on_delivery_success(oid, resp)
@@ -86,8 +85,7 @@ class DeliveriesService(QObject):
         worker.error.connect(
             lambda err, oid=order_id: self._on_delivery_failure(oid, err)
         )
-
-        return worker
+        self._thread_pool.start(worker)
     
     def _try_process_next(self):
         """

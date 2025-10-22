@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
+from typing import TypeVar
 import httpx
 
 from models.velide_delivery_models import (
     DeliveryResponse,
+    DeliverymanResponse,
     GraphQLParseError,
     GraphQLPayload,
     GraphQLRequestError,
@@ -14,6 +16,7 @@ from models.velide_delivery_models import (
 )
 from config import ApiConfig, TargetSystem
 
+T = TypeVar('T')
 
 class Velide:
     """Client for interacting with Velide delivery API via GraphQL."""
@@ -51,6 +54,15 @@ class Velide:
             }
         }
     """
+
+    GET_DELIVERYMEN_QUERY =  """
+        query {
+            deliverymen {
+                id
+                name
+            }
+        }
+    """
     
     def __init__(self, access_token: str, api_config: ApiConfig, target_system: TargetSystem):
         """
@@ -60,22 +72,21 @@ class Velide:
             access_token: Bearer token for API authentication
             api_config: Configuration object containing URL, timeout, SSL settings
         """
+        self._access_token = access_token
         self._api_config = api_config
         self._target_system = target_system
-        self._headers = {
-            'Content-Type': 'application/json',
-            'Authorization': access_token
-        }
-
-    async def close(self):
-        """Close the HTTP client connection."""
-        await self._client.aclose()
+        self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self):
         """Called when entering the 'async with' block."""
+        # Create headers dict here
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': self._access_token
+        }
         # Create the client here. It will use the currently active event loop.
         self._client = httpx.AsyncClient(
-            headers=self._headers,
+            headers=headers,
             timeout=self._api_config.timeout,
             verify=self._api_config.use_ssl
         )
@@ -106,24 +117,38 @@ class Velide:
             ValidationError: When input data validation fails
         """
         # Build request components
-        variables = self._build_variables(order)
+        variables = self._build_variables_to_add_delivery(order)
         payload = GraphQLPayload(query=self.ADD_DELIVERY_MUTATION, variables=variables)
         
         # Make request and parse response
         response = await self._execute_request(payload)
-        return self._parse_response(response)
+        
+        # Use the new generic parser
+        return self._parse_response(response, data_key="addDeliveryFromIntegration")
 
-    def _build_variables(
+    async def get_deliverymen(self) -> list[DeliverymanResponse]:
+        """
+        Retrieves the list of deliverymen.
+        
+        Returns:
+            DeliverymanResponse: Parsed deliveryman data
+        """
+        payload = GraphQLPayload(query=self.GET_DELIVERYMEN_QUERY)
+
+        response = await self._execute_request(payload)
+        
+        # Use the new generic parser with the correct key (and fix the bug)
+        return self._parse_response(response, data_key="deliverymen")
+
+    def _build_variables_to_add_delivery(
         self,
         order: Order
     ) -> GraphQLVariables:
         """
-        Build GraphQL variables from sale data.
+        Build GraphQL variables from order data.
         
         Args:
-            sale_data: Validated order data
-            target_software: Integration software name
-            use_neighbourhood: Whether to include neighbourhood
+            order: Validated order
             
         Returns:
             GraphQLVariables: Validated variables for the mutation
@@ -203,28 +228,30 @@ class Velide:
             raise GraphQLRequestError(response.status_code, response.text)
         
         return response
-
-    def _parse_response(self, response: httpx.Response) -> DeliveryResponse:
+    
+    def _parse_response(self, response: httpx.Response, data_key: str) -> T:
         """
-        Parse and validate GraphQL response.
+        Generically parse and validate a GraphQL response, extracting data from a specific key.
         
         Args:
             response: HTTP response from the API
+            data_key: The key within the 'data' object to extract (e.g., 'addDeliveryFromIntegration')
             
         Returns:
-            DeliveryResponse: Parsed delivery data
+            T: The extracted data (e.g., a DeliveryResponse or list[DeliverymanResponse])
             
         Raises:
             GraphQLParseError: When JSON parsing fails
-            GraphQLResponseError: When response structure is invalid or contains errors
+            GraphQLResponseError: When response structure is invalid, contains errors,
+                                 or the data_key is missing.
         """
-        # Parse JSON
+        # 1. Parse JSON
         try:
             response_json = response.json()
         except Exception:
             raise GraphQLParseError(response)
         
-        # Validate response structure
+        # 2. Validate response structure
         try:
             graphql_response = GraphQLResponse.model_validate(response_json)
         except Exception as e:
@@ -232,13 +259,28 @@ class Velide:
                 f"Unexpected response structure: {response_json}"
             ) from e
         
-        # Check for errors
+        # 3. Check for GraphQL errors
         if graphql_response.errors:
             raise GraphQLResponseError(
                 f"GraphQL returned errors: {graphql_response.errors}"
             )
         
+        # 4. Check for 'data' field
         if not graphql_response.data:
-            raise GraphQLResponseError(f"No data in response: {response_json}")
+            raise GraphQLResponseError(f"No 'data' in response: {response_json}")
         
-        return graphql_response.data.addDeliveryFromIntegration
+        # 5. Extract specific data using the key
+        try:
+            # Use getattr to dynamically access the attribute
+            data = getattr(graphql_response.data, data_key)
+            if data is None:
+                # Handle cases where the key exists but is null (and not expected)
+                raise GraphQLResponseError(
+                    f"Data key '{data_key}' is null in response: {response_json}"
+                )
+            return data
+        except AttributeError:
+            # This catches if graphql_response.data doesn't have the attribute `data_key`
+            raise GraphQLResponseError(
+                f"Expected data key '{data_key}' not found in response data: {response_json}"
+            )

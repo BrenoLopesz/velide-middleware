@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 import httpx
 
@@ -48,7 +48,7 @@ class GraphQLVariables(BaseModel):
 class GraphQLPayload(BaseModel):
     """Complete GraphQL request payload"""
     query: str = Field(..., min_length=1)
-    variables: GraphQLVariables
+    variables: Optional[GraphQLVariables] = None
 
 
 # Response Models
@@ -64,6 +64,10 @@ class Location(BaseModel):
     """Location information from GraphQL response"""
     properties: LocationProperties
 
+class DeliverymanResponse(BaseModel):
+    """Deliveryman information from GraphQL response"""
+    id: str
+    name: str
 
 class DeliveryResponse(BaseModel):
     """Delivery data from GraphQL response"""
@@ -78,15 +82,19 @@ class AddDeliveryData(BaseModel):
     """Data wrapper for addDeliveryFromIntegration"""
     addDeliveryFromIntegration: DeliveryResponse
 
+class GetDeliverymenData(BaseModel):
+    """Data wrapper for deliverymen query"""
+    deliverymen: list[DeliverymanResponse]
 
 class GraphQLResponse(BaseModel):
     """Complete GraphQL response"""
-    data: Optional[AddDeliveryData] = None
+    data: Optional[Union[AddDeliveryData, GetDeliverymenData]] = None
     errors: Optional[list] = None
     
     @field_validator('data')
     @classmethod
     def validate_data_present(cls, v, info):
+        # This validator remains correct
         if v is None and info.data.get('errors') is None:
             raise ValueError("Response must contain either data or errors")
         return v

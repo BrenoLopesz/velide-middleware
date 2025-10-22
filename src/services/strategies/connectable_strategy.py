@@ -1,5 +1,6 @@
 # in src/services/delivery_strategy.py
 from abc import ABC, ABCMeta, abstractmethod
+from typing import Optional, Tuple
 from PyQt5.QtCore import QObject, pyqtSignal
 from models.velide_delivery_models import Order
 
@@ -7,7 +8,7 @@ from models.velide_delivery_models import Order
 class QABCMeta(type(QObject), ABCMeta):
     pass
 
-class IDeliverySourceStrategy(QObject, ABC, metaclass=QABCMeta):
+class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):
     """
     The interface (contract) for any delivery source.
     Its job is to listen for source-specific data and normalize it into a common Order model.
@@ -24,4 +25,14 @@ class IDeliverySourceStrategy(QObject, ABC, metaclass=QABCMeta):
     @abstractmethod
     def stop_listening(self):
         """Stops the listening process."""
+        pass
+
+    @abstractmethod
+    def requires_initial_configuration(self) -> bool:
+        """Returns True if the config screen must be shown first."""
+        pass
+
+    @abstractmethod
+    def fetch_deliverymen(self, success, error) -> list:
+        """Returns the local registered deliverymen on the software."""
         pass

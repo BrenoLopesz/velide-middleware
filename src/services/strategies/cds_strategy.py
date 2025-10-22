@@ -4,12 +4,12 @@ from PyQt5.QtCore import pyqtSignal
 from pydantic import ValidationError
 from models.velide_delivery_models import Order
 from models.cds_order_model import CdsOrder
-from services.strategies.deliveries_source_strategy import IDeliverySourceStrategy
+from services.strategies.connectable_strategy import IConnectableStrategy
 from config import ApiConfig
 from utils.run_in_thread import run_in_thread
 from workers.cds_logs_listener_worker import CdsLogsListenerWorker
 
-class CdsStrategy(IDeliverySourceStrategy):
+class CdsStrategy(IConnectableStrategy):
     # Signals for the Presenter
     order_normalized = pyqtSignal(Order)
 
@@ -33,6 +33,13 @@ class CdsStrategy(IDeliverySourceStrategy):
         if self._file_listener_worker is None:
             return
         self._file_listener_worker.stop()
+
+
+    def requires_initial_configuration(self):
+        return False
+    
+    def fetch_deliverymen(self, success, error):
+        raise NotImplementedError
 
     def _on_new_file_found(self, delivery_data: dict):
         try: 

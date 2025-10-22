@@ -2,8 +2,10 @@ from datetime import time, datetime
 from typing import Literal, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
-class FarmaxDeliveryman(BaseModel):
-    model_config = ConfigDict(from_attributes=True) # Makes it work with SQLAlchemy
+from models.base_models import BaseLocalDeliveryman
+
+class FarmaxDeliveryman(BaseLocalDeliveryman):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True) # Makes it work with SQLAlchemy
     id: int = Field(alias="CD_VENDEDOR")
     name: str = Field(alias="NOME")
 

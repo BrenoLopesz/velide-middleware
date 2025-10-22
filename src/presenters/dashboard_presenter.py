@@ -5,11 +5,10 @@ from pydantic import ValidationError
 from models.delivery_table_model import DeliveryRowModel, DeliveryRowStatus, DeliveryTableModel
 from models.velide_delivery_models import Order
 from services.deliveries_service import DeliveriesService
-from visual.screens.cds_screen import CdsScreen
-from utils.log_handler import QLogHandler
+from visual.screens.dashboard_screen import DashboardScreen
 
 class DashboardPresenter(QObject):
-    def __init__(self, view: CdsScreen, delivery_service: DeliveriesService):
+    def __init__(self, view: DashboardScreen, delivery_service: DeliveriesService):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self._view = view

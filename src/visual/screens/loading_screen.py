@@ -3,9 +3,10 @@ from PyQt5.QtCore import Qt, QPropertyAnimation, pyqtProperty
 from visual.components.loading_icon import LoadingIcon
 from visual.fonts import get_fonts
 
-class DeviceCodeLoading(QWidget):
-    def __init__(self):
+class LoadingScreen(QWidget):
+    def __init__(self, loading_text: str):
         super().__init__()
+        self._loading_text = loading_text
         self.fonts = get_fonts()
 
         self.main_layout = QVBoxLayout()
@@ -16,7 +17,7 @@ class DeviceCodeLoading(QWidget):
 
     def add_loading(self):
         self.add_loading_icon() 
-        self.loading_label = QLabel("Solicitando código de autenticação,<br/>por favor aguarde...")
+        self.loading_label = QLabel(self._loading_text)
         self.loading_label.setFont(self.fonts["regular"])
         self.loading_label.setAlignment(Qt.AlignCenter)
         self.main_layout.addStretch()

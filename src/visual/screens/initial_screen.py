@@ -4,7 +4,7 @@ from visual.fonts import get_fonts
 from config import config
 
 class InitialScreen(QWidget):
-    start_device_flow = pyqtSignal()
+    on_request_device_flow_start = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -37,4 +37,4 @@ class InitialScreen(QWidget):
         self.setLayout(main_layout)
 
     def on_button_press(self):
-        self.start_device_flow.emit()
+        self.on_request_device_flow_start.emit()
