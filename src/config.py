@@ -57,6 +57,7 @@ class Settings(BaseModel):
     auth: AuthenticationConfig
     api: ApiConfig
     farmax: Optional[FarmaxConfig] = None
+    sqlite_path: Optional[str] = Field(default="resources/velide.db", description="Relative path to SQLite database file.")
     folder_to_watch: Optional[str] = Field(default=None, description="Used to listen for new files when using CDS.")
 
     @classmethod

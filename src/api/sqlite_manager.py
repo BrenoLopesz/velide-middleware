@@ -1,155 +1,214 @@
 import sqlite3
-from sqlite3 import Error
+import logging
+from typing import Optional, List, Tuple
 
-class SQLiteManager:
+class DeliverymenMappingDB:
     """
-    A context manager class for simplified SQLite database operations.
+    Manages the 'DeliverymenMapping' table in a SQLite database.
 
-    Args:
-        db_file (str): The path to the SQLite database file.
+    This class is designed to be used as a context manager to ensure
+    that database connections are handled safely and automatically.
+
+    The table schema is:
+    DeliverymenMapping (
+        velide_id TEXT PRIMARY KEY NOT NULL,
+        local_id  TEXT UNIQUE NOT NULL
+    )
+    
+    - 'velide_id' is the primary key, which must be unique and not null.
+    - 'local_id' has a UNIQUE constraint, so it must also be unique and not null.
     """
-    def __init__(self, db_file):
-        self.db_file = db_file
-        self.conn = None
 
-    def __enter__(self):
+    def __init__(self, db_path: str):
         """
-        Connect to the SQLite database and return the connection object.
+        Initializes the database manager.
+
+        Args:
+            db_path (str): The file path to the SQLite database.
+                           Defaults to "deliverymen.db" in the current directory.
+        """
+        if db_path is None:
+            raise ValueError("É necessário informar o caminho para o banco de dados SQLite.")
+
+        self.logger = logging.getLogger(__name__)
+        self.db_path = db_path
+        self.conn: Optional[sqlite3.Connection] = None
+
+    def __enter__(self) -> 'DeliverymenMappingDB':
+        """
+        Opens the database connection and creates the table if it doesn't exist.
+        
+        This method is called when entering a 'with' statement.
+
+        Returns:
+            DeliverymenMappingDB: The current instance of the class.
         """
         try:
-            self.conn = sqlite3.connect(self.db_file)
-            self.conn.row_factory = sqlite3.Row  # Access columns by name
-            print(f"Successfully connected to {self.db_file}")
+            self.conn = sqlite3.connect(self.db_path)
+            # Enable foreign key support just in case (good practice)
+            self.conn.execute("PRAGMA foreign_keys = ON;")
+            self._create_table()
             return self
-        except Error as e:
-            print(f"Error connecting to database: {e}")
-            raise  # Re-raise the exception to stop the 'with' block
+        except sqlite3.Error as e:
+            self.logger.exception(f"Erro ao conectar ao banco de dados em {self.db_path}.")
+            raise
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """
-        Close the database connection.
+        Closes the database connection, committing or rolling back changes.
+
+        - If no exception occurred (exc_type is None), changes are committed.
+        - If an exception occurred, changes are rolled back.
+        
+        This method is called when exiting a 'with' statement.
         """
         if self.conn:
-            self.conn.close()
-            print(f"Database connection to {self.db_file} closed.")
-            
-    def execute_query(self, query, params=()):
-        """
-        Execute a single SQL query (e.g., CREATE TABLE, INSERT, UPDATE, DELETE).
+            try:
+                if exc_type is None:
+                    self.conn.commit()
+                else:
+                    logging.warning(f"Desfazendo mudanças devido ao erro: {exc_val}")
+                    self.conn.rollback()
+            except sqlite3.Error as e:
+                logging.exception(f"Erro durante saída.")
+            finally:
+                self.conn.close()
+                self.conn = None
 
-        Args:
-            query (str): The SQL query to execute.
-            params (tuple, optional): Parameters to bind to the query.
+    def _create_table(self):
+        """
+        Internal method to create the 'DeliverymenMapping' table.
+        
+        Uses 'CREATE TABLE IF NOT EXISTS' to be idempotent (safe to run multiple times).
         """
         if not self.conn:
-            raise ConnectionError("Database is not connected.")
+            raise ConnectionError("Conexão com banco de dados não está aberta.")
             
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute(query, params)
-            self.conn.commit()
-            print("Query executed successfully.")
-            return cursor.lastrowid  # Useful for getting the ID of an INSERT
-        except Error as e:
-            print(f"Error executing query: {e}")
-            self.conn.rollback() # Rollback changes if an error occurs
-            return None
-
-    def fetch_all(self, query, params=()):
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS DeliverymenMapping (
+            velide_id TEXT PRIMARY KEY NOT NULL,
+            local_id  TEXT UNIQUE NOT NULL
+        );
         """
-        Execute a SELECT query and fetch all results.
+        try:
+            self.conn.execute(create_table_query)
+        except sqlite3.Error as e:
+            logging.exception("Falha ao criar tabela.")
+            raise
+
+    def add_mapping(self, velide_id: str, local_id: str) -> bool:
+        """
+        Adds a new mapping between a velide_id and a local_id.
 
         Args:
-            query (str): The SELECT query to execute.
-            params (tuple, optional): Parameters to bind to the query.
+            velide_id (str): The Velide ID.
+            local_id (str): The Local ID.
 
         Returns:
-            list: A list of rows (as sqlite3.Row objects).
+            bool: True if the mapping was added successfully, False if a
+                  constraint (PRIMARY KEY or UNIQUE) was violated.
         """
         if not self.conn:
-            raise ConnectionError("Database is not connected.")
-
+            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
+        
+        insert_query = "INSERT INTO DeliverymenMapping (velide_id, local_id) VALUES (?, ?)"
         try:
-            cursor = self.conn.cursor()
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            return rows
-        except Error as e:
-            print(f"Error fetching data: {e}")
+            self.conn.execute(insert_query, (velide_id, local_id))
+            logging.debug(f"Adicionado mapeamento: {velide_id} -> {local_id}")
+            return True
+        except sqlite3.IntegrityError as e:
+            # This catches violations of PRIMARY KEY (velide_id) or
+            # UNIQUE (local_id) constraints.
+            logging.warning(f"Falha ao mapear ({velide_id}, {local_id}). Motivo: {e}")
+            return False
+        except sqlite3.Error as e:
+            logging.exception("Ocorreu um erro inesperado ao adicionar um mapeamento.")
+            return False
+
+    def get_local_id(self, velide_id: str) -> Optional[str]:
+        """
+        Retrieves the local_id associated with a given velide_id.
+
+        Args:
+            velide_id (str): The Velide ID to search for.
+
+        Returns:
+            Optional[str]: The corresponding local_id if found, else None.
+        """
+        if not self.conn:
+            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
+            
+        query = "SELECT local_id FROM DeliverymenMapping WHERE velide_id = ?"
+        try:
+            cursor = self.conn.execute(query, (velide_id,))
+            result = cursor.fetchone()
+            return result[0] if result else None
+        except sqlite3.Error as e:
+            logging.exception(f"Erro ao buscar `local_id` para {velide_id}.")
+            return None
+
+    def get_velide_id(self, local_id: str) -> Optional[str]:
+        """
+        Retrieves the velide_id associated with a given local_id.
+
+        Args:
+            local_id (str): The Local ID to search for.
+
+        Returns:
+            Optional[str]: The corresponding velide_id if found, else None.
+        """
+        if not self.conn:
+            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
+                    
+        query = "SELECT velide_id FROM DeliverymenMapping WHERE local_id = ?"
+        try:
+            cursor = self.conn.execute(query, (local_id,))
+            result = cursor.fetchone()
+            return result[0] if result else None
+        except sqlite3.Error as e:
+            logging.error(f"Error ao buscar `velide_id` para {local_id}: {e}")
+            return None
+
+    def delete_mapping_by_velide_id(self, velide_id: str) -> bool:
+        """
+        Deletes a mapping from the table based on the velide_id.
+
+        Args:
+            velide_id (str): The Velide ID of the mapping to delete.
+
+        Returns:
+            bool: True if a row was deleted, False otherwise.
+        """
+        if not self.conn:
+            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
+            
+        query = "DELETE FROM DeliverymenMapping WHERE velide_id = ?"
+        try:
+            cursor = self.conn.execute(query, (velide_id,))
+            if cursor.rowcount > 0:
+                logging.info(f"Mapeamento deletado para o `velide_id`: {velide_id}")
+                return True
+            else:
+                logging.warning(f"Nenhum mapeamento encontrado para deletar o velide_id: {velide_id}")
+                return False
+        except sqlite3.Error as e:
+            logging.exception(f"Erro ao deletar mapeamento de {velide_id}.")
+            return False
+
+    def get_all_mappings(self) -> List[Tuple[str, str]]:
+        """
+        Retrieves all mappings from the table.
+
+        Returns:
+            List[Tuple[str, str]]: A list of (velide_id, local_id) tuples.
+        """
+        if not self.conn:
+            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
+        
+        query = "SELECT velide_id, local_id FROM DeliverymenMapping"
+        try:
+            cursor = self.conn.execute(query)
+            return cursor.fetchall()
+        except sqlite3.Error as e:
+            logging.error(f"Erro ao buscar todos os mapeamentos: {e}")
             return []
-
-    def fetch_one(self, query, params=()):
-        """
-        Execute a SELECT query and fetch the first result.
-
-        Args:
-            query (str): The SELECT query to execute.
-            params (tuple, optional): Parameters to bind to the query.
-
-        Returns:
-            sqlite3.Row or None: A single row object or None if no result.
-        """
-        if not self.conn:
-            raise ConnectionError("Database is not connected.")
-            
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute(query, params)
-            row = cursor.fetchone()
-            return row
-        except Error as e:
-            print(f"Error fetching data: {e}")
-            return None
-
-# --- Example Usage ---
-
-if __name__ == "__main__":
-    
-    db_path = "example.db"
-
-    # Use the context manager to handle the connection
-    try:
-        with SQLiteManager(db_path) as db:
-            
-            # 1. Create a table
-            print("\n--- Creating table ---")
-            create_users_table_query = """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                email TEXT NOT NULL UNIQUE
-            );
-            """
-            db.execute_query(create_users_table_query)
-
-            # 2. Insert data
-            print("\n--- Inserting data ---")
-            # Using placeholders (?) to prevent SQL injection
-            db.execute_query("INSERT INTO users (name, email) VALUES (?, ?)", 
-                             ("Alice", "alice@example.com"))
-            db.execute_query("INSERT INTO users (name, email) VALUES (?, ?)", 
-                             ("Bob", "bob@example.com"))
-
-            # 3. Query all data
-            print("\n--- Fetching all users ---")
-            all_users = db.fetch_all("SELECT * FROM users")
-            if all_users:
-                for user in all_users:
-                    # Access data by column name (due to row_factory)
-                    print(f"ID: {user['id']}, Name: {user['name']}, Email: {user['email']}")
-
-            # 4. Query one item
-            print("\n--- Fetching one user (Alice) ---")
-            user_alice = db.fetch_one("SELECT * FROM users WHERE name = ?", ("Alice",))
-            if user_alice:
-                print(f"Found: {user_alice['name']} ({user_alice['email']})")
-
-            # 5. Example of handling a failed query (UNIQUE constraint)
-            print("\n--- Attempting duplicate insert ---")
-            db.execute_query("INSERT INTO users (name, email) VALUES (?, ?)", 
-                             ("Charlie", "alice@example.com")) # This will fail
-
-    except Error as e:
-        print(f"An operation failed: {e}")
-    except ConnectionError as e:
-        print(f"Connection failed: {e}")
