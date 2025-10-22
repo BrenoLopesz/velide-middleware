@@ -2,7 +2,7 @@ import sqlite3
 import logging
 from typing import Optional, List, Tuple
 
-class DeliverymenMappingDB:
+class SQLiteManager:
     """
     Manages the 'DeliverymenMapping' table in a SQLite database.
 
@@ -34,7 +34,7 @@ class DeliverymenMappingDB:
         self.db_path = db_path
         self.conn: Optional[sqlite3.Connection] = None
 
-    def __enter__(self) -> 'DeliverymenMappingDB':
+    def __enter__(self) -> 'SQLiteManager':
         """
         Opens the database connection and creates the table if it doesn't exist.
         
@@ -67,10 +67,10 @@ class DeliverymenMappingDB:
                 if exc_type is None:
                     self.conn.commit()
                 else:
-                    logging.warning(f"Desfazendo mudanças devido ao erro: {exc_val}")
+                    self.logger.warning(f"Desfazendo mudanças devido ao erro: {exc_val}")
                     self.conn.rollback()
             except sqlite3.Error as e:
-                logging.exception(f"Erro durante saída.")
+                self.logger.exception(f"Erro durante saída.")
             finally:
                 self.conn.close()
                 self.conn = None
@@ -93,7 +93,7 @@ class DeliverymenMappingDB:
         try:
             self.conn.execute(create_table_query)
         except sqlite3.Error as e:
-            logging.exception("Falha ao criar tabela.")
+            self.logger.exception("Falha ao criar tabela.")
             raise
 
     def add_mapping(self, velide_id: str, local_id: str) -> bool:
@@ -114,15 +114,15 @@ class DeliverymenMappingDB:
         insert_query = "INSERT INTO DeliverymenMapping (velide_id, local_id) VALUES (?, ?)"
         try:
             self.conn.execute(insert_query, (velide_id, local_id))
-            logging.debug(f"Adicionado mapeamento: {velide_id} -> {local_id}")
+            self.logger.debug(f"Adicionado mapeamento: {velide_id} -> {local_id}")
             return True
         except sqlite3.IntegrityError as e:
             # This catches violations of PRIMARY KEY (velide_id) or
             # UNIQUE (local_id) constraints.
-            logging.warning(f"Falha ao mapear ({velide_id}, {local_id}). Motivo: {e}")
+            self.logger.warning(f"Falha ao mapear ({velide_id}, {local_id}). Motivo: {e}")
             return False
         except sqlite3.Error as e:
-            logging.exception("Ocorreu um erro inesperado ao adicionar um mapeamento.")
+            self.logger.exception("Ocorreu um erro inesperado ao adicionar um mapeamento.")
             return False
 
     def get_local_id(self, velide_id: str) -> Optional[str]:
@@ -144,7 +144,7 @@ class DeliverymenMappingDB:
             result = cursor.fetchone()
             return result[0] if result else None
         except sqlite3.Error as e:
-            logging.exception(f"Erro ao buscar `local_id` para {velide_id}.")
+            self.logger.exception(f"Erro ao buscar `local_id` para {velide_id}.")
             return None
 
     def get_velide_id(self, local_id: str) -> Optional[str]:
@@ -166,7 +166,7 @@ class DeliverymenMappingDB:
             result = cursor.fetchone()
             return result[0] if result else None
         except sqlite3.Error as e:
-            logging.error(f"Error ao buscar `velide_id` para {local_id}: {e}")
+            self.logger.error(f"Error ao buscar `velide_id` para {local_id}: {e}")
             return None
 
     def delete_mapping_by_velide_id(self, velide_id: str) -> bool:
@@ -186,13 +186,13 @@ class DeliverymenMappingDB:
         try:
             cursor = self.conn.execute(query, (velide_id,))
             if cursor.rowcount > 0:
-                logging.info(f"Mapeamento deletado para o `velide_id`: {velide_id}")
+                self.logger.info(f"Mapeamento deletado para o `velide_id`: {velide_id}")
                 return True
             else:
-                logging.warning(f"Nenhum mapeamento encontrado para deletar o velide_id: {velide_id}")
+                self.logger.warning(f"Nenhum mapeamento encontrado para deletar o velide_id: {velide_id}")
                 return False
         except sqlite3.Error as e:
-            logging.exception(f"Erro ao deletar mapeamento de {velide_id}.")
+            self.logger.exception(f"Erro ao deletar mapeamento de {velide_id}.")
             return False
 
     def get_all_mappings(self) -> List[Tuple[str, str]]:
@@ -210,5 +210,5 @@ class DeliverymenMappingDB:
             cursor = self.conn.execute(query)
             return cursor.fetchall()
         except sqlite3.Error as e:
-            logging.error(f"Erro ao buscar todos os mapeamentos: {e}")
+            self.logger.error(f"Erro ao buscar todos os mapeamentos: {e}")
             return []
