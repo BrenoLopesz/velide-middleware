@@ -124,6 +124,39 @@ class SQLiteManager:
         except sqlite3.Error as e:
             self.logger.exception("Ocorreu um erro inesperado ao adicionar um mapeamento.")
             return False
+        
+    def add_many_mappings(self, mappings: List[Tuple[str, str]]) -> int:
+        """
+        Adds multiple mappings in a single transaction, ignoring duplicates.
+
+        Uses "INSERT OR IGNORE" to skip rows that would violate
+        PRIMARY KEY (velide_id) or UNIQUE (local_id) constraints.
+
+        Args:
+            mappings: A list of (velide_id, local_id) tuples.
+
+        Returns:
+            int: The number of rows actually inserted.
+        """
+        if not self.conn:
+            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
+        
+        if not mappings:
+            self.logger.warning("Nenhuma mapeamento fornecido para 'add_many_mappings'.")
+            return 0
+
+        # Use INSERT OR IGNORE to skip duplicates without raising an error
+        insert_query = "INSERT OR IGNORE INTO DeliverymenMapping (velide_id, local_id) VALUES (?, ?)"
+        
+        try:
+            cursor = self.conn.executemany(insert_query, mappings)
+            inserted_count = cursor.rowcount
+            self.logger.debug(f"Processados {len(mappings)} mapeamentos. {inserted_count} novos inseridos.")
+            return inserted_count
+        except sqlite3.Error as e:
+            self.logger.exception("Ocorreu um erro inesperado durante o 'add_many_mappings'.")
+            # The __exit__ method will handle the rollback.
+            raise # Re-raise to trigger rollback in __exit__
 
     def get_local_id(self, velide_id: str) -> Optional[str]:
         """

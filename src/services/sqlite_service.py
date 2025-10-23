@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool, pyqtSlot
 
@@ -20,6 +20,9 @@ class SQLiteService(QObject):
     
     # Emits True/False on completion of an add operation
     add_mapping_result = pyqtSignal(bool)
+
+    # Emits the number of rows successfully inserted (int)
+    add_many_mappings_result = pyqtSignal(int)
     
     # Emits the found ID (str) or None
     local_id_found = pyqtSignal(object)
@@ -49,10 +52,6 @@ class SQLiteService(QObject):
         self.db_path = db_path
         self.thread_pool = QThreadPool.globalInstance()
         self.logger = logging.getLogger(__name__)
-        self.logger.info(
-            f"DatabaseService using global QThreadPool with "
-            f"maxThreadCount={self.thread_pool.maxThreadCount()}"
-        )
 
     def _create_and_run_worker(
         self, 
@@ -92,6 +91,16 @@ class SQLiteService(QObject):
             velide_id,
             local_id,
             result_signal=self.add_mapping_result
+        )
+
+    @pyqtSlot(list)
+    def request_add_many_mappings(self, mappings: List[Tuple[str, str]]):
+        """Asynchronously adds multiple new mappings, ignoring duplicates."""
+        self.logger.debug(f"Solicitando {len(mappings)} mapeamentos para serem adicionados.")
+        self._create_and_run_worker(
+            SQLiteWorker.for_add_many_mappings,
+            mappings,  # Note: 'mappings' is a single list argument, matching *args
+            result_signal=self.add_many_mappings_result
         )
 
     @pyqtSlot(str)

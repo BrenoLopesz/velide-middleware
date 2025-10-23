@@ -16,6 +16,7 @@ views (like authentication, dashboard, and setup) using a finite state machine.
 # Third-party imports
 from typing import Optional
 from PyQt5.QtCore import QObject
+from presenters.dashboard_presenter import DashboardPresenter
 from presenters.device_code_presenter import DeviceCodePresenter
 from services.auth_service import AuthService
 from services.deliverymen_retriever_service import DeliverymenRetrieverService
@@ -48,7 +49,8 @@ class AppPresenter(QObject):
             state_machine: MainStateMachine,
             auth_service: AuthService,
             deliverymen_retriever_service: DeliverymenRetrieverService,
-            device_code_presenter: DeviceCodePresenter
+            device_code_presenter: DeviceCodePresenter,
+            dashboard_presenter: DashboardPresenter
     ):
         """
         Initializes the AppPresenter.
@@ -62,6 +64,7 @@ class AppPresenter(QObject):
         self._view = view
         self._auth_service = auth_service
         self._deliverymen_retriever_service = deliverymen_retriever_service
+        self._dashboard_presenter = dashboard_presenter
         self._device_code_presenter = device_code_presenter
 
         self._last_error_title: Optional[str] = None
@@ -95,6 +98,9 @@ class AppPresenter(QObject):
         )
         self._machine.gathering_deliverymen_state.entered.connect(
             self._deliverymen_retriever_service.fetch_deliverymen
+        )
+        self._machine.dashboard_state.entered.connect(
+            self._dashboard_presenter.start
         )
 
         # --- UI Screen Switching ---

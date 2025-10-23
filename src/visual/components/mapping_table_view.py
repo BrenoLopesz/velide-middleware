@@ -106,7 +106,7 @@ class MappingTableView(QTableView):
         dest_names = [option.name for option in destination_options]
 
         # Update the delegate with the new set of options for the dropdown
-        self._delegate.options = [""] + sorted(dest_names) # Add a blank option
+        self._delegate.options = sorted(dest_names) # Add a blank option
 
         # Load the prepared data into the model
         self._model.load_data(table_data, headers)

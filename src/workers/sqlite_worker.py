@@ -1,5 +1,6 @@
 import sys
 import logging
+from typing import List, Tuple
 
 from PyQt5.QtCore import QObject, QRunnable, pyqtSignal
 
@@ -59,6 +60,13 @@ class SQLiteWorker(QRunnable):
     ) -> 'SQLiteWorker':
         """Factory method to create a worker for 'add_mapping'."""
         return cls(signals, db_path, 'add_mapping', velide_id, local_id)
+    
+    @classmethod
+    def for_add_many_mappings(
+        cls, signals: SQLiteWorkerSignals, db_path: str, mappings: List[Tuple[str, str]]
+    ) -> 'SQLiteWorker':
+        """Factory method to create a worker for 'add_many_mappings'."""
+        return cls(signals, db_path, 'add_many_mappings', mappings)
 
     @classmethod
     def for_get_local_id(

@@ -16,6 +16,7 @@ from presenters.deliverymen_mapping_presenter import DeliverymenMappingPresenter
 from presenters.device_code_presenter import DeviceCodePresenter
 from services.deliveries_service import DeliveriesService
 from services.deliverymen_retriever_service import DeliverymenRetrieverService
+from services.sqlite_service import SQLiteService
 from services.strategies.cds_strategy import CdsStrategy
 from services.auth_service import AuthService
 from presenters.app_presenter import AppPresenter
@@ -127,17 +128,18 @@ def create_strategy(app_config: Settings):
     # Handles missing strategy
     raise ValueError(f"Sistema alvo não suportado: {app_config.target_system}")
 
-def build_services(app_config: Settings) -> Tuple[AuthService, DeliveriesService, DeliverymenRetrieverService]:
+def build_services(app_config: Settings) -> Tuple[AuthService, DeliveriesService, DeliverymenRetrieverService, SQLiteService]:
     """Creates and wires together all core application services."""
     auth_service = AuthService(app_config.auth)
     delivery_service = DeliveriesService(app_config.api, app_config.target_system)
+    sqlite_service = SQLiteService(os.path.join(BUNDLE_DIR, app_config.sqlite_path))
     
     strategy = create_strategy(app_config)
     delivery_service.set_strategy(strategy)
     
     deliverymen_retriever_service = DeliverymenRetrieverService(app_config.api, app_config.target_system, strategy)
 
-    return auth_service, delivery_service, deliverymen_retriever_service
+    return auth_service, delivery_service, deliverymen_retriever_service, sqlite_service
 
 # --- Main Execution ---
 
@@ -159,17 +161,18 @@ def main():
     configure_logging(view)
     
     # Build services (Dependency Injection)
-    auth_service, delivery_service, deliverymen_retriever_service = build_services(config)
+    auth_service, delivery_service, deliverymen_retriever_service, sqlite_service = build_services(config)
     
     machine = MainStateMachine()
 
     device_code_presenter = DeviceCodePresenter(auth_service, view)
     deliverymen_mapping_presenter = DeliverymenMappingPresenter(
         deliverymen_retriever_service, 
+        sqlite_service,
         auth_service,
         view.deliverymen_mapping_screen
     )
-    dashboard_presenter = DashboardPresenter(view.dashboard_screen, delivery_service)
+    dashboard_presenter = DashboardPresenter(view.dashboard_screen, delivery_service, auth_service)
 
     # Initialize the presenter to connect view and services
     presenter = AppPresenter(
@@ -177,7 +180,8 @@ def main():
         state_machine=machine,
         auth_service=auth_service,
         deliverymen_retriever_service=deliverymen_retriever_service,
-        device_code_presenter=device_code_presenter
+        device_code_presenter=device_code_presenter,
+        dashboard_presenter=dashboard_presenter
     )
     machine.initial_state.addTransition(
         view.initial_screen.on_request_device_flow_start,
@@ -215,6 +219,10 @@ def main():
     )
     machine.gathering_deliverymen_state.addTransition(
         deliverymen_retriever_service.error,
+        machine.error_state
+    )
+    machine.gathering_deliverymen_state.addTransition(
+        deliverymen_mapping_presenter.error,
         machine.error_state
     )
 

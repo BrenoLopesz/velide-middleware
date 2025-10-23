@@ -1,12 +1,11 @@
 # In a new file, e.g., src/services/delivery_service.py
 import logging
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import pyqtSignal, QThreadPool
 from pydantic import ValidationError
 from models.velide_delivery_models import Order
 from models.cds_order_model import CdsOrder
 from services.strategies.connectable_strategy import IConnectableStrategy
 from config import ApiConfig
-from utils.run_in_thread import run_in_thread
 from workers.cds_logs_listener_worker import CdsLogsListenerWorker
 
 class CdsStrategy(IConnectableStrategy):
@@ -21,19 +20,18 @@ class CdsStrategy(IConnectableStrategy):
 
         # These workers will be created and moved to threads later
         self._file_listener_worker = None
+        self._thread_pool = QThreadPool.globalInstance() 
 
-    @run_in_thread("file_listener")
     def start_listening(self):
         """Creates and starts the file listener worker in a background thread."""
         self._file_listener_worker = CdsLogsListenerWorker(self._folder_to_watch)
-        self._file_listener_worker.new_order.connect(self._on_new_file_found)
-        return self._file_listener_worker
+        self._file_listener_worker.signals.new_order.connect(self._on_new_file_found)
+        self._thread_pool.start(self._file_listener_worker)
     
     def stop_listening(self):
         if self._file_listener_worker is None:
             return
         self._file_listener_worker.stop()
-
 
     def requires_initial_configuration(self):
         return False
