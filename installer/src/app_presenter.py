@@ -150,10 +150,10 @@ class AppPresenter(QObject):
         if self._new_version is None:
             creation_flags = 0
             if sys.platform == "win32":
-                creation_flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+                creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
             
             subprocess.Popen(
-                [self._main_exe_path, "--is-upgrade-checked"], 
+                [self._main_exe_path, "--is-update-checked"], 
                 creationflags=creation_flags,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
