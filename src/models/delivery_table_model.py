@@ -1,6 +1,7 @@
 # models/delivery_table_model.py
 
 from enum import Enum
+from typing import Dict, List
 from PyQt5.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PyQt5.QtGui import QColor, QBrush
 from pydantic import BaseModel, Field
@@ -44,8 +45,8 @@ class DeliveryTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._headers = ["Horário", "Status", "Endereço"]
-        self._data: list[DeliveryRowModel] = []
-        self._id_map: dict[str, int] = {} # For fast lookups
+        self._data: List[DeliveryRowModel] = []
+        self._id_map: Dict[str, int] = {} # For fast lookups
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._data)

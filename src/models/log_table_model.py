@@ -1,5 +1,6 @@
 # models/log_table_model.py
 
+from typing import List
 from PyQt5.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PyQt5.QtGui import QBrush, QColor
 from pydantic import BaseModel, Field
@@ -26,7 +27,7 @@ class LogTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._headers = ["Horário", "Tipo", "Mensagem"]
-        self._data: list[LogRowModel] = []
+        self._data: List[LogRowModel] = []
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._data)

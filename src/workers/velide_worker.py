@@ -23,7 +23,7 @@ class VelideWorkerSignals(QObject):
         delivery_added (dict): Emitted on successful delivery addition.
                                Payload is the response model's dictionary.
         deliverymen_retrieved (list): Emitted on successful retrieval of deliverymen.
-                                      Payload is a list[DeliverymanResponse].
+                                      Payload is a List[DeliverymanResponse].
         error (str): Emitted when an error occurs. Payload is the error message.
         finished (): Emitted when the task is completed, successfully or not.
     """

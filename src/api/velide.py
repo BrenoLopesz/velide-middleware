@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import TypeVar
+from typing import List, TypeVar
 import httpx
 
 from models.velide_delivery_models import (
@@ -126,7 +126,7 @@ class Velide:
         # Use the new generic parser
         return self._parse_response(response, data_key="addDeliveryFromIntegration")
 
-    async def get_deliverymen(self) -> list[DeliverymanResponse]:
+    async def get_deliverymen(self) -> List[DeliverymanResponse]:
         """
         Retrieves the list of deliverymen.
         
@@ -238,7 +238,7 @@ class Velide:
             data_key: The key within the 'data' object to extract (e.g., 'addDeliveryFromIntegration')
             
         Returns:
-            T: The extracted data (e.g., a DeliveryResponse or list[DeliverymanResponse])
+            T: The extracted data (e.g., a DeliveryResponse or List[DeliverymanResponse])
             
         Raises:
             GraphQLParseError: When JSON parsing fails

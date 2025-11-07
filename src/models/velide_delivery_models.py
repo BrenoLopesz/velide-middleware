@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, Union
+from typing import List, Optional, Union
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 import httpx
 
@@ -84,7 +84,7 @@ class AddDeliveryData(BaseModel):
 
 class GetDeliverymenData(BaseModel):
     """Data wrapper for deliverymen query"""
-    deliverymen: list[DeliverymanResponse]
+    deliverymen: List[DeliverymanResponse]
 
 class GraphQLResponse(BaseModel):
     """Complete GraphQL response"""
