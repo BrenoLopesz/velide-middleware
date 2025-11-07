@@ -1,7 +1,7 @@
 from typing import Dict, List, Tuple
 from models.base_models import BaseLocalDeliveryman
 from models.velide_delivery_models import DeliverymanResponse
-from rapidfuzz import process, fuzz
+# from rapidfuzz import process, fuzz
 
 def generate_levenshtein_mappings(
     source_items: List[DeliverymanResponse],
@@ -28,20 +28,20 @@ def generate_levenshtein_mappings(
         # Cannot map if there are no options
         return {}
 
-    for source in source_items:
-        # Use rapidfuzz to find the single best match for the source name
-        # from the list of destination names.
-        # It returns a tuple: (match_string, score, index)
-        best_match = process.extractOne(
-            source.name,
-            destination_names,
-            scorer=fuzz.ratio # Use standard Levenshtein ratio
-        )
+    # for source in source_items:
+    #     # Use rapidfuzz to find the single best match for the source name
+    #     # from the list of destination names.
+    #     # It returns a tuple: (match_string, score, index)
+    #     best_match = process.extractOne(
+    #         source.name,
+    #         destination_names,
+    #         scorer=fuzz.ratio # Use standard Levenshtein ratio
+    #     )
 
-        if best_match:
-            match_name, score, index = best_match
+    #     if best_match:
+    #         match_name, score, index = best_match
             
-            # Only create the mapping if the match is good enough
-            default_mappings[source.id] = match_name
+    #         # Only create the mapping if the match is good enough
+    #         default_mappings[source.id] = match_name
                 
     return default_mappings
