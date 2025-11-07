@@ -11,7 +11,10 @@ annotated-types==0.7.0
 anyio==4.5.2
     # via
     #   -r requirements.in
+    #   gql
     #   httpx
+backoff==2.2.1
+    # via gql
 cabarchive==0.2.4
     # via -r requirements.in
 certifi==2025.10.5
@@ -20,8 +23,7 @@ certifi==2025.10.5
     #   httpcore
     #   httpx
     #   requests
-cffi
-# cffi==1.17.1
+cffi==1.17.1
     # via
     #   -r requirements.in
     #   cryptography
@@ -48,6 +50,14 @@ fdb==2.0.4
     # via -r requirements.in
 filelock==3.16.1
     # via -r requirements.in
+firebird-base==1.8.0
+    # via firebird-driver
+firebird-driver==1.10.11
+    # via sqlalchemy-firebird
+gql[websockets]==3.5.3
+    # via -r requirements.in
+graphql-core==3.2.6
+    # via gql
 greenlet==3.1.1
     # via sqlalchemy
 h11==0.16.0
@@ -66,20 +76,26 @@ idna==3.11
     #   anyio
     #   httpx
     #   requests
+    #   yarl
 importlib-metadata==8.5.0
     # via cx-freeze
-PyJWT==2.9.0
-    # via -r requirements.in
 lief==0.16.3
     # via
     #   -r requirements.in
     #   cx-freeze
+multidict==6.1.0
+    # via yarl
 packaging==25.0
     # via
     #   -r requirements.in
     #   cx-freeze
+    #   sqlalchemy-firebird
 pillow==10.4.0
     # via -r requirements.in
+propcache==0.2.0
+    # via yarl
+protobuf==5.29.5
+    # via firebird-base
 pycparser==2.23
     # via
     #   -r requirements.in
@@ -94,6 +110,8 @@ pydantic-core==2.27.2
     #   pydantic
 pydantic-settings==2.8.1
     # via -r requirements.in
+pyjwt==2.9.0
+    # via -r requirements.in
 pypng==0.20220715.0
     # via qrcode
 pyqt5==5.15.11
@@ -106,6 +124,8 @@ pyqt5-sip==12.15.0
     # via
     #   -r requirements.in
     #   pyqt5
+python-dateutil==2.9.0.post0
+    # via firebird-driver
 python-dotenv==1.0.1
     # via
     #   -r requirements.in
@@ -114,15 +134,23 @@ pyyaml==6.0.3
     # via -r requirements.in
 qrcode==7.4.2
     # via -r requirements.in
+rapidfuzz==3.9.7
+    # via -r requirements.in
 requests==2.32.4
     # via -r requirements.in
 screeninfo==0.8.1
     # via -r requirements.in
+six==1.17.0
+    # via python-dateutil
 sniffio==1.3.1
     # via
     #   -r requirements.in
     #   anyio
 sqlalchemy==2.0.44
+    # via
+    #   -r requirements.in
+    #   sqlalchemy-firebird
+sqlalchemy-firebird==2.1
     # via -r requirements.in
 striprtf==0.0.29
     # via -r requirements.in
@@ -141,6 +169,8 @@ typing-extensions==4.13.2
     #   cryptography
     #   cx-freeze
     #   exceptiongroup
+    #   graphql-core
+    #   multidict
     #   pydantic
     #   pydantic-core
     #   qrcode
@@ -151,6 +181,10 @@ urllib3==2.2.3
     #   requests
 watchdog==4.0.2
     # via -r requirements.in
+websockets==11.0.3
+    # via gql
+yarl==1.15.2
+    # via gql
 zipp==3.20.2
     # via importlib-metadata
 
