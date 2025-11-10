@@ -1,6 +1,6 @@
 
 
-from typing import Optional
+from typing import Optional, Tuple
 from api.velide import Velide
 from config import ApiConfig, TargetSystem
 from services.strategies.connectable_strategy import IConnectableStrategy
@@ -12,6 +12,7 @@ class DeliverymenRetrieverService(QObject):
     mapping_is_required = pyqtSignal()
     mapping_not_required = pyqtSignal()
     deliverymen_received = pyqtSignal(tuple)
+    mapping_finished = pyqtSignal()
     error = pyqtSignal(str)
 
     def __init__(self, api_config: ApiConfig, target_system: TargetSystem, strategy: IConnectableStrategy):
@@ -31,11 +32,17 @@ class DeliverymenRetrieverService(QObject):
         if self._waiting_for_token:
             self.fetch_deliverymen()
 
+    def get_deliverymen(self) -> Tuple[list, list]:
+        return (self._velide_deliverymen, self._local_deliverymen)
+
     def check_if_mapping_is_required(self):
         if self._strategy.requires_initial_configuration():
             self.mapping_is_required.emit()
         else:
             self.mapping_not_required.emit()
+
+    def mark_mapping_as_finished(self):
+        self.mapping_finished.emit()
 
     def _on_receive_velide_deliverymen(self, deliverymen: list):
         self._velide_deliverymen = deliverymen

@@ -36,3 +36,8 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):
     def fetch_deliverymen(self, success, error) -> list:
         """Returns the local registered deliverymen on the software."""
         pass
+
+    @abstractmethod
+    def on_delivery_added(self):
+        """Optional callback function to receive deliveries added notifications."""
+        pass

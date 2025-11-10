@@ -1,32 +1,38 @@
-from PyQt5.QtCore import QStateMachine, QState
+from __future__ import annotations
+from PyQt5.QtCore import QStateMachine, QState, pyqtSignal
 
-from states.gathering_deliverymen_state import GatheringDeliverymenState
-
+from states.logged_in_state import LoggedInState
+from states.logged_out_state import LoggedOutState
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from models.app_context_model import Services
 
 class MainStateMachine(QStateMachine):
-    def __init__(self):
+    _access_token_stored = pyqtSignal()
+
+    def __init__(self, services: 'Services'):
         super().__init__()
+        self.services = services
+
         self._create_states()
         self._build_state_machine()
+        self._add_transitions()
+
+    def _add_transitions(self):
+        self.services.auth.access_token.connect(self._on_access_token_received)
+        self.logged_out_state.addTransition(self._access_token_stored, self.logged_in_state)
+
+    def _on_access_token_received(self, access_token: str):
+        self.logged_in_state.setProperty("access_token", access_token)
+        self._access_token_stored.emit()
 
     def _create_states(self):
         """Initializes all QState objects used in the state machine."""
         
         # --- Main Application States ---
-        self.initial_state = QState()
-        self.device_flow_state = QState()
-        self.dashboard_state = QState()
+        self.logged_out_state = LoggedOutState(self.services)
+        self.logged_in_state = LoggedInState(self.services)
 
-        # --- Mapping & Setup States ---
-        
-        # This state checks if mapping is needed and branches.
-        self.check_mapping_state = QState()
-
-        self.gathering_deliverymen_state = GatheringDeliverymenState()
-        
-        # This state shows the mapping UI.
-        self.deliverymen_mapping_state = QState()
-       
         # --- Utility States ---
         self.error_state = QState()
         self.restart_state = QState()
@@ -39,17 +45,25 @@ class MainStateMachine(QStateMachine):
         """
         # Add all created states to the machine
         states = [
-            self.initial_state,
-            self.device_flow_state,
-            self.dashboard_state,
-            self.check_mapping_state,
-            self.gathering_deliverymen_state,
-            self.deliverymen_mapping_state,
+            self.logged_out_state,
+            self.logged_in_state,
             self.error_state,
             self.restart_state
         ]
         for state in states:
             self.addState(state)
             
-        self.setInitialState(self.initial_state)
+        self.setup_state_logging(self)
+        self.setInitialState(self.logged_out_state)
     
+    def setup_state_logging(self, state: QState, level=0):
+        """Recursively setup logging for all states in the hierarchy."""
+        indent = "  " * level
+        state_name = state.objectName() or state.__class__.__name__
+        
+        state.entered.connect(lambda: print(f"{indent}→ ENTERED: {state_name}"))
+        state.exited.connect(lambda: print(f"{indent}← EXITED: {state_name}"))
+
+        for child in state.children():
+            if isinstance(child, QState):
+                self.setup_state_logging(child, level + 1)

@@ -25,6 +25,8 @@ class ApiConfig(BaseModel):
     use_ssl: Optional[bool] = Field(default=True, description="Enables SSL verification on API requests.")
     timeout: Optional[float] = Field(default=15.0, description="API requests timeout.")
 
+    velide_websockets_server: Optional[str] = Field(description="Websockets server to receive updates from.")
+
 class AuthenticationConfig(BaseModel):
     """
     A model to hold essential details for OAuth 2.0 and OIDC authentication flows.

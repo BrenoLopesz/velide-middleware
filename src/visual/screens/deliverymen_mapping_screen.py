@@ -68,5 +68,8 @@ class DeliverymenMappingScreen(QWidget):
         self.deliverymen_config_table.populate_table(source_items, destination_options, default_mappings, headers)
         self.stack.setCurrentIndex(1)
 
+    def set_screen(self, index: int):
+        self.stack.setCurrentIndex(index)
+
     def get_mappings(self):
         return self.deliverymen_config_table.get_mappings()

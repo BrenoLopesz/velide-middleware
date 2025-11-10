@@ -1,8 +1,14 @@
 from datetime import time, datetime
+from enum import Enum
 from typing import Literal, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
 from models.base_models import BaseLocalDeliveryman
+
+class FarmaxAction(Enum):
+    INSERT = "INSERT"
+    UPDATE = "UPDATE"
+    DELETE = "DELETE"
 
 class FarmaxDeliveryman(BaseLocalDeliveryman):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True) # Makes it work with SQLAlchemy
@@ -12,7 +18,7 @@ class FarmaxDeliveryman(BaseLocalDeliveryman):
 class FarmaxSale(BaseModel):
     model_config = ConfigDict(from_attributes=True) # Makes it work with SQLAlchemy
     id: float = Field(alias="CD_VENDA") # Firebird uses DOUBLE PRECISION
-    status: str = Field(alias="STATUS")
+    status: FarmaxAction = Field(alias="STATUS")
 
 class FarmaxDelivery(BaseModel):
     model_config = ConfigDict(from_attributes=True) # Makes it work with SQLAlchemy

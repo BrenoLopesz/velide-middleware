@@ -13,12 +13,6 @@ class FarmaxRepository:
     def __init__(self, engine: Engine):
         self.logger = logging.getLogger(__name__)
         self._engine = engine
-        # self._engine = create_engine(
-        #     get_farmax_engine_string(farmax_config),
-        #     pool_size=3,
-        #     max_overflow=5,
-        #     pool_pre_ping=True
-        # )
 
     def _build_in_clause_params(self, values: Tuple) -> Tuple[str, dict]:
         """Builds placeholders and params for an IN clause."""

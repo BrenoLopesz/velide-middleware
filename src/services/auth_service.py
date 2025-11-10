@@ -6,6 +6,7 @@ from workers.stored_token_retriever_worker import StoredTokenRetrieverWorker
 from workers.refresh_token_worker import RefreshTokenWorker
 
 class AuthService(QObject):
+    loading = pyqtSignal()
     device_code = pyqtSignal(dict)
     access_token = pyqtSignal(str)
     error = pyqtSignal(str, str)
@@ -21,6 +22,7 @@ class AuthService(QObject):
 
     def load_device_flow(self):
         """Creates and connects the authorization worker."""
+        self.loading.emit()
         worker = AuthorizationFlowWorker(self._auth_config)
         # Connect the worker's specific signals here
         worker.signals.device_code.connect(self.device_code)

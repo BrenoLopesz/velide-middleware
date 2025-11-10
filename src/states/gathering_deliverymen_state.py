@@ -1,5 +1,9 @@
 # states/gathering_deliverymen_state.py
+from __future__ import annotations
+from typing import TYPE_CHECKING
 from PyQt5.QtCore import QState, QFinalState, pyqtSignal
+if TYPE_CHECKING:
+    from models.app_context_model import Services
 
 class GatheringDeliverymenState(QState):
     """
@@ -20,8 +24,9 @@ class GatheringDeliverymenState(QState):
     local_received = pyqtSignal()
     velide_received = pyqtSignal()
     
-    def __init__(self):
-        super().__init__(QState.ChildMode.ParallelStates)
+    def __init__(self, services: 'Services', parent=None):
+        super().__init__(QState.ChildMode.ParallelStates, parent)
+        self._services = services
         self._local_done = False
         self._velide_done = False
         

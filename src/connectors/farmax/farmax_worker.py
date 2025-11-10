@@ -1,83 +1,195 @@
 import logging
-from typing import List
+from typing import Any, Tuple
+from datetime import datetime, time
 from PyQt5.QtCore import QRunnable, QObject, pyqtSignal
 
 from connectors.farmax.farmax_repository import FarmaxRepository
-from models.farmax_models import FarmaxDeliveryman
+from models.farmax_models import (
+    FarmaxDelivery, 
+    FarmaxDeliveryman, 
+)
 
 class FarmaxWorkerSignals(QObject):
     """
-    Defines the signals available from a worker thread.
+    Defines the signals available from a generic repository worker thread.
     
-    This class is used by QRunnable workers to communicate with the 
-    main thread, as QRunnable itself cannot emit signals.
-
     Supported signals:
     
     finished
-        Emitted when the task is completed, regardless of success.
+      Emitted when the task is completed, regardless of success.
     
     error
-        str: Emitted when an error occurs. Passes a string 
-        (str) with the error message.
+      str: Emitted when an error occurs. Passes a string 
+      (str) with the error message.
     
     success
-        list: Emitted when the data is successfully fetched. 
-        Passes the list (list) of FarmaxDeliveryman objects.
+      object: Emitted when the task is successfully completed. 
+      Passes the result (object) from the repository method.
     """
     finished = pyqtSignal()
     error = pyqtSignal(str)
-    success = pyqtSignal(list) 
+    success = pyqtSignal(object)
 
 
 class FarmaxWorker(QRunnable):
     """
-    A QRunnable worker to fetch deliverymen from the FarmaxRepository
-    in a separate thread using a QThreadPool.
+    A QRunnable worker that uses creational class methods for
+    type-safe execution of repository tasks in a separate thread.
     
-    This worker is designed to perform the database query without 
-    blocking the main GUI thread. It uses a WorkerSignals object 
-    to communicate the results or any errors back.
+    Do not instantiate this class directly. Instead, use one
+    of the provided @classmethod factory methods.
+    
+    ---
+    
+    ### Example Usage:
+    
+    ```python
+    # 1. To fetch deliverymen
+    worker = FarmaxWorker.for_fetch_deliverymen(self.repository)
+    worker.signals.success.connect(self.handle_deliverymen_list)
+    
+    # 2. To update a delivery
+    worker = FarmaxWorker.for_update_delivery_as_done(
+        self.repository, 
+        delivery=my_delivery_obj, 
+        ended_at=datetime.now().time()
+    )
+    worker.signals.success.connect(self.handle_update_success)
+    
+    # 3. To fetch specific deliveries
+    ids_tuple = (123.0, 456.0)
+    worker = FarmaxWorker.for_fetch_deliveries_by_id(
+        self.repository, 
+        cd_vendas=ids_tuple
+    )
+    worker.signals.success.connect(self.handle_deliveries_list)
+    
+    # Run any of them
+    self.thread_pool.start(worker)
+    ```
     """
     
-    def __init__(self, repository: FarmaxRepository):
+    def __init__(self, repository: FarmaxRepository, method_name: str, *args: Any, **kwargs: Any):
         """
-        Initialize the worker.
-        
-        Args:
-            repository (FarmaxRepository): An instance of the 
-                                           repository to use for 
-                                           database operations.
+        Private constructor. Use the @classmethod factories to create
+        a worker instance.
         """
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.repository = repository
         self.signals = FarmaxWorkerSignals()
+        
+        # Store the task to be executed
+        self.method_name = method_name
+        self.args = args
+        self.kwargs = kwargs
 
     def run(self):
         """
         The main execution method for the QRunnable.
         
         This method is called when the worker is run by a QThreadPool.
-        It attempts to fetch the list of deliverymen. On success, 
-        it emits the 'success' signal with the data. On failure,
-        it logs the error and emits the 'error' 
-        signal. It always emits 'finished'
-        when done.
+        It executes the repository method specified during construction.
         """
         try:
-            # 1. Executa a tarefa principal (a consulta ao banco)
-            deliverymen_list: List[FarmaxDeliveryman] = self.repository.fetch_deliverymen()
+            # 1. Get the actual method from the repository object
+            method_to_call = getattr(self.repository, self.method_name)
             
-            # 2. Emite o sinal de sucesso com os dados
-            self.signals.success.emit(deliverymen_list)
+            # 2. Execute the task with the provided arguments
+            result = method_to_call(*self.args, **self.kwargs)
+            
+            # 3. Emit the success signal with the result
+            self.signals.success.emit(result)
             
         except Exception as e:
-            error_msg = f"Falha ao buscar a lista de entregadores no banco de dados: {e}"
-            
+            error_msg = (
+                f"Falha ao executar '{self.method_name}' no Farmax."
+            )
             self.logger.exception(error_msg)
-            
             self.signals.error.emit(error_msg)
             
         finally:
+            # 4. Always emit finished
             self.signals.finished.emit()
+
+    # --- Creational Factory Methods ---
+
+    @classmethod
+    def for_fetch_deliverymen(
+        cls, 
+        repository: FarmaxRepository
+    ) -> 'FarmaxWorker':
+        """Creates a worker to fetch all active deliverymen."""
+        return cls(repository, "fetch_deliverymen")
+
+    @classmethod
+    def for_fetch_recent_changes(
+        cls, 
+        repository: FarmaxRepository, 
+        last_check_time: datetime
+    ) -> 'FarmaxWorker':
+        """Creates a worker to fetch delivery log changes."""
+        # We pass arguments as kwargs for clarity and safety
+        return cls(
+            repository, 
+            "fetch_recent_changes", 
+            last_check_time=last_check_time
+        )
+
+    @classmethod
+    def for_fetch_deliveries_by_id(
+        cls, 
+        repository: FarmaxRepository, 
+        cd_vendas: Tuple[float]
+    ) -> 'FarmaxWorker':
+        """Creates a worker to fetch full delivery details by ID."""
+        return cls(
+            repository, 
+            "fetch_deliveries_by_id", 
+            cd_vendas=cd_vendas
+        )
+        
+    @classmethod
+    def for_fetch_sales_statuses_by_id(
+        cls, 
+        repository: FarmaxRepository, 
+        cd_vendas: Tuple[float]
+    ) -> 'FarmaxWorker':
+        """Creates a worker to fetch sale statuses by ID."""
+        return cls(
+            repository, 
+            "fetch_sales_statuses_by_id", 
+            cd_vendas=cd_vendas
+        )
+
+    @classmethod
+    def for_update_delivery_as_in_route(
+        cls, 
+        repository: FarmaxRepository, 
+        delivery: FarmaxDelivery, 
+        deliveryman: FarmaxDeliveryman, 
+        left_at: time
+    ) -> 'FarmaxWorker':
+        """Creates a worker to update a delivery to 'In Route'."""
+        return cls(
+            repository, 
+            "update_delivery_as_in_route", 
+            delivery=delivery, 
+            deliveryman=deliveryman, 
+            left_at=left_at
+        )
+
+    @classmethod
+    def for_update_delivery_as_done(
+        cls, 
+        repository: FarmaxRepository, 
+        delivery: FarmaxDelivery, 
+        ended_at: time
+    ) -> 'FarmaxWorker':
+        """Creates a worker to update a delivery to 'Done'."""
+        return cls(
+            repository, 
+            "update_delivery_as_done", 
+            delivery=delivery, 
+            ended_at=ended_at
+        )

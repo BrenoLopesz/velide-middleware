@@ -38,6 +38,9 @@ class CdsStrategy(IConnectableStrategy):
     
     def fetch_deliverymen(self, success, error):
         raise NotImplementedError
+    
+    def on_delivery_added(self):
+        return # Just ignore it.
 
     def _on_new_file_found(self, delivery_data: dict):
         try: 
