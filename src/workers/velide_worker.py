@@ -74,7 +74,7 @@ class VelideWorker(QRunnable):
         It creates a new asyncio event loop to run the async API call
         and handles all potential errors, emitting the appropriate signals.
         """
-        self.logger.info(f"Iniciando tarefa Velide: {self._operation}...")
+        self.logger.debug(f"Iniciando tarefa Velide: {self._operation}...")
         
         try:
             # asyncio.run() creates, runs, and closes the event loop for us.

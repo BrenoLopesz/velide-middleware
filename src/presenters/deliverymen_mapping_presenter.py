@@ -43,6 +43,15 @@ class DeliverymenMappingPresenter(QObject):
         deliverymen_mapping_workflow.gathering_deliverymen_state.entered.connect(
             self._on_start_gathering_deliverymen
         )
+        # Retrieving mappings
+        deliverymen_mapping_workflow.retrieving_mappings_state.entered.connect(
+            self._on_retrieving_mappings
+        )
+        # Comparing mappings
+        deliverymen_mapping_workflow.comparing_mappings_state.entered.connect(
+            self._on_mappings_retrieved
+        )
+
         # Display table when deliverymen received
         deliverymen_mapping_workflow.deliverymen_mapping_state.entered.connect(self.on_deliverymen_received)
         # On clicking to save
@@ -60,6 +69,23 @@ class DeliverymenMappingPresenter(QObject):
         )
         # Then fetch deliverymen
         self._services.deliverymen_retriever.fetch_deliverymen()
+
+    def _on_retrieving_mappings(self):
+        self._services.sqlite.request_get_all_mappings()
+
+    def _on_mappings_retrieved(self):
+        mappings = self._machine.logged_in_state.deliverymen_mapping_workflow.property("deliverymen_mappings")
+        # TODO: 'mappings' is supposed to be non-null. Add a verification.
+        velide_deliverymen, local_deliverymen = self._services.deliverymen_retriever.get_deliverymen()
+        for velide_deliveryman in velide_deliverymen:
+            found_id = next((mapping[0] for mapping in mappings if mapping[0] == velide_deliveryman.id), None)
+            if found_id is None:
+                # Move to deliverymen mapping screen
+                self._services.deliverymen_retriever.mark_mapping_as_incomplete()
+                return
+        
+        # Skip deliverymen screen
+        self._services.deliverymen_retriever.mark_mapping_as_complete()
 
     def on_deliverymen_received(self):
         # 1. Populate table

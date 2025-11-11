@@ -12,6 +12,8 @@ class DeliverymenRetrieverService(QObject):
     mapping_is_required = pyqtSignal()
     mapping_not_required = pyqtSignal()
     deliverymen_received = pyqtSignal(tuple)
+    mapping_is_complete = pyqtSignal()
+    mapping_is_incomplete = pyqtSignal()
     mapping_finished = pyqtSignal()
     error = pyqtSignal(str)
 
@@ -43,6 +45,12 @@ class DeliverymenRetrieverService(QObject):
 
     def mark_mapping_as_finished(self):
         self.mapping_finished.emit()
+
+    def mark_mapping_as_complete(self):
+        self.mapping_is_complete.emit()
+
+    def mark_mapping_as_incomplete(self):
+        self.mapping_is_incomplete.emit()
 
     def _on_receive_velide_deliverymen(self, deliverymen: list):
         self._velide_deliverymen = deliverymen
