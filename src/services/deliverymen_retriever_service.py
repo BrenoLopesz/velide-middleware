@@ -1,8 +1,10 @@
 
 
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from api.velide import Velide
 from config import ApiConfig, TargetSystem
+from models.base_models import BaseLocalDeliveryman
+from models.velide_delivery_models import DeliverymanResponse
 from services.strategies.connectable_strategy import IConnectableStrategy
 from PyQt5.QtCore import pyqtSignal, QThreadPool, QObject
 
@@ -46,11 +48,32 @@ class DeliverymenRetrieverService(QObject):
     def mark_mapping_as_finished(self):
         self.mapping_finished.emit()
 
-    def mark_mapping_as_complete(self):
-        self.mapping_is_complete.emit()
+    def check_if_mapping_is_complete(
+        self, 
+        mappings: list, 
+        velide_deliverymen: List[DeliverymanResponse], 
+        local_deliverymen: List[BaseLocalDeliveryman]
+    ):
+        # Create a set of valid local IDs for fast lookup
+        valid_local_ids = {d.id for d in local_deliverymen}
 
-    def mark_mapping_as_incomplete(self):
-        self.mapping_is_incomplete.emit()
+        for velide_deliveryman in velide_deliverymen:
+            # Find the full mapping tuple (velide_id, local_id)
+            mapping_tuple = next((mapping for mapping in mappings if mapping[0] == velide_deliveryman.id), None)
+            
+            if mapping_tuple is None:
+                # Case 1: No mapping exists at all for this Velide user
+                self.mapping_is_incomplete.emit()
+                return
+
+            mapped_local_id = mapping_tuple[1] # Get the local_id from the mapping
+            if mapped_local_id not in valid_local_ids:
+                # Case 2: Mapping exists, but the local_id is stale/invalid
+                self.mapping_is_incomplete.emit()
+                return
+        
+        # All Velide users have a *valid* and *current* mapping
+        self.mapping_is_complete.emit()
 
     def _on_receive_velide_deliverymen(self, deliverymen: list):
         self._velide_deliverymen = deliverymen

@@ -11,8 +11,12 @@ class FarmaxAction(Enum):
     DELETE = "DELETE"
 
 class FarmaxDeliveryman(BaseLocalDeliveryman):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True) # Makes it work with SQLAlchemy
-    id: int = Field(alias="CD_VENDEDOR")
+    model_config = ConfigDict(
+        from_attributes=True, # Makes it work with SQLAlchemy
+        populate_by_name=True,
+        coerce_numbers_to_str=True
+    ) 
+    id: str = Field(alias="CD_VENDEDOR")
     name: str = Field(alias="NOME")
 
 class FarmaxSale(BaseModel):

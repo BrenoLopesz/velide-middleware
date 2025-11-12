@@ -45,7 +45,7 @@ class DeliverymenMappingPresenter(QObject):
         )
         # Retrieving mappings
         deliverymen_mapping_workflow.retrieving_mappings_state.entered.connect(
-            self._on_retrieving_mappings
+            self._services.sqlite.request_get_all_mappings
         )
         # Comparing mappings
         deliverymen_mapping_workflow.comparing_mappings_state.entered.connect(
@@ -70,22 +70,14 @@ class DeliverymenMappingPresenter(QObject):
         # Then fetch deliverymen
         self._services.deliverymen_retriever.fetch_deliverymen()
 
-    def _on_retrieving_mappings(self):
-        self._services.sqlite.request_get_all_mappings()
-
     def _on_mappings_retrieved(self):
         mappings = self._machine.logged_in_state.deliverymen_mapping_workflow.property("deliverymen_mappings")
-        # TODO: 'mappings' is supposed to be non-null. Add a verification.
         velide_deliverymen, local_deliverymen = self._services.deliverymen_retriever.get_deliverymen()
-        for velide_deliveryman in velide_deliverymen:
-            found_id = next((mapping[0] for mapping in mappings if mapping[0] == velide_deliveryman.id), None)
-            if found_id is None:
-                # Move to deliverymen mapping screen
-                self._services.deliverymen_retriever.mark_mapping_as_incomplete()
-                return
-        
-        # Skip deliverymen screen
-        self._services.deliverymen_retriever.mark_mapping_as_complete()
+        self._services.deliverymen_retriever.check_if_mapping_is_complete(
+            mappings,
+            velide_deliverymen,
+            local_deliverymen
+        )
 
     def on_deliverymen_received(self):
         # 1. Populate table
@@ -102,8 +94,32 @@ class DeliverymenMappingPresenter(QObject):
         self._view.deliverymen_mapping_screen.set_screen(1)
 
     def validate_mapping(self):
-        mappings = self._view.deliverymen_mapping_screen.get_mappings()
-        mappings_tuple_list = [(velide_id, local_id) for velide_id, local_id in mappings.items()]
+        # 1. Get the {velide_id: local_name} mappings from the view
+        name_mappings = self._view.deliverymen_mapping_screen.get_mappings()
+
+        # 2. Get the full list of local deliverymen from the service
+        _, local_deliverymen = self._services.deliverymen_retriever.get_deliverymen()
+
+        # 3. Create a {local_name: local_id} lookup dictionary
+        #    This is the crucial conversion step.
+        name_to_id_map = {dm.name: dm.id for dm in local_deliverymen}
+
+        # 4. Build the final {velide_id: local_id} list
+        mappings_tuple_list = []
+        for velide_id, local_name in name_mappings.items():
+            # Find the local_id corresponding to the selected local_name
+            local_id = name_to_id_map.get(local_name)
+            
+            # Only add to the list if a valid mapping was found
+            if local_id:
+                mappings_tuple_list.append((velide_id, local_id))
+            else:
+                self.logger.warning(
+                    f"Ignorando o mapeamento para {velide_id}: "
+                    f"o nome '{local_name}' não foi encontrado."
+                )
+
+        # 5. Send the correct ID-to-ID list to the database
         self._services.sqlite.request_add_many_mappings(mappings_tuple_list)
 
     def on_mapping_success(self):
