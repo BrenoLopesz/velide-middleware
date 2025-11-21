@@ -85,6 +85,10 @@ class DeliveriesService(QObject):
         worker.signals.error.connect(
             lambda err, oid=order_id: self._on_delivery_failure(oid, err)
         )
+
+        worker.signals.delivery_added.connect(self._on_process_finished)
+        worker.signals.error.connect(self._on_process_finished)
+
         self._thread_pool.start(worker)
     
     def _try_process_next(self):
@@ -102,20 +106,6 @@ class DeliveriesService(QObject):
         # This call starts the decorated function. The decorator will create
         # and attach the thread and worker to `self`.
         self._process_delivery_queue()
-
-        # KEY INSIGHT: The decorator has now run and set the thread attribute.
-        # We can now access it and connect to the CORRECT signal.
-        thread_attr = "_velide_api_call_thread"
-        if hasattr(self, thread_attr):
-            thread = getattr(self, thread_attr)
-            # This is the safe way to chain tasks. We wait for the thread,
-            # not just the worker, to be finished.
-            thread.finished.connect(self._on_process_finished)
-        else:
-            # This is a safeguard. If the decorated function returned None
-            # (e.g., queue was empty), the decorator creates no thread.
-            self.logger.warning("Decorator did not create a thread. Resetting state.")
-            self._is_processing = False
 
     def _on_process_finished(self):
         """

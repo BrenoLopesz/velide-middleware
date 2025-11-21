@@ -1,5 +1,5 @@
 import difflib
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 from models.base_models import BaseLocalDeliveryman
 from models.velide_delivery_models import DeliverymanResponse
 
@@ -7,7 +7,7 @@ from models.velide_delivery_models import DeliverymanResponse
 # 0.7 means 70% similar. Adjust as needed.
 MIN_MATCH_SCORE = 0 
 
-def get_best_match(query: str, choices: List[str]) -> str | None:
+def get_best_match(query: str, choices: List[str]) -> Optional[str]:
     """
     Finds the single best match for a query string from a list of choices.
     

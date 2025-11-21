@@ -124,7 +124,6 @@ def create_strategy(app_config: Settings):
         farmax_repository = FarmaxRepository(engine)
         return FarmaxStrategy(
             farmax_config=app_config.farmax,
-            sqlite_manager=sqlite_manager,
             # farmax_setup=farmax_setup, 
             farmax_repository=farmax_repository
         )

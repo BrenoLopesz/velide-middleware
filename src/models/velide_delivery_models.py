@@ -30,7 +30,7 @@ class MetadataInput(BaseModel):
     """Metadata for GraphQL mutation"""
     integration_name: str = Field(..., min_length=1, alias="integrationName")
     customer_name: str = Field(..., min_length=1, alias="customerName")
-    customer_contact: Optional[str] = Field(..., alias="customerContact")
+    customer_contact: Optional[str] = Field(None, alias="customerContact")
 
 
 class GraphQLVariables(BaseModel):
@@ -72,8 +72,8 @@ class DeliverymanResponse(BaseModel):
 class DeliveryResponse(BaseModel):
     """Delivery data from GraphQL response"""
     id: str
-    route_id: Optional[str] = Field(..., alias="routeId")
-    ended_at: Optional[datetime] = Field(..., alias="endedAt")
+    route_id: Optional[str] = Field(alias="routeId")
+    ended_at: Optional[datetime] = Field(alias="endedAt")
     created_at: datetime = Field(..., alias="createdAt")
     location: Optional[Location] = None
 

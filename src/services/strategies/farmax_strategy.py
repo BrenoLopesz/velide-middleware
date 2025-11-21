@@ -1,6 +1,6 @@
 import logging
-from datetime import datetime
-from typing import List, Set, Dict, Tuple
+from datetime import date, datetime
+from typing import List, Optional, Set, Dict, Tuple
 
 from PyQt5.QtCore import pyqtSignal, QThreadPool, QTimer
 from api.sqlite_manager import SQLiteManager
@@ -38,18 +38,19 @@ class FarmaxStrategy(IConnectableStrategy):
     def __init__(
             self, 
             farmax_config: FarmaxConfig, 
-            farmax_repository: FarmaxRepository, 
-            sqlite_manager: SQLiteManager
+            farmax_repository: FarmaxRepository 
         ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.config = farmax_config
         self._farmax = farmax_repository
-        self._sqlite = sqlite_manager
         self._thread_pool = QThreadPool.globalInstance() 
 
         # --- Internal State ---
-        self._last_check_time: datetime | None = None
+        self._last_check_time: Optional[datetime] = None
+
+        # Track the last processed Log ID
+        self._last_log_id: Optional[int] = None
         
         #: Set of sale IDs (float) currently being tracked for status.
         self._tracked_sales_ids: Set[float] = set()
@@ -82,8 +83,16 @@ class FarmaxStrategy(IConnectableStrategy):
             return
 
         self.logger.info("Rastreamento de entregas do Farmax iniciado.")
-        self._last_check_time = datetime.now()
+        # Instead of datetime.now(), we start from midnight today.
+        # This ensures the first poll catches everything from the current day.
+        today = date.today()
+        midnight = datetime.combine(today, datetime.min.time())
+        
+        self._last_check_time = midnight
     
+        # Reset ID to None to force the initial time-based lookup
+        self._last_log_id = None
+
         # Start the timers
         self._poll_timer.start(self.NEW_DELIVERY_POLL_INTERVAL_MS)
         self._status_timer.start(self.STATUS_POLL_INTERVAL_MS)
@@ -105,6 +114,7 @@ class FarmaxStrategy(IConnectableStrategy):
         
         # Clear the state
         self._last_check_time = None
+        self._last_log_id = None
         self._tracked_sales_ids.clear()
         self._tracked_sales_statuses.clear()
 
@@ -149,6 +159,20 @@ class FarmaxStrategy(IConnectableStrategy):
         
         Creates a worker to fetch recent changes from the DELIVERYLOG.
         """
+        # STEADY STATE: We have a Log ID, so we poll for changes > ID
+        if self._last_log_id is not None:
+            self.logger.debug(f"Buscando pelo ID (Último ID: {self._last_log_id})...")
+            
+            worker = FarmaxWorker.for_fetch_recent_changes_by_id(
+                self._farmax, 
+                last_log_id=self._last_log_id
+            )
+            # We don't need to pass 'current_check_time' anymore for ID logic
+            worker.signals.success.connect(self._handle_new_delivery_logs)
+            worker.signals.error.connect(self._handle_poll_error)
+            self._thread_pool.start(worker)
+            return
+
         if self._last_check_time is None:
             self.logger.warning(
                 "Solicitado a verificação de entregas adicionadas, " \
@@ -159,9 +183,12 @@ class FarmaxStrategy(IConnectableStrategy):
 
         # Store the time *before* the query.
         # This becomes the new `_last_check_time` *after* the query succeeds.
+        # TODO: Improve this: An order might be placed during this and the 
+        #       query execution time, which would be missed. You might need
+        #       to check by log ids instead.
         current_check_time = datetime.now()
         
-        self.logger.debug("Buscando novas entregas...")
+        self.logger.debug("Buscando novas entregas (inicial)...")
         worker = FarmaxWorker.for_fetch_recent_changes(
             self._farmax, 
             last_check_time=self._last_check_time
@@ -198,14 +225,7 @@ class FarmaxStrategy(IConnectableStrategy):
 
     # --- Worker Signal Handlers (Slots) ---
 
-    def _update_last_check_time(self, new_time: datetime):
-        """
-        [SLOT] Updates the `_last_check_time` after a successful poll.
-        """
-        self.logger.debug(f"Poll complete. Updating last check time to {new_time}")
-        self._last_check_time = new_time
-
-    def _handle_new_delivery_logs(self, logs: List[DeliveryLog], new_check_time: datetime):
+    def _handle_new_delivery_logs(self, logs: List[DeliveryLog], poll_time: datetime = None):
         """
         [SLOT] Handles the result of `for_fetch_recent_changes`.
         
@@ -215,24 +235,40 @@ class FarmaxStrategy(IConnectableStrategy):
         NOTE: This assumes the `DeliveryLog` model has 'Action' and
         'CD_VENDA' fields, or similar, to identify new deliveries.
         """
-        # Update time on success, BEFORE processing
-        self._update_last_check_time(new_check_time)
+        if logs:
+            # 1. We found logs. Extract the highest ID.
+            # Assuming DeliveryLog has an 'id' field (the primary key of the log table)
+            max_id = max(log.id for log in logs)
+            
+            # Update the ID. This effectively switches us to "ID Mode" for the next run.
+            self._last_log_id = max_id
+            self.logger.debug(f"Atualizado último Log ID para: {self._last_log_id}")
 
-        new_sale_ids: Set[float] = set()
+        elif poll_time is not None:
+            # 2. We found NO logs, but we are in "Time Mode" (Bootstrap).
+            # We must advance the time window, otherwise we will keep querying 
+            # the same old time range forever until a log appears.
+            self._last_check_time = poll_time
+            self.logger.debug(f"Início: Nenhum log encontrado. Avançando tempo para {poll_time}")
+            return # Nothing to process
+
+        if not logs:
+            return
+
+        ids_to_fetch: Set[float] = set()
         for log in logs:
             # We assume the log table has an 'Action' column 
-            is_insert = getattr(log, 'Action', '').upper() == FarmaxAction.INSERT.value()
-            sale_id = getattr(log, 'CD_VENDA', None)
+            is_insert = getattr(log, 'action', '').upper() == FarmaxAction.INSERT.value
+            sale_id = getattr(log, 'sale_id', None)
             
             if is_insert and sale_id and (sale_id not in self._tracked_sales_ids):
-                new_sale_ids.add(sale_id)
-                self._tracked_sales_ids.add(sale_id)
+                ids_to_fetch.add(sale_id)
 
-        if not new_sale_ids:
+        if not ids_to_fetch:
             return  # No new deliveries found
 
-        if len(new_sale_ids) > 1:
-            self.logger.info(f"Foram detectadas {len(new_sale_ids)} novas entregas. Buscando detalhes...")
+        if len(ids_to_fetch) > 1:
+            self.logger.info(f"Foram detectadas {len(ids_to_fetch)} novas entregas. Buscando detalhes...")
         else:
             self.logger.info(f"Foi detectada uma nova entrega. Buscando detalhes...")
         
@@ -240,7 +276,7 @@ class FarmaxStrategy(IConnectableStrategy):
         # to normalize and start tracking.
         worker = FarmaxWorker.for_fetch_deliveries_by_id(
             self._farmax, 
-            cd_vendas=tuple(new_sale_ids)
+            cd_vendas=tuple(ids_to_fetch)
         )
         worker.signals.success.connect(self._handle_new_delivery_details)
         worker.signals.error.connect(self._handle_poll_error)
@@ -254,7 +290,7 @@ class FarmaxStrategy(IConnectableStrategy):
         the tracking set.
         """
         for delivery in deliveries:
-            sale_id = delivery.cd_venda
+            sale_id = delivery.sale_id
             
             # Double-check we haven't *just* added it
             if sale_id not in self._tracked_sales_ids:
@@ -282,7 +318,7 @@ class FarmaxStrategy(IConnectableStrategy):
         a signal for any that have changed.
         """
         for sale in sales:
-            sale_id = sale.cd_venda
+            sale_id = sale.id
             new_status = sale.status
             
             # Check if we are still tracking this ID
@@ -319,16 +355,12 @@ class FarmaxStrategy(IConnectableStrategy):
         """
         Converts a Farmax-specific model to the generic `Order` model.
         """
-        # Based on the FarmaxDelivery fields available from the
-        # repository query (CD_VENDA, NOME, BAIRRO, etc.)
-        
-        # We must create a valid `Order` object.
-        # This is a guess at the `Order` model's structure.
         return Order(
-            customer_name=delivery.nome,
+            customerName=delivery.customer_name,
+            customerContact=getattr(delivery, "customer_contact", None),
             address=delivery.address,
-            neighborhood=delivery.bairro,
-            created_at=delivery.created_at,
-            reference=delivery.reference
+            neighborhood=getattr(delivery, "neighborhood", None),
+            createdAt=delivery.created_at,
+            reference=getattr(delivery, "reference", None)
             # ... map other fields as required by the Order model
         )

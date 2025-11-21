@@ -135,6 +135,20 @@ class FarmaxWorker(QRunnable):
             "fetch_recent_changes", 
             last_check_time=last_check_time
         )
+    
+    @classmethod
+    def for_fetch_recent_changes_by_id(
+        cls, 
+        repository: FarmaxRepository, 
+        last_id: int
+    ) -> 'FarmaxWorker':
+        """Creates a worker to fetch delivery log changes, based on latest fetched ID."""
+        # We pass arguments as kwargs for clarity and safety
+        return cls(
+            repository, 
+            "fetch_recent_changes_by_id", 
+            last_id=last_id
+        )
 
     @classmethod
     def for_fetch_deliveries_by_id(

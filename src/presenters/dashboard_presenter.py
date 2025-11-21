@@ -7,20 +7,22 @@ from models.velide_delivery_models import Order
 from services.auth_service import AuthService
 from services.deliveries_service import DeliveriesService
 from states.main_state_machine import MainStateMachine
+from visual.main_view import MainView
 from visual.screens.dashboard_screen import DashboardScreen
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from models.app_context_model import Services
 
 class DashboardPresenter(QObject):
-    def __init__(self, view: DashboardScreen, services: 'Services', state_machine: MainStateMachine):
+    def __init__(self, view: MainView, services: 'Services', state_machine: MainStateMachine):
         super().__init__()
         self.logger = logging.getLogger(__name__)
-        self._view = view
+        self._dashboard_view = view.dashboard_screen
         self._services = services
-        self._state_machine = state_machine
+        self._machine = state_machine
 
-        self._state_machine.logged_in_state.entered.connect(self.on_authenticate)
+        self._machine.logged_in_state.entered.connect(self.on_authenticate)
+        self._machine.logged_in_state.dashboard_state.entered.connect(self.start)
 
         self._connect_signals()
 
@@ -29,7 +31,7 @@ class DashboardPresenter(QObject):
         self._services.deliveries.start_listening()
         
     def on_authenticate(self):
-        access_token = self._state_machine.logged_in_state.property("access_token")
+        access_token = self._machine.logged_in_state.property("access_token")
         self._services.deliveries.set_access_token(access_token)
 
     def _connect_signals(self):
@@ -38,12 +40,12 @@ class DashboardPresenter(QObject):
         self._services.deliveries.delivery_update.connect(self._on_delivery_status_update)
 
     def _on_log_received(self, created_at, level, message):
-        self._view.log_table.add_row(created_at, level, message)
+        self._dashboard_view.log_table.add_row(created_at, level, message)
 
     def _on_delivery_acknowledged(self, order_id: str, order: Order):
         # Assuming you extract a displayable address from the data
         try:
-            model: DeliveryTableModel = self._view.deliveries_table.model()
+            model: DeliveryTableModel = self._dashboard_view.deliveries_table.model()
             model.add_delivery_acknowledge(order_id, order)
         except ValidationError as e:
             self.logger.exception("Ocorreu um erro ao converter dados da entrega para serem adicionados a tabela! " \
@@ -59,7 +61,7 @@ class DashboardPresenter(QObject):
             self.logger.error("Entrega não encontrada! Não foi possível atualizar o seu status.")
             return
         
-        self._view.deliveries_table.update_delivery(order_id, order, status)
+        self._dashboard_view.deliveries_table.update_delivery(order_id, order, status)
 
     def _transform(self, order_id: str, status: DeliveryRowStatus, order: Order) -> DeliveryRowModel:
         return DeliveryRowModel(

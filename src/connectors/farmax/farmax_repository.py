@@ -96,7 +96,8 @@ class FarmaxRepository:
         with self._engine.connect() as conn:
             result = conn.execute(query, params)
             rows = result.fetchall()
-            return [FarmaxSale.model_validate(row) for row in rows]
+            row_dicts = [dict(row._mapping) for row in rows]
+            return [FarmaxSale.model_validate(row_dict) for row_dict in row_dicts]
 
     def fetch_deliveries_by_id(self, cd_vendas: Tuple[float]) -> List[FarmaxDelivery]:
         """
@@ -115,9 +116,11 @@ class FarmaxRepository:
                 E.NOME,
                 E.HORA_SAIDA,
                 E.BAIRRO,
+                E.DATA,
                 V_Details.HORA,
                 V_Details.TEMPENDERECO,
-                V_Details.TEMPREFERENCIA
+                V_Details.TEMPREFERENCIA,
+                C.FONE
             FROM
                 ENTREGAS E
             LEFT JOIN (
@@ -127,6 +130,8 @@ class FarmaxRepository:
                     V1.HORA,
                     V1.TEMPENDERECO,
                     V1.TEMPREFERENCIA
+                    -- Note: If CD_CLIENTE is on VENDAS instead of ENTREGAS,
+                    -- you would add V1.CD_CLIENTE here and join C to V_Details later.
                 FROM
                     VENDAS V1
                 JOIN (
@@ -153,6 +158,10 @@ class FarmaxRepository:
                 ) V3
                     ON V1.RDB$DB_KEY = V3.unique_row_key
             ) AS V_Details ON E.CD_VENDA = V_Details.CD_VENDA
+            
+            -- vvv 2. ADDED THIS JOIN vvv
+            LEFT JOIN CLIENTES C ON E.CD_CLIENTE = C.CD_CLIENTE
+            
             WHERE
                 E.STATUS = 'S' AND E.CD_VENDA IN ({placeholders}) -- Filter main query
             ORDER BY
@@ -162,11 +171,12 @@ class FarmaxRepository:
         with self._engine.connect() as conn:
             result = conn.execute(text(query_str), params)
             rows = result.fetchall()
+            row_dicts = [dict(row._mapping) for row in rows]
             
             # Directly convert the complete rows to Pydantic models
-            return [FarmaxDelivery.model_validate(row) for row in rows]
+            return [FarmaxDelivery.model_validate(row_dict) for row_dict in row_dicts]
 
-    def fetch_recent_changes(self, last_check_time: datetime) -> List[DeliveryLog]: # <-- New return type
+    def fetch_recent_changes(self, last_check_time: datetime) -> List[DeliveryLog]:
         """
         Fetches all delivery log changes since the last check time.
         """
@@ -178,7 +188,23 @@ class FarmaxRepository:
         with self._engine.connect() as conn:
             result = conn.execute(query, {"last_check": last_check_time})
             rows = result.fetchall()
-            return [DeliveryLog.model_validate(row) for row in rows]
+            row_dicts = [dict(row._mapping) for row in rows]
+            return [DeliveryLog.model_validate(row_dict) for row_dict in row_dicts]
+        
+    def fetch_recent_changes_by_id(self, last_id: int) -> List[DeliveryLog]:
+        """
+        Fetches all delivery log changes since the last check time.
+        """
+        query = text(
+            f"SELECT * FROM {self.LOG_TABLE_NAME} "
+            f"WHERE ID > :last_id"
+        )
+        
+        with self._engine.connect() as conn:
+            result = conn.execute(query, {"last_id": last_id})
+            rows = result.fetchall()
+            row_dicts = [dict(row._mapping) for row in rows]
+            return [DeliveryLog.model_validate(row_dict) for row_dict in row_dicts]
 
     def fetch_deliverymen(self) -> List[FarmaxDeliveryman]:
         """
@@ -198,8 +224,8 @@ class FarmaxRepository:
             for row in rows:
                 # Manually create a dictionary.
                 data_dict = {
-                    'CD_VENDEDOR': row[0],
-                    'NOME': row[1]
+                    'cd_vendedor': row[0],
+                    'nome': row[1]
                 }
                 deliverymen.append(FarmaxDeliveryman.model_validate(data_dict))
             return deliverymen

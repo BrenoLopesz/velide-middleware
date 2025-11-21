@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List, TypeVar
+from typing import List, Optional, TypeVar
 import httpx
 
 from models.velide_delivery_models import (
@@ -75,7 +75,7 @@ class Velide:
         self._access_token = access_token
         self._api_config = api_config
         self._target_system = target_system
-        self._client: httpx.AsyncClient | None = None
+        self._client: Optional[httpx.AsyncClient] = None
 
     async def __aenter__(self):
         """Called when entering the 'async with' block."""
@@ -160,7 +160,7 @@ class Velide:
         metadata = MetadataInput(
             integrationName=self._target_system.value,
             customerName=order.customer_name,
-            customerContact=order.customer_contact
+            customerContact=getattr(order, "customer_contact", None)
         )
         
         # Build variables dictionary with required fields
@@ -193,9 +193,7 @@ class Velide:
         Returns:
             int: Offset in milliseconds.
         """
-        # Get the current time as a timezone-aware object in UTC.
-        # This is crucial for correctly comparing with the UTC-aware created_at_time.
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now()
         
         # Calculate the difference. This works correctly because both
         # datetime objects are timezone-aware.
