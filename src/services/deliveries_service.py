@@ -79,10 +79,10 @@ class DeliveriesService(QObject):
         order_id, order = self._delivery_queue.popleft()
         worker = VelideWorker.for_add_delivery(self._velide_api, order)
 
-        worker.delivery_added.connect(
+        worker.signals.delivery_added.connect(
             lambda resp, oid=order_id: self._on_delivery_success(oid, resp)
         )
-        worker.error.connect(
+        worker.signals.error.connect(
             lambda err, oid=order_id: self._on_delivery_failure(oid, err)
         )
         self._thread_pool.start(worker)
