@@ -193,7 +193,7 @@ class Velide:
         Returns:
             int: Offset in milliseconds.
         """
-        now_utc = datetime.now()
+        now_utc = datetime.now(timezone.utc)
         
         # Calculate the difference. This works correctly because both
         # datetime objects are timezone-aware.
