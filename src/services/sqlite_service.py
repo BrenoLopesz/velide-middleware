@@ -38,6 +38,26 @@ class SQLiteService(QObject):
     
     # Emits a simplified error message (str) if any worker fails
     error_occurred = pyqtSignal(str)
+
+    # --- Delivery Service-Level Signals ---
+    
+    # Emits True/False on completion of adding a delivery
+    add_delivery_result = pyqtSignal(bool)
+
+    # Emits the number of rows successfully inserted (int)
+    add_many_deliveries_result = pyqtSignal(int)
+
+    # Emits True/False on completion of status update
+    update_status_result = pyqtSignal(bool)
+
+    # Emits a tuple (internal_id, DeliveryStatus) or None
+    delivery_by_external_found = pyqtSignal(object)
+
+    # Emits a tuple (external_id, DeliveryStatus) or None
+    delivery_by_internal_found = pyqtSignal(object)
+
+    # Emits a list of tuples [(ext_id, int_id, status), ...]
+    all_deliveries_found = pyqtSignal(list)
     
 
     def __init__(self, db_path: str, parent: Optional[QObject] = None):
@@ -140,4 +160,73 @@ class SQLiteService(QObject):
         self._create_and_run_worker(
             SQLiteWorker.for_get_all_mappings,
             result_signal=self.all_mappings_found
+        )
+
+    # -----------------------------------------------------------------
+    # DeliveryMapping Requests
+    # -----------------------------------------------------------------
+
+    @pyqtSlot(str, str, object) # 'object' allows passing the Enum
+    def request_add_delivery_mapping(self, external_id: str, internal_id: str, status):
+        """Asynchronously adds a new delivery mapping."""
+        self.logger.debug(f"Solicitando adicionar entrega: {external_id} -> {internal_id} ({status})")
+        self._create_and_run_worker(
+            SQLiteWorker.for_add_delivery_mapping,
+            external_id,
+            internal_id,
+            status,
+            result_signal=self.add_delivery_result
+        )
+
+    @pyqtSlot(list)
+    def request_add_many_delivery_mappings(self, mappings: List[Tuple[str, str, object]]):
+        """
+        Asynchronously adds multiple delivery mappings.
+        Expected format: [(ext_id, int_id, DeliveryStatus), ...]
+        """
+        self.logger.debug(f"Solicitando adicionar {len(mappings)} mapeamentos de entrega.")
+        self._create_and_run_worker(
+            SQLiteWorker.for_add_many_delivery_mappings,
+            mappings,
+            result_signal=self.add_many_deliveries_result
+        )
+
+    @pyqtSlot(str, object)
+    def request_update_delivery_status(self, external_id: str, new_status):
+        """Asynchronously updates the status of a delivery."""
+        self.logger.debug(f"Solicitando atualização de status para {external_id} -> {new_status}")
+        self._create_and_run_worker(
+            SQLiteWorker.for_update_delivery_status,
+            external_id,
+            new_status,
+            result_signal=self.update_status_result
+        )
+
+    @pyqtSlot(str)
+    def request_get_delivery_by_external(self, external_id: str):
+        """Asynchronously retrieves delivery info by external ID."""
+        self.logger.debug(f"Solicitando busca de entrega por external ID: {external_id}")
+        self._create_and_run_worker(
+            SQLiteWorker.for_get_delivery_by_external,
+            external_id,
+            result_signal=self.delivery_by_external_found
+        )
+
+    @pyqtSlot(str)
+    def request_get_delivery_by_internal(self, internal_id: str):
+        """Asynchronously retrieves delivery info by internal ID."""
+        self.logger.debug(f"Solicitando busca de entrega por internal ID: {internal_id}")
+        self._create_and_run_worker(
+            SQLiteWorker.for_get_delivery_by_internal,
+            internal_id,
+            result_signal=self.delivery_by_internal_found
+        )
+
+    @pyqtSlot()
+    def request_get_all_deliveries(self):
+        """Asynchronously retrieves all delivery mappings."""
+        self.logger.debug("Solicitando todas as entregas.")
+        self._create_and_run_worker(
+            SQLiteWorker.for_get_all_deliveries,
+            result_signal=self.all_deliveries_found
         )

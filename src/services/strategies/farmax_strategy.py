@@ -3,7 +3,7 @@ from datetime import date, datetime
 from typing import List, Optional, Set, Dict, Tuple
 
 from PyQt5.QtCore import pyqtSignal, QThreadPool, QTimer
-from api.sqlite_manager import SQLiteManager
+from api.sqlite_manager import DeliveryStatus, SQLiteManager
 from config import ApiConfig, FarmaxConfig
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_worker import FarmaxWorker
@@ -11,6 +11,7 @@ from connectors.farmax.farmax_worker import FarmaxWorker
 from models.farmax_models import FarmaxAction, FarmaxDelivery, DeliveryLog, FarmaxSale
 from models.velide_delivery_models import Order
 from services.strategies.connectable_strategy import IConnectableStrategy
+from services.tracking_persistence_service import TrackingPersistenceService
 
 class FarmaxStrategy(IConnectableStrategy):
     """
@@ -38,26 +39,21 @@ class FarmaxStrategy(IConnectableStrategy):
     def __init__(
             self, 
             farmax_config: FarmaxConfig, 
-            farmax_repository: FarmaxRepository 
+            farmax_repository: FarmaxRepository,
+            persistence_service: TrackingPersistenceService
         ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.config = farmax_config
         self._farmax = farmax_repository
         self._thread_pool = QThreadPool.globalInstance() 
+        self._persistence = persistence_service
 
         # --- Internal State ---
         self._last_check_time: Optional[datetime] = None
 
         # Track the last processed Log ID
         self._last_log_id: Optional[int] = None
-        
-        #: Set of sale IDs (float) currently being tracked for status.
-        self._tracked_sales_ids: Set[float] = set()
-        
-        #: Cache of the last known status for each tracked sale ID.
-        #: {sale_id: "status"}
-        self._tracked_sales_statuses: Dict[float, str] = {}
 
         # --- Timers ---
         
@@ -68,6 +64,9 @@ class FarmaxStrategy(IConnectableStrategy):
         # Timer for polling the VENDAS table for status changes
         self._status_timer = QTimer(self)
         self._status_timer.timeout.connect(self._poll_for_status_updates)
+
+        # Connect to hydration signal
+        self._persistence.hydrated.connect(self._on_persistence_ready)
 
     # --- Public Interface Implementation ---
 
@@ -82,22 +81,23 @@ class FarmaxStrategy(IConnectableStrategy):
             self.logger.warning("As entregas do Farmax já estão sendo rastreadas.")
             return
 
-        self.logger.info("Rastreamento de entregas do Farmax iniciado.")
-        # Instead of datetime.now(), we start from midnight today.
-        # This ensures the first poll catches everything from the current day.
+        self.logger.info("Iniciando rastreamento de entregas do Farmax...")
+        self._persistence.initialize()
+
+    def _on_persistence_ready(self):
+        """Called once SQLite data is loaded into memory."""
         today = date.today()
         midnight = datetime.combine(today, datetime.min.time())
-        
         self._last_check_time = midnight
-    
-        # Reset ID to None to force the initial time-based lookup
         self._last_log_id = None
 
-        # Start the timers
+        # Start Timers
         self._poll_timer.start(self.NEW_DELIVERY_POLL_INTERVAL_MS)
         self._status_timer.start(self.STATUS_POLL_INTERVAL_MS)
+
+        self.logger.info("Rastreamento de entregas iniciado.")
         
-        # Immediately run the first poll for new deliveries
+        # Immediate Poll
         self._poll_for_new_deliveries()
 
     def stop_listening(self):
@@ -148,8 +148,25 @@ class FarmaxStrategy(IConnectableStrategy):
         self._tracked_sales_ids.discard(sale_id)
         self._tracked_sales_statuses.pop(sale_id, None)
 
-    def on_delivery_added(self):
-        return 
+    def on_delivery_added(self, internal_id: float, external_id: str):
+        """
+        [Callback] Called by DeliveriesService when Velide successfully accepts the order.
+        """
+        self.logger.debug(f"Integração confirmada: Farmax {internal_id} <-> Velide {external_id}")
+        
+        # This commits the relationship to SQLite and removes the "In-Flight" reservation
+        self._persistence.register_new_delivery(
+            internal_id=internal_id,
+            external_id=external_id,
+            status=DeliveryStatus.PENDING # Initial status in Velide
+        )
+
+    def on_delivery_failed(self, internal_id: float):
+        """
+        [Callback] Called when Velide rejects the order.
+        """
+        self.logger.warning(f"Falha na integração do ID {internal_id}. Ignorando entrega do Farmax.")
+        self._persistence.release_reservation(internal_id)
 
     # --- Polling Slots (Connected to Timers) ---
 
@@ -165,7 +182,7 @@ class FarmaxStrategy(IConnectableStrategy):
             
             worker = FarmaxWorker.for_fetch_recent_changes_by_id(
                 self._farmax, 
-                last_log_id=self._last_log_id
+                last_id=self._last_log_id
             )
             # We don't need to pass 'current_check_time' anymore for ID logic
             worker.signals.success.connect(self._handle_new_delivery_logs)
@@ -173,19 +190,9 @@ class FarmaxStrategy(IConnectableStrategy):
             self._thread_pool.start(worker)
             return
 
-        if self._last_check_time is None:
-            self.logger.warning(
-                "Solicitado a verificação de entregas adicionadas, " \
-                "mas não foi possível identificar quando foi a última " \
-                "verificação. Ignorando..."
-            )
-            return
-
         # Store the time *before* the query.
         # This becomes the new `_last_check_time` *after* the query succeeds.
-        # TODO: Improve this: An order might be placed during this and the 
-        #       query execution time, which would be missed. You might need
-        #       to check by log ids instead.
+        # Note: It could cause a race condition, but it won't be used anymore.
         current_check_time = datetime.now()
         
         self.logger.debug("Buscando novas entregas (inicial)...")
@@ -206,14 +213,14 @@ class FarmaxStrategy(IConnectableStrategy):
         
         Creates a worker to fetch current statuses for all tracked sales.
         """
-        if not self._tracked_sales_ids:
-            # No need to poll if we aren't tracking anything
+        tracked_ids = self._persistence.get_tracked_ids()
+        if not tracked_ids:
             return
 
-        self.logger.debug(f"Buscando atualizações em {len(self._tracked_sales_ids)} entrega(s)...")
+        self.logger.debug(f"Buscando atualizações em {len(tracked_ids)} entrega(s)...")
         
         # Create a snapshot of the IDs to track
-        ids_tuple = tuple(self._tracked_sales_ids)
+        ids_tuple = tuple(tracked_ids)
 
         worker = FarmaxWorker.for_fetch_sales_statuses_by_id(
             self._farmax, 
@@ -261,7 +268,7 @@ class FarmaxStrategy(IConnectableStrategy):
             is_insert = getattr(log, 'action', '').upper() == FarmaxAction.INSERT.value
             sale_id = getattr(log, 'sale_id', None)
             
-            if is_insert and sale_id and (sale_id not in self._tracked_sales_ids):
+            if is_insert and sale_id and not self._persistence.is_tracked(sale_id):
                 ids_to_fetch.add(sale_id)
 
         if not ids_to_fetch:
@@ -291,24 +298,34 @@ class FarmaxStrategy(IConnectableStrategy):
         """
         for delivery in deliveries:
             sale_id = delivery.sale_id
+
+            # 1. Try to Reserve the ID immediately
+            # If returns False, it means we are already handling it (or it's done)
+            if not self._persistence.reserve_id(sale_id):
+                continue
             
-            # Double-check we haven't *just* added it
-            if sale_id not in self._tracked_sales_ids:
-                self.logger.info(f"Recebido nova entrega com o ID: {sale_id}")
-                
-                # 1. Normalize the FarmaxDelivery -> Order
-                normalized_order = self._normalize_delivery(delivery)
-                
-                # 2. Emit the signal for the Presenter/UI
-                self.order_normalized.emit(normalized_order)
-                
-                # 3. Add to tracking
-                self._tracked_sales_ids.add(sale_id)
-                
-                # 4. Store its initial status (from the query, E.STATUS = 'S')
-                # We assume 'S' is the initial state from the query.
-                initial_status = 'S' 
-                self._tracked_sales_statuses[sale_id] = initial_status
+            self.logger.info(f"Recebido nova entrega com o ID: {sale_id}")
+            
+            # 2. Normalize the FarmaxDelivery -> Order
+            normalized_order = self._normalize_delivery(delivery)
+            
+            # 3. Emit to UI/Presenter
+            # The Presenter now has the responsibility to callback 'on_integration_success'
+            # or 'on_integration_failure'
+            self.order_normalized.emit(normalized_order)
+
+    def on_integration_success(self, internal_id: float, external_id: str):
+        """Called by Presenter when Velide API returns 201 Created."""
+        self._persistence.register_new_delivery(
+            internal_id=internal_id,
+            external_id=external_id,
+            status=DeliveryStatus.PENDING
+        )
+
+    def on_integration_failure(self, internal_id: float):
+        """Called by Presenter when Velide API fails."""
+        # Release the ID so we can try again in the next poll cycle (30s later)
+        self._persistence.release_reservation(internal_id)
 
     def _handle_status_updates(self, sales: List[FarmaxSale]):
         """
@@ -319,25 +336,23 @@ class FarmaxStrategy(IConnectableStrategy):
         """
         for sale in sales:
             sale_id = sale.id
-            new_status = sale.status
+            new_farmax_status = sale.status
             
-            # Check if we are still tracking this ID
-            if sale_id not in self._tracked_sales_ids:
-                continue
+            # TODO: This function should be used only to detect if the delivery was cancelled.
 
-            # Get the last known status, default to None if not seen
-            old_status = self._tracked_sales_statuses.get(sale_id)
+            # Map Farmax Status Char to DeliveryStatus Enum
+            # new_enum_status = self._map_sale_status(new_farmax_status)
             
-            if old_status != new_status:
-                self.logger.debug(
-                    f"Mudança de status detectado para {sale_id}: {old_status} -> {new_status}"
-                )
+            # current_enum_status = self._persistence.get_current_status(sale_id)
+            
+            # if current_enum_status != new_enum_status:
+            #     self.logger.info(f"Mudança de status: {current_enum_status} -> {new_enum_status}")
                 
-                # Update the cache
-                self._tracked_sales_statuses[sale_id] = new_status
+            #     # Update Persistence
+            #     self._persistence.update_status(sale_id, new_enum_status)
                 
-                # Emit the change signal
-                self.order_status_changed.emit(sale_id, new_status)
+            #     # Emit Signal
+            #     self.order_status_changed.emit(sale_id, new_farmax_status)
 
     def _handle_poll_error(self, error_msg: str):
         """[SLOT] Logs errors from the new delivery poll."""
@@ -351,11 +366,17 @@ class FarmaxStrategy(IConnectableStrategy):
         
     # --- Helper Methods ---
 
+    def _map_sale_status(self, farmax_char: str) -> DeliveryStatus:
+        """Helper to convert Farmax sale status to Enum."""
+        if farmax_char.upper() == 'V':
+            return DeliveryStatus.PENDING
+        return DeliveryStatus.CANCELLED
+
     def _normalize_delivery(self, delivery: FarmaxDelivery) -> Order:
         """
         Converts a Farmax-specific model to the generic `Order` model.
         """
-        return Order(
+        order = Order(
             customerName=delivery.customer_name,
             customerContact=getattr(delivery, "customer_contact", None),
             address=delivery.address,
@@ -364,3 +385,8 @@ class FarmaxStrategy(IConnectableStrategy):
             reference=getattr(delivery, "reference", None)
             # ... map other fields as required by the Order model
         )
+
+        # CRITICAL: Attach the Farmax ID to the object so it travels with the request
+        order.internal_id = delivery.sale_id
+
+        return order

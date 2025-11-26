@@ -38,6 +38,11 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):
         pass
 
     @abstractmethod
-    def on_delivery_added(self):
+    def on_delivery_added(self, internal_id: Optional[float], external_id: Optional[str]):
+        """Optional callback function to receive deliveries added notifications."""
+        pass
+
+    @abstractmethod
+    def on_delivery_failed(self, internal_id: Optional[float]):
         """Optional callback function to receive deliveries added notifications."""
         pass

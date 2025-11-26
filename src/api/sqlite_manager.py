@@ -1,7 +1,16 @@
+from functools import wraps
 import sqlite3
 import logging
 from typing import Optional, List, Tuple
 from enum import Enum
+
+def require_connection(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if not self.conn:
+            raise ConnectionError("Conexão fechada. Utilize o contexto 'with'.")
+        return func(self, *args, **kwargs)
+    return wrapper
 
 class DeliveryStatus(Enum):
     """
@@ -61,8 +70,17 @@ class SQLiteManager:
         """
         try:
             self.conn = sqlite3.connect(self.db_path)
-            # Enable foreign key support just in case (good practice)
+            # Enable WAL Mode
+            # This allows concurrent readers and writers.
+            self.conn.execute("PRAGMA journal_mode = WAL;")
+            
+            # Optimize Synchronization
+            # 'NORMAL' is safe for WAL and much faster than default 'FULL'.
+            self.conn.execute("PRAGMA synchronous = NORMAL;")
+            
+            # Foreign Keys
             self.conn.execute("PRAGMA foreign_keys = ON;")
+            
             self._create_tables()
             return self
         except sqlite3.Error as e:
@@ -91,15 +109,13 @@ class SQLiteManager:
                 self.conn.close()
                 self.conn = None
 
+    @require_connection
     def _create_tables(self):
         """
         Internal method to create all required tables.
         
         Uses 'CREATE TABLE IF NOT EXISTS' to be idempotent (safe to run multiple times).
-        """
-        if not self.conn:
-            raise ConnectionError("Conexão com banco de dados não está aberta.")
-            
+        """ 
         create_deliverymen_table_query = """
         CREATE TABLE IF NOT EXISTS DeliverymenMapping (
             velide_id TEXT PRIMARY KEY NOT NULL,
@@ -143,6 +159,7 @@ class SQLiteManager:
     # DeliverymenMapping Methods
     # -----------------------------------------------------------------
 
+    @require_connection
     def add_mapping(self, velide_id: str, local_id: str) -> bool:
         """
         Adds a new mapping between a velide_id and a local_id.
@@ -155,9 +172,6 @@ class SQLiteManager:
             bool: True if the mapping was added successfully, False if a
                   constraint (PRIMARY KEY or UNIQUE) was violated.
         """
-        if not self.conn:
-            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
-        
         insert_query = "INSERT INTO DeliverymenMapping (velide_id, local_id) VALUES (?, ?)"
         try:
             self.conn.execute(insert_query, (velide_id, local_id))
@@ -172,6 +186,7 @@ class SQLiteManager:
             self.logger.exception("Ocorreu um erro inesperado ao adicionar um mapeamento.")
             return False
         
+    @require_connection
     def add_many_mappings(self, mappings: List[Tuple[str, str]]) -> int:
         """
         Adds multiple mappings in a single transaction, ignoring duplicates.
@@ -185,9 +200,6 @@ class SQLiteManager:
         Returns:
             int: The number of rows actually inserted.
         """
-        if not self.conn:
-            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
-        
         if not mappings:
             self.logger.warning("Nenhuma mapeamento fornecido para 'add_many_mappings'.")
             return 0
@@ -205,6 +217,7 @@ class SQLiteManager:
             # The __exit__ method will handle the rollback.
             raise # Re-raise to trigger rollback in __exit__
 
+    @require_connection
     def get_local_id(self, velide_id: str) -> Optional[str]:
         """
         Retrieves the local_id associated with a given velide_id.
@@ -214,10 +227,7 @@ class SQLiteManager:
 
         Returns:
             Optional[str]: The corresponding local_id if found, else None.
-        """
-        if not self.conn:
-            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
-            
+        """ 
         query = "SELECT local_id FROM DeliverymenMapping WHERE velide_id = ?"
         try:
             cursor = self.conn.execute(query, (velide_id,))
@@ -227,6 +237,7 @@ class SQLiteManager:
             self.logger.exception(f"Erro ao buscar `local_id` para {velide_id}.")
             return None
 
+    @require_connection
     def get_velide_id(self, local_id: str) -> Optional[str]:
         """
         Retrieves the velide_id associated with a given local_id.
@@ -237,9 +248,6 @@ class SQLiteManager:
         Returns:
             Optional[str]: The corresponding velide_id if found, else None.
         """
-        if not self.conn:
-            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
-                    
         query = "SELECT velide_id FROM DeliverymenMapping WHERE local_id = ?"
         try:
             cursor = self.conn.execute(query, (local_id,))
@@ -249,6 +257,7 @@ class SQLiteManager:
             self.logger.error(f"Error ao buscar `velide_id` para {local_id}: {e}")
             return None
 
+    @require_connection
     def delete_mapping_by_velide_id(self, velide_id: str) -> bool:
         """
         Deletes a mapping from the table based on the velide_id.
@@ -259,9 +268,6 @@ class SQLiteManager:
         Returns:
             bool: True if a row was deleted, False otherwise.
         """
-        if not self.conn:
-            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
-            
         query = "DELETE FROM DeliverymenMapping WHERE velide_id = ?"
         try:
             cursor = self.conn.execute(query, (velide_id,))
@@ -275,6 +281,7 @@ class SQLiteManager:
             self.logger.exception(f"Erro ao deletar mapeamento de {velide_id}.")
             return False
 
+    @require_connection
     def get_all_mappings(self) -> List[Tuple[str, str]]:
         """
         Retrieves all mappings from the table.
@@ -282,9 +289,6 @@ class SQLiteManager:
         Returns:
             List[Tuple[str, str]]: A list of (velide_id, local_id) tuples.
         """
-        if not self.conn:
-            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
-        
         query = "SELECT velide_id, local_id FROM DeliverymenMapping"
         try:
             cursor = self.conn.execute(query)
@@ -297,6 +301,7 @@ class SQLiteManager:
     # DeliveryMapping Methods
     # -----------------------------------------------------------------
 
+    @require_connection
     def add_delivery_mapping(self, external_id: str, internal_id: str, status: DeliveryStatus) -> bool:
         """
         Adds a new delivery mapping.
@@ -309,9 +314,6 @@ class SQLiteManager:
         Returns:
             bool: True if added successfully, False on a constraint violation.
         """
-        if not self.conn:
-            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
-        
         query = "INSERT INTO DeliveryMapping (external_delivery_id, internal_delivery_id, status) VALUES (?, ?, ?)"
         try:
             self.conn.execute(query, (external_id, internal_id, status.value))
@@ -324,6 +326,7 @@ class SQLiteManager:
             self.logger.exception("Ocorreu um erro inesperado ao adicionar um mapeamento de entrega.")
             return False
 
+    @require_connection
     def add_many_delivery_mappings(self, mappings: List[Tuple[str, str, DeliveryStatus]]) -> int:
         """
         Adds multiple delivery mappings, ignoring duplicates.
@@ -337,9 +340,6 @@ class SQLiteManager:
         Returns:
             int: The number of rows actually inserted.
         """
-        if not self.conn:
-            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
-        
         if not mappings:
             self.logger.warning("Nenhuma mapeamento de entrega fornecido para 'add_many_delivery_mappings'.")
             return 0
@@ -358,6 +358,7 @@ class SQLiteManager:
             self.logger.exception("Ocorreu um erro inesperado durante o 'add_many_delivery_mappings'.")
             raise # Re-raise to trigger rollback in __exit__
 
+    @require_connection
     def update_delivery_status(self, external_id: str, new_status: DeliveryStatus) -> bool:
         """
         Updates the status of an existing delivery mapping.
@@ -369,9 +370,6 @@ class SQLiteManager:
         Returns:
             bool: True if a row was updated, False if no matching row was found.
         """
-        if not self.conn:
-            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
-        
         query = "UPDATE DeliveryMapping SET status = ? WHERE external_delivery_id = ?"
         try:
             cursor = self.conn.execute(query, (new_status.value, external_id))
@@ -385,6 +383,7 @@ class SQLiteManager:
             self.logger.exception(f"Erro ao atualizar status da entrega {external_id}.")
             return False
 
+    @require_connection
     def get_delivery_by_external_id(self, external_id: str) -> Optional[Tuple[str, DeliveryStatus]]:
         """
         Retrieves a delivery's internal ID and status using its external ID.
@@ -395,10 +394,7 @@ class SQLiteManager:
         Returns:
             Optional[Tuple[str, DeliveryStatus]]: A tuple of
             (internal_delivery_id, status) if found, else None.
-        """
-        if not self.conn:
-            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
-            
+        """ 
         query = "SELECT internal_delivery_id, status FROM DeliveryMapping WHERE external_delivery_id = ?"
         try:
             cursor = self.conn.execute(query, (external_id,))
@@ -414,6 +410,7 @@ class SQLiteManager:
             self.logger.error(f"Status inválido no DB para entrega {external_id}: {e}")
             return None
 
+    @require_connection
     def get_delivery_by_internal_id(self, internal_id: str) -> Optional[Tuple[str, DeliveryStatus]]:
         """
         Retrieves a delivery's external ID and status using its internal ID.
@@ -424,10 +421,7 @@ class SQLiteManager:
         Returns:
             Optional[Tuple[str, DeliveryStatus]]: A tuple of
             (external_delivery_id, status) if found, else None.
-        """
-        if not self.conn:
-            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
-            
+        """ 
         query = "SELECT external_delivery_id, status FROM DeliveryMapping WHERE internal_delivery_id = ?"
         try:
             cursor = self.conn.execute(query, (internal_id,))
@@ -443,6 +437,7 @@ class SQLiteManager:
             self.logger.error(f"Status inválido no DB para entrega {internal_id}: {e}")
             return None
 
+    @require_connection
     def get_all_deliveries(self) -> List[Tuple[str, str, DeliveryStatus]]:
         """
         Retrieves all delivery mappings from the table.
@@ -451,9 +446,6 @@ class SQLiteManager:
             List[Tuple[str, str, DeliveryStatus]]: A list of
             (external_delivery_id, internal_delivery_id, status) tuples.
         """
-        if not self.conn:
-            raise ConnectionError("Conexão com banco de dados não está aberta. Utilize o 'with'.")
-        
         query = "SELECT external_delivery_id, internal_delivery_id, status FROM DeliveryMapping"
         try:
             cursor = self.conn.execute(query)

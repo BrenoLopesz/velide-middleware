@@ -23,6 +23,7 @@ from services.strategies.cds_strategy import CdsStrategy
 from services.auth_service import AuthService
 from presenters.app_presenter import AppPresenter
 from services.strategies.farmax_strategy import FarmaxStrategy
+from services.tracking_persistence_service import TrackingPersistenceService
 from states.main_state_machine import MainStateMachine
 from utils.sql_utils import get_farmax_engine_string
 from visual.main_view import MainView
@@ -107,7 +108,7 @@ def configure_logging(view: MainView):
     log_handler.new_log.connect(view.dashboard_screen.log_table.add_row)
     setup_logging(log_handler)  # Assuming this configures the root logger
 
-def create_strategy(app_config: Settings):
+def create_strategy(app_config: Settings, tracking_persistence_service: TrackingPersistenceService):
     """Factory function to create the correct delivery strategy."""
     if app_config.target_system == TargetSystem.CDS:
         return CdsStrategy(app_config.api, app_config.folder_to_watch)
@@ -125,7 +126,8 @@ def create_strategy(app_config: Settings):
         return FarmaxStrategy(
             farmax_config=app_config.farmax,
             # farmax_setup=farmax_setup, 
-            farmax_repository=farmax_repository
+            farmax_repository=farmax_repository,
+            persistence_service=tracking_persistence_service
         )
     
     # Handles missing strategy
@@ -136,8 +138,9 @@ def build_services(app_config: Settings) -> Services:
     auth_service = AuthService(app_config.auth)
     deliveries_service = DeliveriesService(app_config.api, app_config.target_system)
     sqlite_service = SQLiteService(os.path.join(BUNDLE_DIR, app_config.sqlite_path))
+    tracking_persistance_service = TrackingPersistenceService(sqlite_service)
     
-    strategy = create_strategy(app_config)
+    strategy = create_strategy(app_config, tracking_persistance_service)
     deliveries_service.set_strategy(strategy)
     
     deliverymen_retriever_service = DeliverymenRetrieverService(app_config.api, app_config.target_system, strategy)

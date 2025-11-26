@@ -1,5 +1,6 @@
 # In a new file, e.g., src/services/delivery_service.py
 import logging
+from typing import Optional
 from PyQt5.QtCore import pyqtSignal, QThreadPool
 from pydantic import ValidationError
 from models.velide_delivery_models import Order
@@ -39,7 +40,10 @@ class CdsStrategy(IConnectableStrategy):
     def fetch_deliverymen(self, success, error):
         raise NotImplementedError
     
-    def on_delivery_added(self):
+    def on_delivery_added(self, internal_id: Optional[float], external_id: Optional[str]):
+        return # Just ignore it.
+    
+    def on_delivery_failed(self, internal_id: Optional[float]):
         return # Just ignore it.
 
     def _on_new_file_found(self, delivery_data: dict):

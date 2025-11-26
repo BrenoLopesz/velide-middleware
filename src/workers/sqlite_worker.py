@@ -4,6 +4,7 @@ from typing import List, Tuple
 
 from PyQt5.QtCore import QObject, QRunnable, pyqtSignal
 
+# Ensure this import matches your actual project structure
 from api.sqlite_manager import SQLiteManager
 
 class SQLiteWorkerSignals(QObject):
@@ -28,7 +29,7 @@ class SQLiteWorkerSignals(QObject):
 
 class SQLiteWorker(QRunnable):
     """
-    QRunnable worker for executing DeliverymenMappingDB operations in a thread pool.
+    QRunnable worker for executing SQLiteManager operations in a thread pool.
     
     This class uses classmethod factories to create instances configured
     for specific database operations.
@@ -42,7 +43,7 @@ class SQLiteWorker(QRunnable):
         Args:
             signals: The signal object to emit results/errors.
             db_path: Path to the SQLite database.
-            operation_name: The string name of the method to call on DeliverymenMappingDB.
+            operation_name: The string name of the method to call on SQLiteManager.
             *args: Arguments to pass to the method.
         """
         super().__init__()
@@ -52,7 +53,9 @@ class SQLiteWorker(QRunnable):
         self.args = args
         self.logger = logging.getLogger(__name__)
 
-    # --- Factory Methods (Creational Pattern) ---
+    # -----------------------------------------------------------------
+    # Factory Methods: Deliverymen Mapping
+    # -----------------------------------------------------------------
 
     @classmethod
     def for_add_mapping(
@@ -96,7 +99,56 @@ class SQLiteWorker(QRunnable):
         """Factory method to create a worker for 'get_all_mappings'."""
         return cls(signals, db_path, 'get_all_mappings')
 
-    # --- QRunnable Execution ---
+    # -----------------------------------------------------------------
+    # Factory Methods: Delivery Mapping (ADDED)
+    # -----------------------------------------------------------------
+
+    @classmethod
+    def for_add_delivery_mapping(
+        cls, signals: SQLiteWorkerSignals, db_path: str, external_id: str, internal_id: str, status
+    ) -> 'SQLiteWorker':
+        """Factory method to create a worker for 'add_delivery_mapping'."""
+        # We pass 'status' blindly. The Manager expects a DeliveryStatus enum or similar.
+        return cls(signals, db_path, 'add_delivery_mapping', external_id, internal_id, status)
+
+    @classmethod
+    def for_add_many_delivery_mappings(
+        cls, signals: SQLiteWorkerSignals, db_path: str, mappings: List[Tuple[str, str, object]]
+    ) -> 'SQLiteWorker':
+        """Factory method to create a worker for 'add_many_delivery_mappings'."""
+        return cls(signals, db_path, 'add_many_delivery_mappings', mappings)
+
+    @classmethod
+    def for_update_delivery_status(
+        cls, signals: SQLiteWorkerSignals, db_path: str, external_id: str, new_status
+    ) -> 'SQLiteWorker':
+        """Factory method to create a worker for 'update_delivery_status'."""
+        return cls(signals, db_path, 'update_delivery_status', external_id, new_status)
+
+    @classmethod
+    def for_get_delivery_by_external(
+        cls, signals: SQLiteWorkerSignals, db_path: str, external_id: str
+    ) -> 'SQLiteWorker':
+        """Factory method to create a worker for 'get_delivery_by_external_id'."""
+        return cls(signals, db_path, 'get_delivery_by_external_id', external_id)
+
+    @classmethod
+    def for_get_delivery_by_internal(
+        cls, signals: SQLiteWorkerSignals, db_path: str, internal_id: str
+    ) -> 'SQLiteWorker':
+        """Factory method to create a worker for 'get_delivery_by_internal_id'."""
+        return cls(signals, db_path, 'get_delivery_by_internal_id', internal_id)
+
+    @classmethod
+    def for_get_all_deliveries(
+        cls, signals: SQLiteWorkerSignals, db_path: str
+    ) -> 'SQLiteWorker':
+        """Factory method to create a worker for 'get_all_deliveries'."""
+        return cls(signals, db_path, 'get_all_deliveries')
+
+    # -----------------------------------------------------------------
+    # QRunnable Execution
+    # -----------------------------------------------------------------
 
     def run(self):
         """
@@ -110,6 +162,9 @@ class SQLiteWorker(QRunnable):
                 
                 # Get the actual method to call from the db instance
                 # using its string name (e.g., 'add_mapping')
+                if not hasattr(db, self.operation_name):
+                    raise AttributeError(f"SQLiteManager does not have method '{self.operation_name}'")
+
                 method_to_call = getattr(db, self.operation_name)
                 
                 # Call the method with the stored arguments

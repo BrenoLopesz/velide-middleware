@@ -51,7 +51,44 @@ class DeliveriesService(QObject):
         self._active_strategy.start_listening()
 
     def _on_delivery_success(self, order_id: str, api_response: dict):
+        """
+        Handles success from Velide API.
+        
+        Args:
+            order_id: The temporary UUID used by the UI/Service.
+            api_response: The raw JSON dictionary returned by the GraphQL mutation.
+        """
+        # 1. Update UI Status immediately
         self.delivery_update.emit(order_id, DeliveryRowStatus.ADDED)
+        
+        # 2. Retrieve the original Order object to find the Internal ID
+        order_obj = self._active_deliveries.get(order_id)
+        
+        # 3. Extract External ID (Velide ID) from the GraphQL structure
+        # Structure based on your provided models:
+        # { "data": { "addDeliveryFromIntegration": { "id": "..." } } }
+        external_id = api_response.get("id")
+        if external_id is None:
+            self.logger.error(f"Formato de resposta da API inválido: {api_response}")
+            return
+
+        # 4. Perform the Handshake
+        if order_obj and self._active_strategy:
+            # Retrieve the hidden field we added in Step 1
+            internal_id = getattr(order_obj, 'internal_id', None)
+            
+            if internal_id is not None and external_id:
+                # SUCCESS: Link Farmax ID <-> Velide ID in persistence
+                # This fixes "Part 2" - the re-add loop on restart
+                if hasattr(self._active_strategy, 'on_delivery_added'):
+                    self._active_strategy.on_delivery_added(internal_id, external_id)
+            else:
+                self.logger.warning(
+                    f"Entrega enviada, mas IDs não puderam ser vinculados. "
+                    f"Internal: {internal_id}, External: {external_id}"
+                )
+
+        # 5. Cleanup memory
         self._active_deliveries.pop(order_id, None)
 
     def _on_delivery_failure(self, order_id: str, error_msg: str):
