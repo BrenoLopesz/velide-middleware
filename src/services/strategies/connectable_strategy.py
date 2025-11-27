@@ -15,7 +15,7 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):
     """
     # This signal emits the FINAL, NORMALIZED order model
     order_normalized = pyqtSignal(Order)
-    order_cancelled = pyqtSignal(float, object) # Internal ID, (optional) external ID
+    order_cancelled = pyqtSignal(str, object) # Internal ID, (optional) external ID
     # normalization_failed = pyqtSignal(dict, str) # raw_data, error_message
 
     @abstractmethod

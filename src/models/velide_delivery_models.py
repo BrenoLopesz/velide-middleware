@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 import httpx
 
@@ -49,11 +49,26 @@ class GraphQLVariables(BaseModel):
     reference: Optional[str] = None
 
 
+class AddDeliveryVariables(BaseModel):
+    """Variables specifically for adding a delivery"""
+    metadata: MetadataInput 
+    address: str = Field(..., min_length=1)
+    offset: int = Field(0, ge=0)
+    
+    address2: Optional[str] = None
+    neighbourhood: Optional[str] = None
+    reference: Optional[str] = None
+
+class DeleteDeliveryVariables(BaseModel):
+    """Variables specifically for deleting a delivery"""
+    # API expects 'deliveryId', but we want to use 'delivery_id' in Python
+    delivery_id: str = Field(..., alias="deliveryId", min_length=1)
+
 class GraphQLPayload(BaseModel):
     """Complete GraphQL request payload"""
     query: str = Field(..., min_length=1)
-    variables: Optional[GraphQLVariables] = None
-
+    # Update this line to accept the specific model OR a generic dict
+    variables: Optional[Union[AddDeliveryVariables, DeleteDeliveryVariables]] = None
 
 # Response Models
 class LocationProperties(BaseModel):
@@ -90,19 +105,21 @@ class GetDeliverymenData(BaseModel):
     """Data wrapper for deliverymen query"""
     deliverymen: List[DeliverymanResponse]
 
+class DeleteDeliveryData(BaseModel):
+    deleteDelivery: bool
+
 class GraphQLResponse(BaseModel):
     """Complete GraphQL response"""
-    data: Optional[Union[AddDeliveryData, GetDeliverymenData]] = None
+    # Add DeleteDeliveryData to the Union, or allow Dict[str, Any] as a fallback
+    data: Optional[Union[AddDeliveryData, GetDeliverymenData, DeleteDeliveryData, Dict[str, Any]]] = None
     errors: Optional[list] = None
     
     @field_validator('data')
     @classmethod
     def validate_data_present(cls, v, info):
-        # This validator remains correct
         if v is None and info.data.get('errors') is None:
             raise ValueError("Response must contain either data or errors")
         return v
-
 
 # Custom Exceptions
 class GraphQLError(Exception):

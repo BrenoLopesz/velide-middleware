@@ -3,6 +3,8 @@ from typing import List, Optional, TypeVar
 import httpx
 
 from models.velide_delivery_models import (
+    AddDeliveryVariables,
+    DeleteDeliveryVariables,
     DeliveryResponse,
     DeliverymanResponse,
     GraphQLParseError,
@@ -15,7 +17,7 @@ from models.velide_delivery_models import (
     Order
 )
 from config import ApiConfig, TargetSystem
-from utils import async_retry
+from utils.async_retry import async_retry
 
 T = TypeVar('T')
 
@@ -152,7 +154,7 @@ class Velide:
         Returns:
             bool: True if deletion was successful.
         """
-        variables = {'deliveryId': delivery_id}
+        variables = DeleteDeliveryVariables(deliveryId=delivery_id)
         payload = GraphQLPayload(
             query=self.DELETE_DELIVERY_MUTATION, 
             variables=variables
@@ -182,9 +184,9 @@ class Velide:
         return self._parse_response(response, data_key="deliverymen")
 
     def _build_variables_to_add_delivery(
-        self,
+        self, 
         order: Order
-    ) -> GraphQLVariables:
+    ) -> AddDeliveryVariables:
         """
         Build GraphQL variables from order data.
         
@@ -236,14 +238,20 @@ class Velide:
         """
         now_utc = datetime.now(timezone.utc)
         
-        # Calculate the difference. This works correctly because both
-        # datetime objects are timezone-aware.
+        # Fix Naive Datetime if necessary
+        # The Pydantic model uses datetime.combine(), which returns a naive datetime.
+        if created_at_time.tzinfo is None:
+            # .astimezone() without args assumes the datetime is in the 
+            # local system timezone and makes it aware.
+            created_at_time = created_at_time.astimezone()
+        
+        # 3. Calculate difference (Now both are Aware)
         time_difference = now_utc - created_at_time
         
-        # Convert the resulting timedelta object to total milliseconds.
+        # 4. Convert to milliseconds
         offset_in_milliseconds = time_difference.total_seconds() * 1000
         
-        return round(offset_in_milliseconds)
+        return round(offset_in_milliseconds)    
     
     async def _execute_request(self, payload: GraphQLPayload) -> httpx.Response:
         """

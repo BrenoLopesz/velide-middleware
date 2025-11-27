@@ -20,6 +20,7 @@ class DeliveryRowStatus(Enum):
     ACKNOWLEDGE = "Reconhecido"
     SENDING = "Enviando..."
     ADDED = "Adicionado"
+    DELETING = "Deletando..."
     CANCELLED = "Cancelado"
     ERROR = "Erro"
 
@@ -29,6 +30,7 @@ STATUS_COLORS = {
     DeliveryRowStatus.SENDING: QBrush(QColor(0, 152, 210)),
     DeliveryRowStatus.ADDED: QBrush(QColor(74, 160, 53)),
     DeliveryRowStatus.ERROR: QBrush(QColor(231, 98, 104)), 
+    DeliveryRowStatus.DELETING: QBrush(QColor(233, 149, 33)),
     DeliveryRowStatus.CANCELLED: QBrush(QColor(211, 118, 0)),
 }
 

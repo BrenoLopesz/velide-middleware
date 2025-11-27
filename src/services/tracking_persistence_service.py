@@ -194,3 +194,30 @@ class TrackingPersistenceService(QObject):
             if norm_id in self._id_map:
                 del self._id_map[norm_id]
             self.logger.debug(f"Tracking parado e cache limpo para ID {norm_id}")
+
+    # --- Extensions for FarmaxStatusTracker Compatibility ---
+
+    def get_active_monitored_ids(self) -> List[float]:
+        """
+        Returns IDs that need status checking. 
+        In this implementation, everything in the cache is considered 'active'.
+        """
+        return self.get_tracked_ids()
+
+    def mark_as_cancelled(self, internal_id: RawID):
+        """
+        Updates status to CANCELLED and stops tracking to prevent further polls.
+        """
+        # 1. Persist the status change
+        self.update_status(internal_id, DeliveryStatus.CANCELLED)
+        # 2. Remove from polling cache
+        self.stop_tracking(internal_id)
+
+    def mark_as_finished(self, internal_id: RawID):
+        """
+        Updates status to DELIVERED and stops tracking.
+        """
+        # 1. Persist the status change
+        self.update_status(internal_id, DeliveryStatus.DELIVERED)
+        # 2. Remove from polling cache
+        self.stop_tracking(internal_id)
