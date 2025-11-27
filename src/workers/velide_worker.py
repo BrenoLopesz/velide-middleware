@@ -28,6 +28,7 @@ class VelideWorkerSignals(QObject):
         finished (): Emitted when the task is completed, successfully or not.
     """
     delivery_added = pyqtSignal(dict)
+    delivery_deleted = pyqtSignal(str)
     deliverymen_retrieved = pyqtSignal(list)
     error = pyqtSignal(str)
     finished = pyqtSignal()
@@ -59,6 +60,11 @@ class VelideWorker(QRunnable):
         Creates a worker configured to add a new delivery.
         """
         return cls(velide, "add_delivery", order=order)
+
+    @classmethod
+    def for_delete_delivery(cls, velide: Velide, delivery_id: str) -> 'VelideWorker':
+        """Creates a worker configured to delete a delivery."""
+        return cls(velide, "delete_delivery", delivery_id=delivery_id)
 
     @classmethod
     def for_get_deliverymen(cls, velide: Velide) -> 'VelideWorker':
@@ -140,6 +146,15 @@ class VelideWorker(QRunnable):
                 result = await client.get_deliverymen()
                 self.logger.info(f"Busca de entregadores concluída. {len(result)} encontrados.")
                 self.signals.deliverymen_retrieved.emit(result)
+
+            elif self._operation == "delete_delivery":
+                d_id = self._kwargs.get('delivery_id')
+                success = await client.delete_delivery(d_id)
+                if success:
+                    self.logger.info(f"Entrega {d_id} deletada com sucesso.")
+                    self.signals.delivery_deleted.emit(d_id)
+                else:
+                    raise Exception("A API retornou falha na deleção.")
                 
             else:
                 raise NotImplementedError(f"Operação desconhecida do VelideWorker: {self._operation}")

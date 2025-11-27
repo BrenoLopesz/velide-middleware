@@ -23,6 +23,9 @@ class FarmaxStrategy(IConnectableStrategy):
     
     #: Emitted when a new delivery is detected and normalized.
     order_normalized = pyqtSignal(Order)
+
+    #: Emitted when a tracked delivery status is updated to cancelled.
+    order_cancelled = pyqtSignal(float, object)
     
     #: Emitted when the status of a tracked delivery changes.
     #: (float: sale_id, str: new_status)
@@ -134,31 +137,22 @@ class FarmaxStrategy(IConnectableStrategy):
         worker.signals.error.connect(error)
         self._thread_pool.start(worker)
 
-    def stop_tracking_delivery(self, sale_id: float):
-        """
-        Public method to stop tracking a specific delivery.
-        
-        This removes the sale ID from the set of tracked IDs, so it
-        will no longer be checked for status updates.
-        
-        Args:
-            sale_id (float): The CD_VENDA of the delivery to stop tracking.
-        """
-        self.logger.debug(f"Removendo rastreamento da entrega: {sale_id}")
-        self._tracked_sales_ids.discard(sale_id)
-        self._tracked_sales_statuses.pop(sale_id, None)
-
-    def on_delivery_added(self, internal_id: float, external_id: str):
+    def on_delivery_added(self, internal_id: str, external_id: str):
         """
         [Callback] Called by DeliveriesService when Velide successfully accepts the order.
         """
+        if not self._persistence.is_tracked(internal_id):
+            # If everything is correct, the cancellation would be already requested, and will likely happen.
+            self.logger.warning(f"Entrega {internal_id} foi adicionada no Velide após provavelmente ser cancelada do Farmax.")
+            return
+
         self.logger.debug(f"Integração confirmada: Farmax {internal_id} <-> Velide {external_id}")
         
         # This commits the relationship to SQLite and removes the "In-Flight" reservation
         self._persistence.register_new_delivery(
             internal_id=internal_id,
             external_id=external_id,
-            status=DeliveryStatus.PENDING # Initial status in Velide
+            status=DeliveryStatus.ADDED
         )
 
     def on_delivery_failed(self, internal_id: float):
@@ -332,27 +326,27 @@ class FarmaxStrategy(IConnectableStrategy):
         [SLOT] Handles the result of `for_fetch_sales_statuses_by_id`.
         
         Compares the new statuses against the cached statuses and emits
-        a signal for any that have changed.
+        a signal if it was cancelled.
         """
         for sale in sales:
             sale_id = sale.id
             new_farmax_status = sale.status
             
-            # TODO: This function should be used only to detect if the delivery was cancelled.
+            if new_farmax_status.upper() != 'C' or new_farmax_status.upper() != 'D':
+                continue # Not cancelled
+            
+            external_id = self._persistence.get_external_id(sale_id)
 
-            # Map Farmax Status Char to DeliveryStatus Enum
-            # new_enum_status = self._map_sale_status(new_farmax_status)
+            # In practice, it is almost IMPOSSIBLE that an order is cancelled before it is added to Velide.
+            # Unless the polling timeouts are messed up, or if the cancellation is done extremely fast.
+            # But for safety, we're going to try to handle it as well.
+            if external_id is None:
+                self.logger.warning(f"Entrega {sale_id} foi cancelada no Farmax antes de ser adicionada ao Velide.")
+                self._persistence.release_reservation(sale_id)
+            else:
+                self.logger.info(f"Solicitando remoção da entrega {sale_id} cancelada no Farmax...")
             
-            # current_enum_status = self._persistence.get_current_status(sale_id)
-            
-            # if current_enum_status != new_enum_status:
-            #     self.logger.info(f"Mudança de status: {current_enum_status} -> {new_enum_status}")
-                
-            #     # Update Persistence
-            #     self._persistence.update_status(sale_id, new_enum_status)
-                
-            #     # Emit Signal
-            #     self.order_status_changed.emit(sale_id, new_farmax_status)
+            self.order_cancelled.emit(sale_id, external_id)
 
     def _handle_poll_error(self, error_msg: str):
         """[SLOT] Logs errors from the new delivery poll."""
@@ -366,27 +360,16 @@ class FarmaxStrategy(IConnectableStrategy):
         
     # --- Helper Methods ---
 
-    def _map_sale_status(self, farmax_char: str) -> DeliveryStatus:
-        """Helper to convert Farmax sale status to Enum."""
-        if farmax_char.upper() == 'V':
-            return DeliveryStatus.PENDING
-        return DeliveryStatus.CANCELLED
-
     def _normalize_delivery(self, delivery: FarmaxDelivery) -> Order:
         """
         Converts a Farmax-specific model to the generic `Order` model.
         """
-        order = Order(
+        return Order(
             customerName=delivery.customer_name,
             customerContact=getattr(delivery, "customer_contact", None),
             address=delivery.address,
             neighborhood=getattr(delivery, "neighborhood", None),
             createdAt=delivery.created_at,
-            reference=getattr(delivery, "reference", None)
-            # ... map other fields as required by the Order model
+            reference=getattr(delivery, "reference", None),
+            internal_id=str(delivery.sale_id)
         )
-
-        # CRITICAL: Attach the Farmax ID to the object so it travels with the request
-        order.internal_id = delivery.sale_id
-
-        return order

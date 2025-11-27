@@ -15,6 +15,7 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):
     """
     # This signal emits the FINAL, NORMALIZED order model
     order_normalized = pyqtSignal(Order)
+    order_cancelled = pyqtSignal(float, object) # Internal ID, (optional) external ID
     # normalization_failed = pyqtSignal(dict, str) # raw_data, error_message
 
     @abstractmethod
@@ -38,7 +39,7 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):
         pass
 
     @abstractmethod
-    def on_delivery_added(self, internal_id: Optional[float], external_id: Optional[str]):
+    def on_delivery_added(self, internal_id: str, external_id: str):
         """Optional callback function to receive deliveries added notifications."""
         pass
 

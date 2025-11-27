@@ -11,6 +11,9 @@ from services.strategies.connectable_strategy import IConnectableStrategy
 from models.velide_delivery_models import Order
 from workers.velide_worker import VelideWorker
 
+TASK_ADD = "ADD"
+TASK_DELETE = "DELETE"
+
 class DeliveriesService(QObject):
     delivery_acknowledged = pyqtSignal(str, Order)
     delivery_update = pyqtSignal(str, DeliveryRowStatus)
@@ -39,6 +42,7 @@ class DeliveriesService(QObject):
         self._active_strategy = strategy
         # Connect to the strategy's signals
         self._active_strategy.order_normalized.connect(self._on_order_normalized)
+        self._active_strategy.order_cancelled.connect(self._on_order_cancelled)
 
     def get_order(self, order_id: str) -> Order:
         return self._active_deliveries.get(order_id, None)
@@ -91,6 +95,11 @@ class DeliveriesService(QObject):
         # 5. Cleanup memory
         self._active_deliveries.pop(order_id, None)
 
+    def _on_deletion_success(self, internal_id: str, deleted_external_id: str):
+        """Callback when API confirms deletion."""
+        self.logger.info(f"Entrega {internal_id} ({deleted_external_id}) cancelada nO Velide com sucesso.")
+        self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
+
     def _on_delivery_failure(self, order_id: str, error_msg: str):
         self.delivery_failed.emit(order_id, error_msg)
         self.delivery_update.emit(order_id, DeliveryRowStatus.ERROR)
@@ -101,30 +110,66 @@ class DeliveriesService(QObject):
         Public method to request a delivery. Adds the order to a queue
         and triggers the processing loop.
         """
-        self._delivery_queue.append((order_id, order))
-        self._try_process_next() # Changed: Call the central dispatcher
+        task = {
+            'type': TASK_ADD,
+            'id': order_id,
+            'payload': order
+        }
+        self._delivery_queue.append(task)
+        self._try_process_next()
+
+    def _send_cancellation_to_api(self, internal_id: str, external_id: str):
+        """Adds a delete task to the queue."""
+        task = {
+            'type': TASK_DELETE,
+            'id': internal_id,   # Used for UI updates
+            'ext_id': external_id, # Used for API call
+            'payload': None
+        }
+        self._delivery_queue.append(task)
+        self.delivery_update.emit(internal_id, DeliveryRowStatus.DELETING) # Optional: Add a DELETING status
+        self._try_process_next()
 
     def _process_delivery_queue(self):
         """
-        MODIFIED: This method now only processes ONE item. It no longer
-        triggers the next item in the chain. The manager logic does that.
+        ROUTER: Decides which worker to create based on task type.
         """
-        # Safety check, though the dispatcher should prevent this.
         if not self._delivery_queue:
             return None
 
-        order_id, order = self._delivery_queue.popleft()
-        worker = VelideWorker.for_add_delivery(self._velide_api, order)
+        # Peek at the task (don't pop yet if you want to be super safe, 
+        # but popping is fine here since we have the lock)
+        task = self._delivery_queue.popleft()
+        
+        task_type = task['type']
+        internal_id = task['id']
 
-        worker.signals.delivery_added.connect(
-            lambda resp, oid=order_id: self._on_delivery_success(oid, resp)
-        )
+        worker = None
+
+        if task_type == TASK_ADD:
+            order = task['payload']
+            worker = VelideWorker.for_add_delivery(self._velide_api, order)
+            
+            # Connect Success for ADD
+            worker.signals.delivery_added.connect(
+                lambda resp, oid=internal_id: self._on_delivery_success(oid, resp)
+            )
+
+        elif task_type == TASK_DELETE:
+            external_id = task['ext_id']
+            worker = VelideWorker.for_delete_delivery(self._velide_api, external_id)
+            
+            # Connect Success for DELETE
+            worker.signals.delivery_deleted.connect(
+                lambda del_id, oid=internal_id: self._on_deletion_success(oid, del_id)
+            )
+
+        # Connect Common Signals (Error & Finished)
         worker.signals.error.connect(
-            lambda err, oid=order_id: self._on_delivery_failure(oid, err)
+            lambda err, oid=internal_id: self._on_delivery_failure(oid, err)
         )
-
-        worker.signals.delivery_added.connect(self._on_process_finished)
-        worker.signals.error.connect(self._on_process_finished)
+        # Crucial for the loop to continue:
+        worker.signals.finished.connect(self._on_process_finished)
 
         self._thread_pool.start(worker)
     
@@ -155,25 +200,63 @@ class DeliveriesService(QObject):
 
     def _on_order_normalized(self, normalized_order: Order):
         """This is the entry point for the GENERIC workflow."""
-        order_id = str(uuid.uuid4())
-        self._active_deliveries[order_id] = normalized_order
+        internal_id = normalized_order.internal_id
+        self._active_deliveries[internal_id] = normalized_order
 
         # 1. Acknowledge (to the UI)
-        self.delivery_acknowledged.emit(order_id, normalized_order)
+        self.delivery_acknowledged.emit(internal_id, normalized_order)
 
         if self._velide_api is None:
             self.logger.error("Não é possível enviar entrega antes de efetuar autenticação! Aguardando...")
-            self.delivery_update.emit(order_id, DeliveryRowStatus.ERROR) # May create a custom status later
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.ERROR) # May create a custom status later
             return
 
         # 2. Send to API
         try:
-            self._send_delivery_to_api(order_id, normalized_order)
+            self._send_delivery_to_api(internal_id, normalized_order)
             # On success, update the status to show it's sent.
-            self.delivery_update.emit(order_id, DeliveryRowStatus.SENDING) 
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.SENDING) 
         except Exception as e:
             # If the API call fails, the order *already exists*.
             # We must now log the error AND update its status to ERROR.
-            self.logger.exception(f"Falha inesperada ao enviar entrega para o Velide ({order_id}).")
-            self.delivery_update.emit(order_id, DeliveryRowStatus.ERROR)
+            self.logger.exception(f"Falha inesperada ao enviar entrega para o Velide ({internal_id}).")
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.ERROR)
 
+    def _on_order_cancelled(self, internal_id: str, external_id: Optional[str]):
+        """
+        Handles the cancellation signal from the strategy.
+        
+        1. Checks if the order is currently waiting in the queue to be added. 
+           If yes, we just remove it from the queue (Optimization: saves 1 API call).
+        2. If it was already sent (has external_id), we queue a delete task.
+        """
+        self.logger.debug(f"Solicitação de cancelamento recebida. Internal: {internal_id}, External: {external_id}")
+
+        # 1. OPTIMIZATION: Check if this order is currently in the queue waiting to be sent.
+        # If we haven't sent it yet, we don't need to delete it on the API. 
+        # We just cancel the "Add" job.
+        found_in_queue = False
+        
+        # We iterate a copy to safely modify the original if needed
+        for i, task in enumerate(list(self._delivery_queue)):
+            # Check if it is an ADD task for this internal ID
+            if task['type'] == TASK_ADD and task['id'] == internal_id:
+                del self._delivery_queue[i]
+                found_in_queue = True
+                self.logger.info(f"Pedido {internal_id} removido da fila de envio antes do processamento.")
+                
+                # Update UI to show it was cancelled locally
+                self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED) 
+                break
+        
+        if found_in_queue:
+            return
+
+        # 2. If not in queue, it might be currently processing (in the thread) 
+        #    or already sent. If we have an external_id, we must request deletion.
+        if external_id:
+            self._send_cancellation_to_api(internal_id, external_id)
+        else:
+            self.logger.warning(f"Pedido {internal_id} cancelado, mas não tinha ID externo e não estava na fila. Nada a fazer.")
+            # Ensure UI reflects cancellation
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)

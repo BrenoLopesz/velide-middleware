@@ -1,6 +1,7 @@
 # In a new file, e.g., src/services/delivery_service.py
 import logging
 from typing import Optional
+import uuid
 from PyQt5.QtCore import pyqtSignal, QThreadPool
 from pydantic import ValidationError
 from models.velide_delivery_models import Order
@@ -12,6 +13,8 @@ from workers.cds_logs_listener_worker import CdsLogsListenerWorker
 class CdsStrategy(IConnectableStrategy):
     # Signals for the Presenter
     order_normalized = pyqtSignal(Order)
+    # Unused for CDS
+    order_cancelled = pyqtSignal(float, object)
 
     def __init__(self, api_config: ApiConfig, folder_to_watch: str):
         super().__init__()
@@ -40,7 +43,7 @@ class CdsStrategy(IConnectableStrategy):
     def fetch_deliverymen(self, success, error):
         raise NotImplementedError
     
-    def on_delivery_added(self, internal_id: Optional[float], external_id: Optional[str]):
+    def on_delivery_added(self, internal_id: str, external_id: str):
         return # Just ignore it.
     
     def on_delivery_failed(self, internal_id: Optional[float]):
@@ -68,7 +71,6 @@ class CdsStrategy(IConnectableStrategy):
         else: 
             self.logger.warning("O endereço está formatado incorretamente. Resultado final pode ser impreciso.")
 
-
         return Order(
             customerName=cds_order.nome_cliente,
             customerContact=cds_order.contato_cliente,
@@ -76,5 +78,9 @@ class CdsStrategy(IConnectableStrategy):
             createdAt=cds_order.horario_pedido,
             address2=cds_order.complemento,
             reference=cds_order.referencia,
-            neighbourhood=neighbourhood
+            neighbourhood=neighbourhood,
+            # CDS doesn't provide an internal ID, so we generate one.
+            internal_id=str(uuid.uuid4())
         )
+
+

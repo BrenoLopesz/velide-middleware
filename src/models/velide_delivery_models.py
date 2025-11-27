@@ -20,7 +20,7 @@ class Order(BaseModel):
 
     # We use exclude=True so if you use model_dump() to generate payloads, 
     # this field is automatically hidden from the API.
-    internal_id: Optional[float] = Field(None, description="Internal ERP ID used for tracking.", exclude=True)
+    internal_id: str = Field(None, description="Internal ERP ID used for tracking.", exclude=True)
     
     @field_validator('customer_name', 'address')
     @classmethod

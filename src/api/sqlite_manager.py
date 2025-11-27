@@ -18,6 +18,8 @@ class DeliveryStatus(Enum):
     The string value is what is stored in the database.
     """
     PENDING = "PENDENTE"
+    SENDING = "ENVIANDO"
+    ADDED = "ADICIONADO"
     IN_PROGRESS = "EM_ANDAMENTO"
     DELIVERED = "ENTREGUE"
     FAILED = "FALHA"

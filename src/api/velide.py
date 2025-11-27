@@ -55,6 +55,12 @@ class Velide:
         }
     """
 
+    DELETE_DELIVERY_MUTATION = """
+        mutation DeleteDelivery($deliveryId: String!) {
+            deleteDelivery(deliveryId: $deliveryId)
+        }
+    """
+
     GET_DELIVERYMEN_QUERY =  """
         query {
             deliverymen {
@@ -125,6 +131,27 @@ class Velide:
         
         # Use the new generic parser
         return self._parse_response(response, data_key="addDeliveryFromIntegration")
+    
+    async def delete_delivery(self, delivery_id: str) -> bool:
+        """
+        Deletes a delivery by ID.
+        
+        Args:
+            delivery_id: The unique ID of the delivery to remove.
+            
+        Returns:
+            bool: True if deletion was successful.
+        """
+        variables = {'deliveryId': delivery_id}
+        payload = GraphQLPayload(
+            query=self.DELETE_DELIVERY_MUTATION, 
+            variables=variables
+        )
+
+        response = await self._execute_request(payload)
+        
+        # Return a boolean for success.
+        return self._parse_response(response, data_key="deleteDelivery")
 
     async def get_deliverymen(self) -> List[DeliverymanResponse]:
         """
