@@ -15,6 +15,7 @@ from models.velide_delivery_models import (
     Order
 )
 from config import ApiConfig, TargetSystem
+from utils import async_retry
 
 T = TypeVar('T')
 
@@ -103,6 +104,11 @@ class Velide:
         # Cleanly close the client and its connections.
         await self._client.aclose()
 
+    @async_retry(
+        operation_desc="enviar nova entrega",  # <--- Friendly Name
+        max_retries=4, 
+        initial_delay=2.0
+    )
     async def add_delivery(
         self,
         order: Order,
@@ -132,6 +138,10 @@ class Velide:
         # Use the new generic parser
         return self._parse_response(response, data_key="addDeliveryFromIntegration")
     
+    @async_retry(
+        operation_desc="deletar entrega",
+        max_retries=3
+    )
     async def delete_delivery(self, delivery_id: str) -> bool:
         """
         Deletes a delivery by ID.
@@ -153,6 +163,10 @@ class Velide:
         # Return a boolean for success.
         return self._parse_response(response, data_key="deleteDelivery")
 
+    @async_retry(
+        operation_desc="buscar entregadores",
+        max_retries=3
+    )
     async def get_deliverymen(self) -> List[DeliverymanResponse]:
         """
         Retrieves the list of deliverymen.

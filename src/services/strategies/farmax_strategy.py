@@ -55,10 +55,23 @@ class FarmaxStrategy(IConnectableStrategy):
         # --- Internal State ---
         self._last_check_time: Optional[datetime] = None
 
+        # Internal state to hold the ID we want to commit to, but haven't yet.
+        self._pending_log_id: Optional[int] = None
+
         # Track the last processed Log ID
         self._last_log_id: Optional[int] = None
 
         # --- Timers ---
+
+        # Retry Configuration
+        self._retry_count = 0
+        self._max_retries = 3
+        self._base_backoff_ms = 2000 # Start with 2 seconds
+
+        # Retry Timer (Single Shot)
+        self._retry_timer = QTimer(self)
+        self._retry_timer.setSingleShot(True)
+        self._retry_timer.timeout.connect(self._retry_logic)
         
         # Timer for polling the DELIVERYLOG for new entries
         self._poll_timer = QTimer(self)
@@ -236,29 +249,18 @@ class FarmaxStrategy(IConnectableStrategy):
         NOTE: This assumes the `DeliveryLog` model has 'Action' and
         'CD_VENDA' fields, or similar, to identify new deliveries.
         """
-        if logs:
-            # 1. We found logs. Extract the highest ID.
-            # Assuming DeliveryLog has an 'id' field (the primary key of the log table)
-            max_id = max(log.id for log in logs)
-            
-            # Update the ID. This effectively switches us to "ID Mode" for the next run.
-            self._last_log_id = max_id
-            self.logger.debug(f"Atualizado último Log ID para: {self._last_log_id}")
-
-        elif poll_time is not None:
-            # 2. We found NO logs, but we are in "Time Mode" (Bootstrap).
-            # We must advance the time window, otherwise we will keep querying 
-            # the same old time range forever until a log appears.
-            self._last_check_time = poll_time
-            self.logger.debug(f"Início: Nenhum log encontrado. Avançando tempo para {poll_time}")
-            return # Nothing to process
-
         if not logs:
+            if poll_time:
+                self._last_check_time = poll_time
             return
 
+        # 1. Calculate the Candidate ID, but DO NOT save it to _last_log_id yet.
+        max_id = max(log.id for log in logs)
+        self._pending_log_id = max_id  # Store it in a temporary pending state
+        
         ids_to_fetch: Set[float] = set()
         for log in logs:
-            # We assume the log table has an 'Action' column 
+            # logic to extract sale_id...
             is_insert = getattr(log, 'action', '').upper() == FarmaxAction.INSERT.value
             sale_id = getattr(log, 'sale_id', None)
             
@@ -266,21 +268,34 @@ class FarmaxStrategy(IConnectableStrategy):
                 ids_to_fetch.add(sale_id)
 
         if not ids_to_fetch:
-            return  # No new deliveries found
+            # If we found logs but none were relevant (e.g., updates vs inserts),
+            # we can safely advance the cursor now because there is no payload to fetch.
+            self._commit_cursor()
+            return
 
         if len(ids_to_fetch) > 1:
             self.logger.info(f"Foram detectadas {len(ids_to_fetch)} novas entregas. Buscando detalhes...")
         else:
             self.logger.info(f"Foi detectada uma nova entrega. Buscando detalhes...")
-        
-        # We found new IDs. Now fetch their full delivery info
-        # to normalize and start tracking.
+
+        # 2. Trigger Phase 2
+        self._fetch_details_payload(tuple(ids_to_fetch))
+
+    def _fetch_details_payload(self, cd_vendas: Tuple[float, ...]):
+        """Helper to launch the worker, separated to allow easy retrying."""
         worker = FarmaxWorker.for_fetch_deliveries_by_id(
             self._farmax, 
-            cd_vendas=tuple(ids_to_fetch)
+            cd_vendas=cd_vendas
         )
+        # Pass the IDs into the worker data or use partials if needed to keep context on error
+        # For simplicity, we assume we can bind the current payload to the error handler if needed,
+        # but here we use instance state or lambda.
+        
         worker.signals.success.connect(self._handle_new_delivery_details)
-        worker.signals.error.connect(self._handle_poll_error)
+        
+        # Connect error to a specialized retry handler, passing the payload
+        worker.signals.error.connect(lambda err: self._handle_fetch_error(err, cd_vendas))
+        
         self._thread_pool.start(worker)
 
     def _handle_new_delivery_details(self, deliveries: List[FarmaxDelivery]):
@@ -290,23 +305,78 @@ class FarmaxStrategy(IConnectableStrategy):
         Normalizes the new deliveries, emits them, and adds them to
         the tracking set.
         """
-        for delivery in deliveries:
-            sale_id = delivery.sale_id
+        try:
+            for delivery in deliveries:
+                sale_id = delivery.sale_id
 
-            # 1. Try to Reserve the ID immediately
-            # If returns False, it means we are already handling it (or it's done)
-            if not self._persistence.reserve_id(sale_id):
-                continue
+                # 1. Try to Reserve the ID immediately
+                # If returns False, it means we are already handling it (or it's done)
+                if not self._persistence.reserve_id(sale_id):
+                    continue
+                
+                self.logger.info(f"Recebido nova entrega com o ID: {sale_id}")
+                
+                # 2. Normalize the FarmaxDelivery -> Order
+                normalized_order = self._normalize_delivery(delivery)
+                
+                # 3. Emit to UI/Presenter
+                # The Presenter now has the responsibility to callback 'on_integration_success'
+                # or 'on_integration_failure'
+                self.order_normalized.emit(normalized_order)
             
-            self.logger.info(f"Recebido nova entrega com o ID: {sale_id}")
+            # SUCCESS: The dangerous part is over. Now we commit the cursor.
+            self._commit_cursor()
             
-            # 2. Normalize the FarmaxDelivery -> Order
-            normalized_order = self._normalize_delivery(delivery)
+            # Reset retry counter on success
+            self._retry_count = 0
+        except Exception as e:
+            self.logger.error(f"Erro crítico ao processar detalhes: {e}")
+            # Do NOT commit cursor here. We will re-poll naturally.
+
+    def _commit_cursor(self):
+        """Moves the Pending ID to the Permanent Last ID."""
+        if self._pending_log_id is not None:
+            self._last_log_id = self._pending_log_id
+            self._pending_log_id = None
+            self.logger.debug(f"Cursor avançado com sucesso para Log ID: {self._last_log_id}")
             
-            # 3. Emit to UI/Presenter
-            # The Presenter now has the responsibility to callback 'on_integration_success'
-            # or 'on_integration_failure'
-            self.order_normalized.emit(normalized_order)
+        # Ensure main poll is running again if it was stopped
+        if not self._poll_timer.isActive():
+            self._poll_timer.start(self.NEW_DELIVERY_POLL_INTERVAL_MS)
+            
+    def _handle_fetch_error(self, error_msg: str, cd_vendas: Tuple[float, ...]):
+        """
+        Handles failure in fetching details. 
+        Does NOT advance cursor. Initiates Retry.
+        """
+        self.logger.warning(f"Falha ao buscar detalhes no Farmax (Tentativa {self._retry_count + 1}/{self._max_retries}): {error_msg}")
+
+        # Pause the main poll to prevent overlapping attempts
+        self._poll_timer.stop()
+
+        if self._retry_count < self._max_retries:
+            self._retry_count += 1
+            # Exponential Backoff: 2s, 4s, 8s...
+            delay = self._base_backoff_ms * (2 ** (self._retry_count - 1))
+            
+            self.logger.info(f"Agendando nova tentativa em {delay/1000} segundos...")
+            
+            # Disconnect previous to avoid multi-connection if using lambda (cleaner to store current_payload)
+            # Here we use a lambda in the timer for simplicity
+            self._retry_timer.timeout.disconnect() 
+            self._retry_timer.timeout.connect(lambda: self._fetch_details_payload(cd_vendas))
+            self._retry_timer.start(delay)
+        else:
+            self.logger.error("Número máximo de retentativas excedido. Abortando este lote.")
+            # We reset the retry count.
+            self._retry_count = 0
+            # Restart the main poll so we try again later
+            self._poll_timer.start(self.NEW_DELIVERY_POLL_INTERVAL_MS)
+            # CRITICAL DECISION:
+            # 1. Do we advance the cursor? If yes, we lose data.
+            # 2. Do we leave it? If yes, the main 30s timer will pick it up again.
+            # Choice: Leave it. The main loop acting as a "Dead Letter Queue" is safer.
+            # The system will try again in 30 seconds.
 
     def on_integration_success(self, internal_id: float, external_id: str):
         """Called by Presenter when Velide API returns 201 Created."""
@@ -332,7 +402,7 @@ class FarmaxStrategy(IConnectableStrategy):
             sale_id = sale.id
             new_farmax_status = sale.status
             
-            if new_farmax_status.upper() != 'C' or new_farmax_status.upper() != 'D':
+            if new_farmax_status.upper() not in ('C', 'D'):
                 continue # Not cancelled
             
             external_id = self._persistence.get_external_id(sale_id)
@@ -350,13 +420,15 @@ class FarmaxStrategy(IConnectableStrategy):
 
     def _handle_poll_error(self, error_msg: str):
         """[SLOT] Logs errors from the new delivery poll."""
-        self.logger.error(f"Error polling for new deliveries: {error_msg}")
+        self.logger.error(f"Erro ao buscar entregas no Farmax: {error_msg}")
+        # TODO: Crash and display big error
         # Depending on severity, you might want to stop the timer
         # self.stop_listening()
 
     def _handle_status_error(self, error_msg: str):
         """[SLOT] Logs errors from the status update poll."""
-        self.logger.error(f"Error polling for status updates: {error_msg}")
+        self.logger.error(f"Erro ao buscar atualização nas entregas: {error_msg}")
+        # TODO: Crash and display big error
         
     # --- Helper Methods ---
 
