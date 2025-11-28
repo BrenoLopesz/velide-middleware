@@ -43,6 +43,29 @@ class DeliveriesService(QObject):
         # Connect to the strategy's signals
         self._active_strategy.order_normalized.connect(self._on_order_normalized)
         self._active_strategy.order_cancelled.connect(self._on_order_cancelled)
+        self._active_strategy.order_restored.connect(self._on_order_restored)
+    
+    def _on_order_restored(self, restored_order: Order):
+        """
+        Handles orders that were recovered from persistence on startup.
+        Updates UI and Memory, but DOES NOT send to API.
+        """
+        internal_id = restored_order.internal_id
+        
+        # 1. Update Internal Memory
+        self._active_deliveries[internal_id] = restored_order
+        
+        # 2. Acknowledge to UI (Populates the table)
+        self.delivery_acknowledged.emit(internal_id, restored_order)
+        
+        # TODO: Use real status
+        # 3. Restore the correct Status icon in the UI
+        # We need to assume the Order comes with a status, or we default to ADDED 
+        # since it was restored from a persistence layer that tracks active/added orders.
+        # You might want to map persistence status to DeliveryRowStatus here.
+        self.delivery_update.emit(internal_id, DeliveryRowStatus.ADDED)
+        
+        self.logger.debug(f"Pedido {internal_id} restaurado na interface visual.")
 
     def get_order(self, order_id: str) -> Order:
         return self._active_deliveries.get(order_id, None)

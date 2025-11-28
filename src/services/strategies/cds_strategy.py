@@ -11,11 +11,6 @@ from config import ApiConfig
 from workers.cds_logs_listener_worker import CdsLogsListenerWorker
 
 class CdsStrategy(IConnectableStrategy):
-    # Signals for the Presenter
-    order_normalized = pyqtSignal(Order)
-    # Unused for CDS
-    order_cancelled = pyqtSignal(str, object)
-
     def __init__(self, api_config: ApiConfig, folder_to_watch: str):
         super().__init__()
         self.logger = logging.getLogger(__name__)

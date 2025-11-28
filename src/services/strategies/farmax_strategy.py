@@ -1,13 +1,15 @@
 import logging
 from typing import List, Optional, Callable
 
-from PyQt5.QtCore import pyqtSlot
+from PyQt5.QtCore import pyqtSlot, QThreadPool
 
 from config import FarmaxConfig
 from connectors.farmax.farmax_delivery_ingestor import FarmaxDeliveryIngestor
+from connectors.farmax.farmax_mapper import FarmaxMapper
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_status_tracker import FarmaxStatusTracker
 from connectors.farmax.farmax_worker import FarmaxWorker
+from models.farmax_models import FarmaxDelivery
 from models.velide_delivery_models import Order
 from services.strategies.connectable_strategy import IConnectableStrategy
 from services.tracking_persistence_service import TrackingPersistenceService
@@ -63,6 +65,49 @@ class FarmaxStrategy(IConnectableStrategy):
         self._status_tracker.order_cancelled.connect(self.order_cancelled.emit)
         self._status_tracker.error_occurred.connect(self._on_service_error)
 
+        # Listen for when the SQLite DB is fully loaded
+        self._persistence.hydrated.connect(self._on_persistence_hydrated)
+
+    def _on_persistence_hydrated(self):
+        """
+        Triggered when TrackingPersistenceService finishes loading from SQLite.
+        We must fetch the details of these deliveries to show them in the UI.
+        """
+        # Get IDs of everything currently being tracked/monitored
+        tracked_ids = self._persistence.get_tracked_ids()
+        
+        if not tracked_ids:
+            return
+
+        self._logger.debug(f"Restaurando {len(tracked_ids)} entregas para a UI...")
+
+        # 2. Reuse your existing Worker logic to fetch details from Farmax
+        # We use the same worker as the Ingestor, but connect to a different slot
+        worker = FarmaxWorker.for_fetch_deliveries_by_id(
+            self._repository, 
+            cd_vendas=tuple(tracked_ids)
+        )
+        
+        worker.signals.success.connect(self._on_restoration_details_fetched)
+        worker.signals.error.connect(lambda err: self._logger.error(f"Erro ao restaurar entregas: {err}"))
+        
+        # Use the strategy's thread pool (or global)
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_restoration_details_fetched(self, deliveries: List['FarmaxDelivery']):
+        """
+        Callback when ERP returns details for the ID list.
+        Convert them to Orders and emit order_restored.
+        """
+        for delivery in deliveries:
+            # Convert raw ERP data to the Normalized Order Model
+            order = FarmaxMapper.to_order(delivery)
+            
+            # TODO: Inject the specific status from persistence if your Order model supports it
+            # current_status = self._persistence.get_current_status(order.internal_id)
+            
+            self.order_restored.emit(order)
+
     # --- Public Interface Implementation (IConnectableStrategy) ---
 
     def start_listening(self):
@@ -93,7 +138,6 @@ class FarmaxStrategy(IConnectableStrategy):
         This is a simple 'one-shot' action, so it doesn't need a dedicated service class.
         """
         # We access the global thread pool here for ad-hoc tasks
-        from PyQt5.QtCore import QThreadPool
         pool = QThreadPool.globalInstance()
 
         worker = FarmaxWorker.for_fetch_deliverymen(self._repository)
