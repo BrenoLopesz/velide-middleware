@@ -12,7 +12,6 @@ from models.velide_delivery_models import (
     GraphQLRequestError,
     GraphQLResponse,
     GraphQLResponseError,
-    GraphQLVariables,
     MetadataInput,
     Order
 )
@@ -205,7 +204,7 @@ class Velide:
             customerName=order.customer_name,
             customerContact=getattr(order, "customer_contact", None)
         )
-        
+
         # Build variables dictionary with required fields
         variables_dict = {
             'metadata': metadata.model_dump(exclude_none=True, by_alias=True),
@@ -221,7 +220,7 @@ class Velide:
         if self._api_config.use_neighbourhood and order.neighbourhood:
             variables_dict['neighbourhood'] = order.neighbourhood
         
-        return GraphQLVariables.model_validate(variables_dict)
+        return AddDeliveryVariables.model_validate(variables_dict)
 
     def _calculate_offset(self, created_at_time: datetime) -> int:
         """

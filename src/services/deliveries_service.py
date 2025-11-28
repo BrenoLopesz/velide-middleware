@@ -97,7 +97,7 @@ class DeliveriesService(QObject):
 
     def _on_deletion_success(self, internal_id: str, deleted_external_id: str):
         """Callback when API confirms deletion."""
-        self.logger.info(f"Entrega {internal_id} ({deleted_external_id}) cancelada nO Velide com sucesso.")
+        self.logger.info(f"Entrega {internal_id} ({deleted_external_id}) cancelada no Velide com sucesso.")
         self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
 
     def _on_delivery_failure(self, order_id: str, error_msg: str):
@@ -202,6 +202,10 @@ class DeliveriesService(QObject):
         """This is the entry point for the GENERIC workflow."""
         internal_id = normalized_order.internal_id
         self._active_deliveries[internal_id] = normalized_order
+
+        # TODO: "order_normalize" triggers both the UI and sending to Velide.
+        #       It is needed to has some way to display the delivery on the UI
+        #       (eg.: when the SQLite is hydrated), without adding to Velide.
 
         # 1. Acknowledge (to the UI)
         self.delivery_acknowledged.emit(internal_id, normalized_order)

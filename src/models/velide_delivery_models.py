@@ -36,24 +36,11 @@ class MetadataInput(BaseModel):
     customer_name: str = Field(..., min_length=1, alias="customerName")
     customer_contact: Optional[str] = Field(None, alias="customerContact")
 
-
-class GraphQLVariables(BaseModel):
-    """Variables for GraphQL mutation"""
-    metadata: Optional[MetadataInput]
-    address: str = Field(..., min_length=1)
-    offset: int = Field(0, ge=0, description="Offset in milliseconds")
-    
-    # Optional fields
-    address2: Optional[str] = None
-    neighbourhood: Optional[str] = None
-    reference: Optional[str] = None
-
-
 class AddDeliveryVariables(BaseModel):
     """Variables specifically for adding a delivery"""
     metadata: MetadataInput 
     address: str = Field(..., min_length=1)
-    offset: int = Field(0, ge=0)
+    offset: int = Field(0, ge=0, description="Offset in milliseconds")
     
     address2: Optional[str] = None
     neighbourhood: Optional[str] = None
@@ -111,7 +98,7 @@ class DeleteDeliveryData(BaseModel):
 class GraphQLResponse(BaseModel):
     """Complete GraphQL response"""
     # Add DeleteDeliveryData to the Union, or allow Dict[str, Any] as a fallback
-    data: Optional[Union[AddDeliveryData, GetDeliverymenData, DeleteDeliveryData, Dict[str, Any]]] = None
+    data: Optional[Union[AddDeliveryData, GetDeliverymenData, DeleteDeliveryData]] = None
     errors: Optional[list] = None
     
     @field_validator('data')
