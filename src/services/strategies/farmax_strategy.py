@@ -9,6 +9,7 @@ from connectors.farmax.farmax_mapper import FarmaxMapper
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_status_tracker import FarmaxStatusTracker
 from connectors.farmax.farmax_worker import FarmaxWorker
+from models.delivery_table_model import map_db_status_to_ui
 from models.farmax_models import FarmaxDelivery
 from models.velide_delivery_models import Order
 from services.strategies.connectable_strategy import IConnectableStrategy
@@ -106,6 +107,15 @@ class FarmaxStrategy(IConnectableStrategy):
             # TODO: Inject the specific status from persistence if your Order model supports it
             # current_status = self._persistence.get_current_status(order.internal_id)
             
+            # Get the PERSISTED status
+            current_db_status = self._persistence.get_current_status(order.internal_id)
+            
+            if current_db_status:
+                order.ui_status_hint = map_db_status_to_ui(current_db_status)
+            else:
+                # If persistence doesn't have it (weird edge case), default to Acknowledge
+                order.ui_status_hint = None 
+                
             self.order_restored.emit(order)
 
     # --- Public Interface Implementation (IConnectableStrategy) ---

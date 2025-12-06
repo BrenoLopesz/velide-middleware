@@ -29,9 +29,14 @@ class TrackingPersistenceService(QObject):
         self._sqlite = sqlite_service
         
         # --- In-Memory Cache ---
-        # Maps Normalized Internal ID ("623604") -> DeliveryStatus
+        
+        # Maps Normalized Internal ID ("623604") -> External ID (Velide UUID) (ACTIVE ONLY)
         self._status_cache: Dict[str, DeliveryStatus] = {}
         
+        # Set of Normalized Internal IDs that are finished/cancelled
+        # Acts as a "Do Not Ingest" blocklist.
+        self._archived_ids: Set[str] = set()
+
         # Maps Normalized Internal ID ("623604") -> External ID (Velide UUID)
         self._id_map: Dict[str, str] = {}
 
@@ -41,6 +46,8 @@ class TrackingPersistenceService(QObject):
     def initialize(self):
         """Starts the hydration process."""
         self.logger.info("Buscando entregas armazenadas...")
+
+        # We need ALL deliveries to build both the active and the blocklist
         self._sqlite.request_get_all_deliveries()
 
     # --- HELPER: ID NORMALIZATION ---
@@ -65,18 +72,34 @@ class TrackingPersistenceService(QObject):
         """
         [SLOT] Handles the result of get_all_deliveries.
         Populates the in-memory cache using NORMALIZED keys.
+        Segregates Active vs Archived based on Status.
         """
-        count = 0
+        count_active = 0
+        # count_archived = 0
+
         for external_id, internal_id, status in rows:
-            # Normalize immediately upon hydration
             norm_id = self._normalize_id(internal_id)
+
+            is_terminal = (
+                status == DeliveryStatus.CANCELLED or 
+                status == DeliveryStatus.DELIVERED or
+                status == DeliveryStatus.FAILED
+            )
+
+            if not is_terminal:
+                # ACTIVE: Goes to Cache (UI + Polling)
+                self._status_cache[norm_id] = status
+                self._id_map[norm_id] = external_id
+                count_active += 1
+            else:
+                # TERMINAL: Goes to Archive (Blocklist only)
+                self._archived_ids.add(norm_id)
+                # We also map external ID just in case we need to reference it later
+                # (Optional, depending on if you need to delete archived items)
+                self._id_map[norm_id] = external_id
+                # count_archived += 1
             
-            self._status_cache[norm_id] = status
-            self._id_map[norm_id] = external_id
-            count += 1
-            
-        if count > 0:            
-            self.logger.info(f"Entregas recuperadas. {count} entregas carregadas na memória.")
+        self.logger.info(f"Entregas recuperadas. {count_active} entregas carregadas na memória.")
         self.hydrated.emit()
 
     # --- Public API for Strategy ---
@@ -110,9 +133,11 @@ class TrackingPersistenceService(QObject):
 
     def is_tracked(self, internal_id: RawID) -> bool:
         """
-        Synchronous check: Is this ID currently being tracked?
+        Checks if the ID is known to the system (Active OR Archived).
+        This stops the Ingestor from re-fetching old stuff.
         """
-        return self._normalize_id(internal_id) in self._status_cache
+        norm_id = self._normalize_id(internal_id)
+        return (norm_id in self._status_cache) or (norm_id in self._archived_ids)
 
     def get_current_status(self, internal_id: RawID) -> Optional[DeliveryStatus]:
         """
@@ -123,10 +148,8 @@ class TrackingPersistenceService(QObject):
 
     def get_tracked_ids(self) -> List[float]:
         """
-        Returns list of all internal IDs currently tracked.
-        Converts the normalized string back to float for ERP compatibility.
+        Returns ONLY Active IDs for the Status Tracker to poll.
         """
-        # "12345" -> 12345.0
         return [float(k) for k in self._status_cache.keys()]
 
     def register_new_delivery(self, internal_id: RawID, external_id: str, status: DeliveryStatus):
@@ -185,15 +208,17 @@ class TrackingPersistenceService(QObject):
 
     def stop_tracking(self, internal_id: RawID):
         """
-        Removes the ID from the active cache. 
+        Moves an ID from Active Cache to Archive.
         """
         norm_id = self._normalize_id(internal_id)
         
         if norm_id in self._status_cache:
+            # Remove from Active
             del self._status_cache[norm_id]
-            if norm_id in self._id_map:
-                del self._id_map[norm_id]
-            self.logger.debug(f"Tracking parado e cache limpo para ID {norm_id}")
+            # Add to Archive (so Ingestor doesn't pick it up again)
+            self._archived_ids.add(norm_id)
+            
+            self.logger.debug(f"ID {norm_id} movido para arquivo (Stop Tracking).")
 
     # --- Extensions for FarmaxStatusTracker Compatibility ---
 

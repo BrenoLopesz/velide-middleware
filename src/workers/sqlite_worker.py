@@ -145,6 +145,13 @@ class SQLiteWorker(QRunnable):
     ) -> 'SQLiteWorker':
         """Factory method to create a worker for 'get_all_deliveries'."""
         return cls(signals, db_path, 'get_all_deliveries')
+    
+    @classmethod
+    def for_get_active_deliveries(
+        cls, signals: SQLiteWorkerSignals, db_path: str
+    ) -> 'SQLiteWorker':
+        """Factory method to create a worker for 'get_active_deliveries'."""
+        return cls(signals, db_path, 'get_active_deliveries')
 
     # -----------------------------------------------------------------
     # QRunnable Execution

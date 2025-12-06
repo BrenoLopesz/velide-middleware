@@ -230,3 +230,12 @@ class SQLiteService(QObject):
             SQLiteWorker.for_get_all_deliveries,
             result_signal=self.all_deliveries_found
         )
+
+    @pyqtSlot()
+    def request_get_active_deliveries(self):
+        """Asynchronously retrieves all delivery mappings."""
+        self.logger.debug("Solicitando todas as entregas ativas.")
+        self._create_and_run_worker(
+            SQLiteWorker.for_get_active_deliveries,
+            result_signal=self.all_deliveries_found
+        )

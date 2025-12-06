@@ -6,6 +6,7 @@ from PyQt5.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PyQt5.QtGui import QColor, QBrush
 from pydantic import BaseModel, Field
 
+from api.sqlite_manager import DeliveryStatus
 from models.velide_delivery_models import Order
 
 class DeliveryIdNotFoundError(LookupError):
@@ -20,6 +21,7 @@ class DeliveryRowStatus(Enum):
     ACKNOWLEDGE = "Reconhecido"
     SENDING = "Enviando..."
     ADDED = "Adicionado"
+    IN_PROGRESS = "Em Rota"
     DELETING = "Deletando..."
     CANCELLED = "Cancelado"
     ERROR = "Erro"
@@ -29,10 +31,30 @@ STATUS_COLORS = {
     DeliveryRowStatus.ACKNOWLEDGE: None,
     DeliveryRowStatus.SENDING: QBrush(QColor(0, 152, 210)),
     DeliveryRowStatus.ADDED: QBrush(QColor(74, 160, 53)),
+    DeliveryRowStatus.IN_PROGRESS: QBrush(QColor(5, 129, 206)),
     DeliveryRowStatus.ERROR: QBrush(QColor(231, 98, 104)), 
     DeliveryRowStatus.DELETING: QBrush(QColor(233, 149, 33)),
     DeliveryRowStatus.CANCELLED: QBrush(QColor(211, 118, 0)),
 }
+
+# This serves as the single source of truth for converting Backend -> UI.
+DB_TO_UI_MAP = {
+    # Backend (SQLite)          # UI (Table Row)
+    DeliveryStatus.PENDING:     DeliveryRowStatus.SENDING,
+    DeliveryStatus.SENDING:     DeliveryRowStatus.SENDING,
+    DeliveryStatus.ADDED:       DeliveryRowStatus.ADDED,
+    DeliveryStatus.IN_PROGRESS: DeliveryRowStatus.IN_PROGRESS,
+    
+    # Terminal States (Mapped for completeness/live updates)
+    # TODO: Use a specific 'DONE' status
+    DeliveryStatus.DELIVERED:   DeliveryRowStatus.ADDED, 
+    DeliveryStatus.CANCELLED:   DeliveryRowStatus.CANCELLED,
+    DeliveryStatus.FAILED:      DeliveryRowStatus.ERROR,
+}
+
+def map_db_status_to_ui(db_status: DeliveryStatus) -> DeliveryRowStatus:
+    """Safe retrieval wrapper with a fallback."""
+    return DB_TO_UI_MAP.get(db_status, DeliveryRowStatus.UNDEFINED)
 
 class DeliveryRowModel(BaseModel):
     id: str = Field(..., description="Unique ID related to this delivery.")

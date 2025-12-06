@@ -460,3 +460,36 @@ class SQLiteManager:
         except ValueError as e:
             self.logger.error(f"Erro ao converter status do DB para Enum: {e}")
             return []
+        
+    @require_connection
+    def get_active_deliveries(self) -> List[Tuple[str, str, DeliveryStatus]]:
+        """
+        Retrieves ONLY active deliveries (Pending, Sending, Added, In Progress).
+        Excludes Terminal states (Delivered, Failed, Cancelled).
+        """
+        # Define terminal states
+        terminal_states = (
+            DeliveryStatus.DELIVERED.value,
+            DeliveryStatus.FAILED.value,
+            DeliveryStatus.CANCELLED.value
+        )
+        
+        # Create placeholders for the query (?, ?, ?)
+        placeholders = ', '.join('?' for _ in terminal_states)
+        
+        query = f"""
+            SELECT external_delivery_id, internal_delivery_id, status 
+            FROM DeliveryMapping 
+            WHERE status NOT IN ({placeholders})
+        """
+        
+        try:
+            cursor = self.conn.execute(query, terminal_states)
+            rows = cursor.fetchall()
+            return [(row[0], row[1], DeliveryStatus(row[2])) for row in rows]
+        except sqlite3.Error as e:
+            self.logger.error(f"Erro ao buscar entregas ativas: {e}")
+            return []
+        except ValueError as e:
+            self.logger.error(f"Erro de conversão de Enum: {e}")
+            return []
