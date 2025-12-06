@@ -1,9 +1,11 @@
 from __future__ import annotations
+from states.websocket_fsm import WebSocketFSM
 from PyQt5.QtCore import QStateMachine, QState, pyqtSignal
 
 from states.logged_in_state import LoggedInState
 from states.logged_out_state import LoggedOutState
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from models.app_context_model import Services
 
@@ -32,6 +34,8 @@ class MainStateMachine(QStateMachine):
         # --- Main Application States ---
         self.logged_out_state = LoggedOutState(self.services)
         self.logged_in_state = LoggedInState(self.services)
+
+        self.websockets_state = WebSocketFSM(self.services)
 
         # --- Utility States ---
         self.error_state = QState()

@@ -24,6 +24,7 @@ from services.auth_service import AuthService
 from presenters.app_presenter import AppPresenter
 from services.strategies.farmax_strategy import FarmaxStrategy
 from services.tracking_persistence_service import TrackingPersistenceService
+from services.velide_websockets_service import VelideWebsocketsService
 from states.main_state_machine import MainStateMachine
 from utils.sql_utils import get_farmax_engine_string
 from visual.main_view import MainView
@@ -144,12 +145,14 @@ def build_services(app_config: Settings) -> Services:
     deliveries_service.set_strategy(strategy)
     
     deliverymen_retriever_service = DeliverymenRetrieverService(app_config.api, app_config.target_system, strategy)
+    websockets_service = VelideWebsocketsService(app_config.api)
 
     return Services(
         auth=auth_service,
         deliveries=deliveries_service,
         sqlite=sqlite_service,
-        deliverymen_retriever=deliverymen_retriever_service
+        deliverymen_retriever=deliverymen_retriever_service,
+        websockets=websockets_service
     )
 
 # --- Main Execution ---

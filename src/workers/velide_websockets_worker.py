@@ -1,15 +1,14 @@
 import logging
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from PyQt5.QtCore import QRunnable, QObject, pyqtSignal
 from gql import gql, Client
 from gql.transport.websockets import WebsocketsTransport
 from pydantic import ValidationError
+from websockets.exceptions import ConnectionClosedError
 
-# --- Assuming these are in your project ---
 from config import ApiConfig
-# We'll import the Pydantic model from the file below
 from models.velide_websockets_models import LatestAction 
 
 class VelideWebsocketsSignals(QObject):
@@ -30,6 +29,12 @@ class VelideWebsocketsSignals(QObject):
     action_received = pyqtSignal(object)
     error_occurred = pyqtSignal(str)
     connection_closed = pyqtSignal(str)
+    
+    # 1. ADDED: This signal was missing
+    finished = pyqtSignal()
+    
+    # 2. ADDED: Essential for the Service Adapter
+    status_changed = pyqtSignal(bool)
 
 
 class VelideWebsocketsWorker(QRunnable):
@@ -61,52 +66,37 @@ class VelideWebsocketsWorker(QRunnable):
         self.access_token = access_token
         self.signals = VelideWebsocketsSignals()
         self.logger = logging.getLogger(__name__)
-
-
-        # 1. Configure Transport with standard auth headers
-        # This payload is sent once during the 'connection_init' message
-        auth_payload = {
-            "headers": {
-                "Authorization": f"Bearer {self.api_config.auth_token}"
-            }
-        }
         
-        self.transport = WebsocketsTransport(
-            url=self.api_config.velide_websockets_server,
-            connect_params=auth_payload
-        )
+        # Control flag
+        self._is_running = True
+        
+        # Reference to transport to allow forcing close if needed
+        self._transport: Optional[WebsocketsTransport] = None
 
-        # 2. Configure GQL Client
-        self.client = Client(
-            transport=self.transport,
-            fetch_schema_from_transport=True
-        )
+    def stop(self):
+        """Method to call from the main thread to stop the worker."""
+        self._is_running = False
+        self.logger.info("Solicitação de parada do WebSocket recebida.")
+        # Optional: You could try to force close self._transport here if 
+        # the loop is stuck, but usually the loop checks _is_running fast enough.
 
     def run(self) -> None:
-        """
-        Synchronous entry point for the QRunnable.
-        This method sets up and runs the asynchronous event loop.
-        """
         try:
-            self.logger.info("Inciando conexão com o Velide...")
-            # asyncio.run() creates a new event loop and runs the coroutine
+            self.logger.info("Iniciando thread do WebSocket Velide...")
             asyncio.run(self._run_async())
-        
         except Exception as e:
-            # Catch any unexpected shutdown errors
-            self.logger.exception(f"Ocorreu uma falha inesperada durante a conexão com o Velide.")
+            self.logger.exception("Falha fatal no Worker.")
             self.signals.error_occurred.emit(str(e))
-        
         finally:
-            self.logger.info("Conexão com o Velide foi fechada.")
-            self.signals.connection_closed.emit("Conexão fechada.")
+            self.signals.connection_closed.emit("Worker finished.")
+            # Ensure we tell the service we are offline effectively
+            self.signals.status_changed.emit(False)
+            
+            # 3. ADDED: Emit 'finished' so the Service knows the thread is dead
+            self.signals.finished.emit()
 
     async def _run_async(self):
-        """
-        The main asynchronous logic for the WebSocket subscription.
-        """
-        
-        # 3. Define the GraphQL Subscription Query
+        # Defines the subscription query
         subscription_query = gql("""
             subscription LatestAction($authorization: String!) {
                 latestAction(authorization: $authorization) {
@@ -119,51 +109,71 @@ class VelideWebsocketsWorker(QRunnable):
                     }
                     delivery {
                         id
-                        code
+                        routeId
+                        createdAt
+                        endedAt
                     }
                 }
             }
         """)
 
-        # 4. Define the variables for the subscription
-        # This is passed with the 'subscribe' message
-        # Note: This is separate from the 'connect_params' auth
-        variables: Dict[str, Any] = {
-            "authorization": self.api_config.auth_token
-        }
+        variables: Dict[str, Any] = {"authorization": self.access_token}
+
+        retry_delay = 2
         
-        try:
-            # 5. Start the client session and subscribe
-            async with self.client as session:
-                # The 'subscribe' method returns an async generator
-                async for data in session.subscribe(
-                    subscription_query,
-                    variable_values=variables
-                ):
-                    self.logger.debug(f"Raw data received: {data}")
+        while self._is_running:
+            try:
+                # Protocol: graphql-transport-ws
+                # We use init_payload={} because the server expects the standard handshake
+                self._transport = WebsocketsTransport(
+                    url=self.api_config.velide_websockets_server,
+                    init_payload={}, 
+                    keep_alive_timeout=60,
+                    ping_interval=30 
+                )
+                
+                async with Client(transport=self._transport, fetch_schema_from_transport=False) as session:
+                    self.logger.info("Conectado ao WebSocket Velide.")
                     
-                    # 6. Validate the received data with Pydantic
-                    try:
-                        # Extract the data nested under the query name
-                        action_data = data['latestAction']
+                    # Signal: Connected (Green Light)
+                    self.signals.status_changed.emit(True)
+                    
+                    retry_delay = 2 # Reset delay
+                    
+                    async for data in session.subscribe(subscription_query, variable_values=variables):
+                        if not self._is_running:
+                            break
                         
-                        # Validate and parse the data
-                        # This raises ValidationError if parsing fails
-                        validated_action = LatestAction.model_validate(action_data)
-                        
-                        self.logger.debug(f"Received valid action: {validated_action.action_type}")
-                        
-                        # 7. Emit the validated Pydantic model
-                        self.signals.action_received.emit(validated_action)
+                        try:
+                            # Use .get to be safe
+                            action_data = data.get('latestAction')
+                            if action_data:
+                                validated_action = LatestAction.model_validate(action_data)
+                                self.signals.action_received.emit(validated_action)
 
-                    except ValidationError as e:
-                        self.logger.warning(f"Falha ao validar dados recebidos do Velide.")
-                        self.signals.error_occurred.emit(f"Erro de validação: {e}")
-                    except KeyError:
-                        self.logger.warning(f"Recebido dado faltando informações, durante conexão com Velide.")
-                        self.signals.error_occurred.emit("Estrutura dos dados inválida")
+                        except ValidationError as e:
+                            self.logger.error(f"Erro de validação: {e}")
+                            # Do not emit error signal here to avoid spamming the UI 
+                            # if the server sends bad data repeatedly
+                        except KeyError:
+                            self.logger.error("Dados incompletos recebidos.")
 
-        except Exception as e:
-            # Handles connection errors, transport errors, etc.
-            self.logger.exception(f"Ocorreu um erro inesperado.")
-            self.signals.error_occurred.emit(f"Erro no WebSocket: {e}")
+            except (ConnectionClosedError, ConnectionRefusedError, asyncio.TimeoutError, OSError) as e:
+                # Signal: Disconnected (Red Light)
+                self.signals.status_changed.emit(False)
+                
+                self.logger.warning(f"Conexão perdida ({e}). Tentando reconectar em {retry_delay}s...")
+                # Note: We do NOT emit error_occurred here to avoid spamming the UI 
+                # with popups. The status_changed(False) is enough for the UI to turn red.
+                
+            except Exception as e:
+                self.logger.exception("Erro inesperado no loop Websocket.")
+                self.signals.status_changed.emit(False)
+                self.signals.error_occurred.emit(str(e))
+            
+            finally:
+                self._transport = None
+
+            if self._is_running:
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 60)

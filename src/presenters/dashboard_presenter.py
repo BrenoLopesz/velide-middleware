@@ -1,4 +1,5 @@
 from __future__ import annotations
+from states.main_state_machine import MainStateMachine
 import logging
 from PyQt5.QtCore import QObject
 from pydantic import ValidationError
@@ -6,7 +7,6 @@ from models.delivery_table_model import DeliveryRowModel, DeliveryRowStatus, Del
 from models.velide_delivery_models import Order
 from services.auth_service import AuthService
 from services.deliveries_service import DeliveriesService
-from states.main_state_machine import MainStateMachine
 from visual.main_view import MainView
 from visual.screens.dashboard_screen import DashboardScreen
 from typing import TYPE_CHECKING
@@ -29,10 +29,12 @@ class DashboardPresenter(QObject):
     def start(self):
         """Called when the dashboard becomes active."""
         self._services.deliveries.start_listening()
+        self._services.websockets.start_service()
         
     def on_authenticate(self):
         access_token = self._machine.logged_in_state.property("access_token")
         self._services.deliveries.set_access_token(access_token)
+        self._services.websockets.set_access_token(access_token)
 
     def _connect_signals(self):
         # TODO: Create states for this.

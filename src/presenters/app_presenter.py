@@ -13,9 +13,9 @@ views (like authentication, dashboard, and setup) using a finite state machine.
 # Imports
 # ----------------------------------------------------------------------------
 from __future__ import annotations
+from presenters.dashboard_presenter import DashboardPresenter
 from typing import Optional
 from PyQt5.QtCore import QObject
-from presenters.dashboard_presenter import DashboardPresenter
 from presenters.deliverymen_mapping_presenter import DeliverymenMappingPresenter
 from presenters.device_code_presenter import DeviceCodePresenter
 from states.main_state_machine import MainStateMachine
