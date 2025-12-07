@@ -15,6 +15,7 @@ from models.velide_delivery_models import Order
 from services.strategies.connectable_strategy import IConnectableStrategy
 from services.tracking_persistence_service import TrackingPersistenceService
 from api.sqlite_manager import DeliveryStatus
+from services.velide_websockets_service import VelideWebsocketsService
 
 class FarmaxStrategy(IConnectableStrategy):
     """
@@ -28,13 +29,15 @@ class FarmaxStrategy(IConnectableStrategy):
         self, 
         farmax_config: FarmaxConfig, 
         farmax_repository: FarmaxRepository,
-        persistence_service: TrackingPersistenceService
+        persistence_service: TrackingPersistenceService,
+        websockets_service: VelideWebsocketsService
     ):
         super().__init__()
         self._logger = logging.getLogger(__name__)
         self._config = farmax_config
         self._repository = farmax_repository
         self._persistence = persistence_service
+        self._websockets = websockets_service
         self._thread_pool = None # Initialized by globalInstance usually, or in workers
 
         # --- Initialize Sub-Services ---
@@ -132,6 +135,9 @@ class FarmaxStrategy(IConnectableStrategy):
         # but handled here for simplicity.
         self._ingestor.start()
         self._status_tracker.start()
+
+        # Subscribes to Velide Websockets
+        self._websockets.start_service()
 
     def stop_listening(self):
         """Stops all polling services."""
