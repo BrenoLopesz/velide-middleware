@@ -9,18 +9,26 @@ from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_dispatcher import DeliveryDispatcher
 from services.strategies.connectable_strategy import IConnectableStrategy
 from models.velide_delivery_models import Order
+from services.velide_action_handler import VelideActionHandler
 
 class DeliveriesService(QObject):
     delivery_acknowledged = pyqtSignal(str, Order)
     delivery_update = pyqtSignal(str, DeliveryRowStatus)
     delivery_failed = pyqtSignal(str, str) # Order ID, error message
 
-    def __init__(self, api_config: ApiConfig, target_system: TargetSystem):
+    def __init__(
+            self, 
+            api_config: ApiConfig, 
+            target_system: TargetSystem, 
+            delivery_repository: DeliveryRepository,
+            velide_action_handler: VelideActionHandler
+        ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         
         # 1. DEPENDENCY INJECTION / COMPOSITION
-        self._repository = DeliveryRepository()
+        self._repository = delivery_repository
+        self._action_handler = velide_action_handler
         self._dispatcher = DeliveryDispatcher(QThreadPool.globalInstance())
         
         # 2. CONFIGURATION
@@ -31,9 +39,12 @@ class DeliveriesService(QObject):
 
         # 3. CONNECT INTERNAL DISPATCHER SIGNALS
         # This bridges the gap between the Worker -> Dispatcher -> Service
-        self._dispatcher.delivery_success.connect(self._on_delivery_success)
-        self._dispatcher.deletion_success.connect(self._on_deletion_success)
-        self._dispatcher.task_failed.connect(self._on_delivery_failure)
+        self._dispatcher.delivery_success.connect(self._on_add_delivery_request_success)
+        self._dispatcher.deletion_success.connect(self._on_deletion_request_success)
+        self._dispatcher.task_failed.connect(self._on_delivery_request_failure)
+
+        # 4. CONNECT VELIDE ACTION HANDLER SIGNALS
+        self._action_handler.delivery_deleted.connect(self._on_delivery_deleted_in_velide)
 
     def set_access_token(self, access_token: str):
         self._velide_api = Velide(access_token, self._api_config, self._target_system)
@@ -57,7 +68,7 @@ class DeliveriesService(QObject):
         
         # Connect Strategy Signals
         self._active_strategy.order_normalized.connect(self._on_order_normalized)
-        self._active_strategy.order_cancelled.connect(self._on_order_cancelled)
+        self._active_strategy.order_cancelled.connect(self._on_internal_order_cancelled)
         self._active_strategy.order_restored.connect(self._on_order_restored)
 
     def start_listening(self):
@@ -121,7 +132,7 @@ class DeliveriesService(QObject):
             self.logger.exception(f"Falha inesperada ao adicionar pedido {internal_id} à fila.")
             self.delivery_update.emit(internal_id, DeliveryRowStatus.ERROR)
 
-    def _on_order_cancelled(self, internal_id: str, external_id: Optional[str]):
+    def _on_internal_order_cancelled(self, internal_id: str, external_id: Optional[str]):
         """
         Handles cancellation requests.
         Logic: Check Queue (Optimization) -> OR -> Send Delete Task.
@@ -152,7 +163,7 @@ class DeliveriesService(QObject):
     # DISPATCHER CALLBACKS (Results from API)
     # =========================================================================
 
-    def _on_delivery_success(self, internal_id: str, external_id: str):
+    def _on_add_delivery_request_success(self, internal_id: str, external_id: str):
         """Called when Dispatcher successfully POSTs to Velide."""
         
         # 1. Link IDs in Repository (Crucial for Websockets!)
@@ -171,15 +182,20 @@ class DeliveriesService(QObject):
         # Recommendation: Keep it in memory, or move it to a "Completed" list if needed.
         # self._repository.remove(internal_id) <--- REMOVED this compared to original to allow WS updates
 
-    def _on_deletion_success(self, internal_id: str, external_id: str):
+    def _on_deletion_request_success(self, internal_id: str, external_id: str):
         """Called when Dispatcher successfully DELETEs from Velide."""
         self.logger.info(f"Entrega {internal_id} ({external_id}) cancelada no Velide com sucesso.")
         self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
         self._repository.remove(internal_id)
 
-    def _on_delivery_failure(self, internal_id: str, error_msg: str):
+    def _on_delivery_request_failure(self, internal_id: str, error_msg: str):
         """Called when Dispatcher encounters an error."""
         self.delivery_failed.emit(internal_id, error_msg)
         self.delivery_update.emit(internal_id, DeliveryRowStatus.ERROR)
         # Original code removed it on failure. Depending on retry logic, you might want to keep it.
         # self._repository.remove(internal_id)
+
+    def _on_delivery_deleted_in_velide(self, order: Order):
+        self.logger.debug("Solicitando strategy para lidar com a entrega deletada.")
+        self._active_strategy.on_delivery_deleted_on_velide(order)
+        self.delivery_update.emit(order.internal_id, DeliveryRowStatus.CANCELLED)

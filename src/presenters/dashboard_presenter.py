@@ -39,6 +39,7 @@ class DashboardPresenter(QObject):
         # TODO: Create states for this.
         self._services.deliveries.delivery_acknowledged.connect(self._on_delivery_acknowledged)
         self._services.deliveries.delivery_update.connect(self._on_delivery_status_update)
+        self._services.websockets.action_received.connect(self._services.velide_action_handler.handle_action)
 
     def _on_log_received(self, created_at, level, message):
         self._dashboard_view.log_table.add_row(created_at, level, message)

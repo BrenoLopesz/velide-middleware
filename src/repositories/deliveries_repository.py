@@ -34,5 +34,3 @@ class DeliveryRepository:
         """Maps the Velide ID to the ERP ID."""
         if internal_id in self._orders:
             self._external_to_internal[external_id] = internal_id
-            # Update the object itself if needed
-            self._orders[internal_id].external_id = external_id

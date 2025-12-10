@@ -181,6 +181,12 @@ class FarmaxStrategy(IConnectableStrategy):
             self._logger.warning(f"Falha na integração para o ID {internal_id}. Liberando reserva.")
             self._persistence.release_reservation(internal_id)
 
+    def on_delivery_deleted_on_velide(self, order: Order):
+        self._persistence.mark_as_cancelled(order.internal_id)
+        # TODO: Add a property on the order to allow checking if 
+        # the cancellation was requested internally or not.
+        self.logger.info(f"Uma entrega ({order.internal_id}) foi deletada no Velide.")
+
     # --- Internal Slots ---
 
     @pyqtSlot(list)

@@ -16,6 +16,7 @@ from models.app_context_model import Services
 from presenters.dashboard_presenter import DashboardPresenter
 from presenters.deliverymen_mapping_presenter import DeliverymenMappingPresenter
 from presenters.device_code_presenter import DeviceCodePresenter
+from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_service import DeliveriesService
 from services.deliverymen_retriever_service import DeliverymenRetrieverService
 from services.sqlite_service import SQLiteService
@@ -24,6 +25,7 @@ from services.auth_service import AuthService
 from presenters.app_presenter import AppPresenter
 from services.strategies.farmax_strategy import FarmaxStrategy
 from services.tracking_persistence_service import TrackingPersistenceService
+from services.velide_action_handler import VelideActionHandler
 from services.velide_websockets_service import VelideWebsocketsService
 from states.main_state_machine import MainStateMachine
 from utils.sql_utils import get_farmax_engine_string
@@ -109,7 +111,11 @@ def configure_logging(view: MainView):
     log_handler.new_log.connect(view.dashboard_screen.log_table.add_row)
     setup_logging(log_handler)  # Assuming this configures the root logger
 
-def create_strategy(app_config: Settings, tracking_persistence_service: TrackingPersistenceService):
+def create_strategy(
+        app_config: Settings, 
+        tracking_persistence_service: TrackingPersistenceService,
+        websockets_service: VelideWebsocketsService
+    ):
     """Factory function to create the correct delivery strategy."""
     if app_config.target_system == TargetSystem.CDS:
         return CdsStrategy(app_config.api, app_config.folder_to_watch)
@@ -128,7 +134,8 @@ def create_strategy(app_config: Settings, tracking_persistence_service: Tracking
             farmax_config=app_config.farmax,
             # farmax_setup=farmax_setup, 
             farmax_repository=farmax_repository,
-            persistence_service=tracking_persistence_service
+            persistence_service=tracking_persistence_service,
+            websockets_service=websockets_service
         )
     
     # Handles missing strategy
@@ -137,22 +144,31 @@ def create_strategy(app_config: Settings, tracking_persistence_service: Tracking
 def build_services(app_config: Settings) -> Services:
     """Creates and wires together all core application services."""
     auth_service = AuthService(app_config.auth)
-    deliveries_service = DeliveriesService(app_config.api, app_config.target_system)
+    delivery_repository = DeliveryRepository()
+    velide_action_handler = VelideActionHandler(delivery_repository)
+    deliveries_service = DeliveriesService(
+        api_config=app_config.api, 
+        target_system=app_config.target_system, 
+        delivery_repository=delivery_repository,
+        velide_action_handler=velide_action_handler
+    )
     sqlite_service = SQLiteService(os.path.join(BUNDLE_DIR, app_config.sqlite_path))
     tracking_persistance_service = TrackingPersistenceService(sqlite_service)
+    websockets_service = VelideWebsocketsService(app_config.api)
     
-    strategy = create_strategy(app_config, tracking_persistance_service)
+    strategy = create_strategy(app_config, tracking_persistance_service, websockets_service)
     deliveries_service.set_strategy(strategy)
     
     deliverymen_retriever_service = DeliverymenRetrieverService(app_config.api, app_config.target_system, strategy)
-    websockets_service = VelideWebsocketsService(app_config.api)
 
     return Services(
         auth=auth_service,
         deliveries=deliveries_service,
         sqlite=sqlite_service,
         deliverymen_retriever=deliverymen_retriever_service,
-        websockets=websockets_service
+        websockets=websockets_service,
+        delivery_repository=delivery_repository,
+        velide_action_handler=velide_action_handler
     )
 
 # --- Main Execution ---

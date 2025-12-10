@@ -48,3 +48,7 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):
     def on_delivery_failed(self, internal_id: Optional[float]):
         """Optional callback function to receive deliveries added notifications."""
         pass
+
+    def on_delivery_deleted_on_velide(self, order: Order):
+        """Optional callback function called when a deleted deliver is detected through Websockets."""
+        pass
