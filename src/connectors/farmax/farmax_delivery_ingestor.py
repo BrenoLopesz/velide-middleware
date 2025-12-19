@@ -91,6 +91,9 @@ class FarmaxDeliveryIngestor(QObject):
         
         # Retry State
         self._retry_count = 0
+
+        # Used to avoid race conditions with different polling threads
+        self._is_processing_cycle = False
         
         # Timers
         self._poll_timer = QTimer(self)
@@ -108,6 +111,7 @@ class FarmaxDeliveryIngestor(QObject):
             return
 
         self._is_running = True
+        self._is_processing_cycle = False # Reset state on fresh start
         self._cursor.set_initial_time(self._get_midnight_timestamp())
         
         self._logger.info("Iniciando o ingestor de entregas Farmax...")
@@ -116,7 +120,7 @@ class FarmaxDeliveryIngestor(QObject):
 
     def stop(self) -> None:
         """Stops polling and pending retries."""
-        self._logger.info("Parando o nigestor de entregas Farmax...")
+        self._logger.info("Parando o ingestor de entregas Farmax...")
         self._is_running = False
         self._poll_timer.stop()
         self._retry_timer.stop()
@@ -131,6 +135,13 @@ class FarmaxDeliveryIngestor(QObject):
         """Initiates the worker to check the logs."""
         if not self._is_running:
             return
+        
+        # Prevent overlap
+        if self._is_processing_cycle:
+            self._logger.debug("Ciclo anterior ainda em andamento. Pulando poll.")
+            return
+        
+        self._is_processing_cycle = True
 
         # Factory logic for worker based on cursor state
         if self._cursor.is_steady_state:
@@ -156,10 +167,12 @@ class FarmaxDeliveryIngestor(QObject):
         Filters logs and decides if we need to fetch details.
         """
         if not self._is_running:
+            self._is_processing_cycle = False # Release
             return
 
         if not logs:
             # Nothing happened, wait for next cycle
+            self._is_processing_cycle = False # Release
             return
 
         # 1. Identify relevant IDs (INSERT + Not Tracked)
@@ -177,6 +190,7 @@ class FarmaxDeliveryIngestor(QObject):
             # We found logs (e.g., updates), but no new inserts we care about.
             # Safe to advance cursor immediately.
             self._cursor.commit()
+            self._is_processing_cycle = False # Release lock
             return
 
         if len(ids_to_fetch) == 1:
@@ -208,6 +222,7 @@ class FarmaxDeliveryIngestor(QObject):
         Normalizes data and commits the transaction.
         """
         if not self._is_running:
+            self._is_processing_cycle = False # Release lock
             return
 
         processed_orders: List[Order] = []
@@ -233,6 +248,9 @@ class FarmaxDeliveryIngestor(QObject):
             self._logger.error(f"Erro crítico ao processar detalhes da entrega: {e}")
             self.error_occurred.emit(str(e))
             # Do NOT commit cursor. Next poll cycle will pick this up again.
+        finally:
+            # ALWAYS Release lock so the next timer tick can work
+            self._is_processing_cycle = False
 
     def _on_fetch_details_error(self, error_msg: str, payload: Tuple[float, ...]) -> None:
         """
@@ -240,6 +258,7 @@ class FarmaxDeliveryIngestor(QObject):
         Implements Exponential Backoff.
         """
         if not self._is_running:
+            self._is_processing_cycle = False # Release lock
             return
 
         self._logger.warning(f"Falha ao buscar detalhes (Tentativa {self._retry_count + 1}): {error_msg}")
@@ -248,6 +267,8 @@ class FarmaxDeliveryIngestor(QObject):
         self._poll_timer.stop()
 
         if self._retry_count < self._config.max_retries:
+            # DO NOT set self._is_processing = False here.
+            # We are still technically "processing" this batch, just waiting.
             self._retry_count += 1
             delay = self._config.base_backoff_ms * (2 ** (self._retry_count - 1))
             
@@ -262,12 +283,15 @@ class FarmaxDeliveryIngestor(QObject):
             self._retry_timer.timeout.connect(partial(self._fetch_details_payload, sale_ids=payload))
             self._retry_timer.start(delay)
         else:
+            # We gave up. NOW we release the lock.
             self._logger.error(f"Máximo de tentativas ({self._config.max_retries}) excedido. Pulando lote.")
             self.error_occurred.emit(f"Falha ao ingerir lote após tentativas: {error_msg}")
             
             # Reset retry state
             self._retry_count = 0
             self._cursor.rollback() # Don't advance ID
+
+            self._is_processing_cycle = False  # <--- Release Lock Here
             
             # Restart main loop; the system acts as a Dead Letter Queue (tries again later)
             self._poll_timer.start(self._config.poll_interval_ms)
@@ -275,8 +299,11 @@ class FarmaxDeliveryIngestor(QObject):
     def _on_poll_error(self, error_msg: str) -> None:
         """Handles failure of the initial Log Poll."""
         self._logger.error(f"Erro ao consultar adição de entregas: {error_msg}")
-        self.error_occurred.emit(f"Erro na Consulta de Log: {error_msg}")
+        self.error_occurred.emit(f"Erro na consulta de entregas: {error_msg}")
         # The main timer is interval-based, so it will try again automatically.
+
+        # Release the lock so the timer can try again later
+        self._is_processing_cycle = False
 
     # --- Helpers ---
 
