@@ -96,7 +96,7 @@ class FarmaxRepository:
         with self._engine.connect() as conn:
             result = conn.execute(query, params)
             rows = result.fetchall()
-            row_dicts = [dict(row._mapping) for row in rows]
+            row_dicts = [{k.lower(): v for k, v in row._mapping.items()} for row in rows]
             return [FarmaxSale.model_validate(row_dict) for row_dict in row_dicts]
 
     def fetch_deliveries_by_id(self, cd_vendas: Tuple[float]) -> List[FarmaxDelivery]:
@@ -171,7 +171,7 @@ class FarmaxRepository:
         with self._engine.connect() as conn:
             result = conn.execute(text(query_str), params)
             rows = result.fetchall()
-            row_dicts = [dict(row._mapping) for row in rows]
+            row_dicts = [{k.lower(): v for k, v in row._mapping.items()} for row in rows]
             
             # Directly convert the complete rows to Pydantic models
             return [FarmaxDelivery.model_validate(row_dict) for row_dict in row_dicts]
@@ -188,7 +188,7 @@ class FarmaxRepository:
         with self._engine.connect() as conn:
             result = conn.execute(query, {"last_check": last_check_time})
             rows = result.fetchall()
-            row_dicts = [dict(row._mapping) for row in rows]
+            row_dicts = [{k.lower(): v for k, v in row._mapping.items()} for row in rows]
             return [DeliveryLog.model_validate(row_dict) for row_dict in row_dicts]
         
     def fetch_recent_changes_by_id(self, last_id: int) -> List[DeliveryLog]:
@@ -203,7 +203,7 @@ class FarmaxRepository:
         with self._engine.connect() as conn:
             result = conn.execute(query, {"last_id": last_id})
             rows = result.fetchall()
-            row_dicts = [dict(row._mapping) for row in rows]
+            row_dicts = [{k.lower(): v for k, v in row._mapping.items()} for row in rows]
             return [DeliveryLog.model_validate(row_dict) for row_dict in row_dicts]
 
     def fetch_deliverymen(self) -> List[FarmaxDeliveryman]:
