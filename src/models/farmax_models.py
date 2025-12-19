@@ -26,12 +26,12 @@ class FarmaxDelivery(BaseModel):
     # We use aliases to map the database's uppercase names 
     # to clean, Pythonic lowercase names.
     sale_id: float = Field(..., alias="cd_venda")
-    customer_name: Optional[str] = Field(alias="nome")
-    customer_contact: Optional[str] = Field(alias="fone")
-    route_start_time: Optional[time] = Field(alias="hora_saida")  # HORA_SAIDA could be NULL
-    neighborhood: Optional[str] = Field(alias="bairro") # BAIRRO could be NULL
-    address: Optional[str] = Field(alias="tempendereco")
-    reference: Optional[str] = Field(alias="tempreferencia")
+    customer_name: str = Field(..., alias="nome")
+    customer_contact: Optional[str] = Field(default=None, alias="fone")
+    route_start_time: Optional[time] = Field(default=None, alias="hora_saida")  # HORA_SAIDA could be NULL
+    neighborhood: Optional[str] = Field(default=None, alias="bairro") # BAIRRO could be NULL
+    address: Optional[str] = Field(default=None, alias="tempendereco")
+    reference: Optional[str] = Field(default=None, alias="tempreferencia")
     delivery_date: date = Field(..., alias="data") 
     delivery_time: time = Field(..., alias="hora")
 

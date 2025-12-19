@@ -36,7 +36,7 @@ class FarmaxMapper:
             
             # Address Block
             address=FarmaxMapper._safe_str(delivery.address),
-            neighborhood=FarmaxMapper._safe_str(getattr(delivery, "neighborhood", None)),
+            neighbourhood=FarmaxMapper._safe_str(getattr(delivery, "neighborhood", None)),
             reference=FarmaxMapper._safe_str(getattr(delivery, "reference", None)),
             
             # Metadata
