@@ -2,16 +2,15 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, date
 from functools import partial
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional, Tuple
 
 from PyQt5.QtCore import pyqtSignal, QObject, QThreadPool, QTimer
 
 # Assumed imports based on previous context
-from config import FarmaxConfig
 from connectors.farmax.farmax_mapper import FarmaxMapper
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_worker import FarmaxWorker
-from models.farmax_models import FarmaxAction, FarmaxDelivery, DeliveryLog
+from models.farmax_models import FarmaxDelivery, DeliveryLog
 from models.velide_delivery_models import Order
 from services.tracking_persistence_service import TrackingPersistenceService
 
@@ -194,7 +193,7 @@ class FarmaxDeliveryIngestor(QObject):
             return
 
         if len(ids_to_fetch) == 1:
-            self._logger.info(f"Detectado uma nova entrega potencial.")
+            self._logger.info("Detectado uma nova entrega potencial.")
         else:
             self._logger.info(f"Detectadas {len(ids_to_fetch)} novas entregas potenciais.")
         

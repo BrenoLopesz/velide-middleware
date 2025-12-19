@@ -85,7 +85,7 @@ class SQLiteManager:
             
             self._create_tables()
             return self
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             self.logger.exception(f"Erro ao conectar ao banco de dados em {self.db_path}.")
             raise
 
@@ -105,8 +105,8 @@ class SQLiteManager:
                 else:
                     self.logger.warning(f"Desfazendo mudanças devido ao erro: {exc_val}")
                     self.conn.rollback()
-            except sqlite3.Error as e:
-                self.logger.exception(f"Erro durante saída.")
+            except sqlite3.Error:
+                self.logger.exception("Erro durante saída.")
             finally:
                 self.conn.close()
                 self.conn = None
@@ -154,7 +154,7 @@ class SQLiteManager:
             self.conn.execute(create_deliverymen_table_query)
             self.conn.execute(create_delivery_table_query)
             self.conn.execute(create_trigger_query)
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             self.logger.exception("Falha ao criar tabelas ou trigger.")
             raise
     # -----------------------------------------------------------------
@@ -184,7 +184,7 @@ class SQLiteManager:
             # UNIQUE (local_id) constraints.
             self.logger.warning(f"Falha ao mapear ({velide_id}, {local_id}). Motivo: {e}")
             return False
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             self.logger.exception("Ocorreu um erro inesperado ao adicionar um mapeamento.")
             return False
         
@@ -214,7 +214,7 @@ class SQLiteManager:
             inserted_count = cursor.rowcount
             self.logger.debug(f"Processados {len(mappings)} mapeamentos. {inserted_count} novos inseridos.")
             return inserted_count
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             self.logger.exception("Ocorreu um erro inesperado durante o 'add_many_mappings'.")
             # The __exit__ method will handle the rollback.
             raise # Re-raise to trigger rollback in __exit__
@@ -235,7 +235,7 @@ class SQLiteManager:
             cursor = self.conn.execute(query, (velide_id,))
             result = cursor.fetchone()
             return result[0] if result else None
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             self.logger.exception(f"Erro ao buscar `local_id` para {velide_id}.")
             return None
 
@@ -279,7 +279,7 @@ class SQLiteManager:
             else:
                 self.logger.warning(f"Nenhum mapeamento encontrado para deletar o velide_id: {velide_id}")
                 return False
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             self.logger.exception(f"Erro ao deletar mapeamento de {velide_id}.")
             return False
 
@@ -324,7 +324,7 @@ class SQLiteManager:
         except sqlite3.IntegrityError as e:
             self.logger.warning(f"Falha ao mapear entrega ({external_id}, {internal_id}). Motivo: {e}")
             return False
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             self.logger.exception("Ocorreu um erro inesperado ao adicionar um mapeamento de entrega.")
             return False
 
@@ -356,7 +356,7 @@ class SQLiteManager:
             inserted_count = cursor.rowcount
             self.logger.debug(f"Processados {len(mappings)} mapeamentos de entrega. {inserted_count} novos inseridos.")
             return inserted_count
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             self.logger.exception("Ocorreu um erro inesperado durante o 'add_many_delivery_mappings'.")
             raise # Re-raise to trigger rollback in __exit__
 
@@ -381,7 +381,7 @@ class SQLiteManager:
             else:
                 self.logger.warning(f"Nenhuma entrega encontrada para atualizar status (ID: {external_id})")
                 return False
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             self.logger.exception(f"Erro ao atualizar status da entrega {external_id}.")
             return False
 
@@ -405,7 +405,7 @@ class SQLiteManager:
                 # Convert the status string back to a DeliveryStatus enum object
                 return (result[0], DeliveryStatus(result[1]))
             return None
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             self.logger.exception(f"Erro ao buscar entrega com external_id {external_id}.")
             return None
         except ValueError as e: # Catch errors if status in DB is not in Enum
@@ -432,7 +432,7 @@ class SQLiteManager:
                 # Convert the status string back to a DeliveryStatus enum object
                 return (result[0], DeliveryStatus(result[1]))
             return None
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             self.logger.exception(f"Erro ao buscar entrega com internal_id {internal_id}.")
             return None
         except ValueError as e: # Catch errors if status in DB is not in Enum

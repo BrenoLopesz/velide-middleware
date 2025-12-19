@@ -3,7 +3,6 @@ import os
 import subprocess
 import sys
 import traceback
-from typing import Tuple
 
 from PyQt5.QtWidgets import QApplication
 from sqlalchemy import create_engine
@@ -13,9 +12,6 @@ from config import Settings, TargetSystem, config
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_setup import FarmaxSetup
 from models.app_context_model import Services
-from presenters.dashboard_presenter import DashboardPresenter
-from presenters.deliverymen_mapping_presenter import DeliverymenMappingPresenter
-from presenters.device_code_presenter import DeviceCodePresenter
 from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_service import DeliveriesService
 from services.deliverymen_retriever_service import DeliverymenRetrieverService
@@ -27,7 +23,6 @@ from services.strategies.farmax_strategy import FarmaxStrategy
 from services.tracking_persistence_service import TrackingPersistenceService
 from services.velide_action_handler import VelideActionHandler
 from services.velide_websockets_service import VelideWebsocketsService
-from states.main_state_machine import MainStateMachine
 from utils.sql_utils import get_farmax_engine_string
 from visual.main_view import MainView
 from utils.log_handler import PackageFilter, QLogHandler

@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 
 from PyQt5.QtCore import pyqtSignal, QObject, QThreadPool, QTimer
 

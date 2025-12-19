@@ -63,7 +63,7 @@ class UpdateDownloaderService(QObject):
             return
 
         self.logger.info(
-            f"Serviço de download inicializado."
+            "Serviço de download inicializado."
         )
 
         self.worker = UpdateDownloaderWorker(

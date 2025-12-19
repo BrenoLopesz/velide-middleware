@@ -103,7 +103,7 @@ class UpdateDownloaderWorker(QRunnable):
         Main worker logic. Executes the downloads for the installer and
         signatures file sequentially.
         """
-        self.logger.info(f"Iniciando o processo de download da atualização...")
+        self.logger.info("Iniciando o processo de download da atualização...")
         self.signals.started.emit()
 
         try:

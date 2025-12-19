@@ -9,7 +9,6 @@ main PyQt5 application thread.
 import logging
 import os
 import subprocess
-import traceback
 
 from PyQt5.QtCore import QObject, QRunnable, pyqtSignal
 
@@ -118,7 +117,7 @@ class InstallerRunnableWorker(QRunnable):
             self.signals.error.emit(error_message)
             return
 
-        except Exception as e:
+        except Exception:
             # This is a generic catch-all for any other unexpected errors.
             error_message = "Ocorreu um erro inesperado ao tentar executar o instalador."
             self.logger.exception(error_message)

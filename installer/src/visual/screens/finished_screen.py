@@ -19,12 +19,12 @@ class FinishedScreen(QWidget):
         self.update_label.setFont(self._fonts["bold"])
         self.update_label.setAlignment(Qt.AlignCenter)
 
-        self.info_label = QLabel(f"Nova versão adquirida:<br/><b>v0.0.0</b><br/>Hoje<br/><br/>Versão anterior:<br/><b>Nenhuma</b>")
+        self.info_label = QLabel("Nova versão adquirida:<br/><b>v0.0.0</b><br/>Hoje<br/><br/>Versão anterior:<br/><b>Nenhuma</b>")
         # self.info_label.setObjectName("title")
         self.info_label.setFont(self._fonts["regular"])
         self.info_label.setAlignment(Qt.AlignCenter)
 
-        self.new_version_label = QLabel(f"A integração irá iniciar em breve,<br/>por favor aguarde.")
+        self.new_version_label = QLabel("A integração irá iniciar em breve,<br/>por favor aguarde.")
         self.new_version_label.setFont(self._fonts["light"])
         self.new_version_label.setAlignment(Qt.AlignCenter)
         

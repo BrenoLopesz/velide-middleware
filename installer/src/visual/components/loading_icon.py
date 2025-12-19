@@ -1,7 +1,6 @@
 import math
-import sys
-from PyQt5.QtCore import Qt, QPropertyAnimation, pyqtProperty
-from PyQt5.QtWidgets import QLabel, QApplication
+from PyQt5.QtCore import Qt, pyqtProperty
+from PyQt5.QtWidgets import QLabel
 from PyQt5.QtGui import QPainter, QTransform, QPixmap
 
 class LoadingIcon(QLabel):

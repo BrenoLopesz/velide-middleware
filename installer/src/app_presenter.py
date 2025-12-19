@@ -2,7 +2,7 @@ import logging
 import os
 import subprocess
 import sys
-from typing import Optional, Union
+from typing import Optional
 from packaging.version import Version, parse
 from PyQt5.QtCore import QObject, QStateMachine, QState, QFinalState, pyqtSignal
 from PyQt5.QtWidgets import QApplication
@@ -86,7 +86,7 @@ class AppPresenter(QObject):
     def _on_fail_to_retrieve_version(self, error: str):
         """Slot for when retrieving the local version fails."""
         self.logger.warning(
-            f"Não foi possível obter a versão atual. "
+            "Não foi possível obter a versão atual. "
             "Considerando isso como uma instalação corrompida. Uma atualização será realizada para tentar corrigir."
         )
         self._current_version = parse("0.0.0") # Still treat it as a valid "found" version

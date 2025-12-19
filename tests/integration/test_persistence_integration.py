@@ -1,5 +1,4 @@
 # tests/integration/test_persistence_flow.py
-import pytest
 from api.sqlite_manager import DeliveryStatus
 
 class TestPersistenceIntegration:

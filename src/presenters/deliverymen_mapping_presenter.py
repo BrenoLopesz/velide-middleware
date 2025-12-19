@@ -1,18 +1,11 @@
 from __future__ import annotations
 import logging
-from typing import Tuple
-from models.base_models import BaseLocalDeliveryman
-from models.velide_delivery_models import DeliverymanResponse
-from services.auth_service import AuthService
-from services.deliverymen_retriever_service import DeliverymenRetrieverService
 from PyQt5.QtCore import QObject, pyqtSignal
 from typing import TYPE_CHECKING
 
-from services.sqlite_service import SQLiteService
 from states.main_state_machine import MainStateMachine
 from utils.levenshtein_mapping import generate_levenshtein_mappings
 from visual.main_view import MainView
-from visual.screens.deliverymen_mapping_screen import DeliverymenMappingScreen
 
 if TYPE_CHECKING:
     from models.app_context_model import Services

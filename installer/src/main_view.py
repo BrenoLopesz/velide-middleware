@@ -1,17 +1,11 @@
 import os
 from PyQt5.QtWidgets import (
-    QApplication,
-    QMainWindow,
     QWidget,
     QVBoxLayout,
-    QPushButton,
-    QLabel,
     QStackedWidget,
-    QHBoxLayout,
 )
 from PyQt5.QtGui import QIcon
 from screeninfo import get_monitors
-from datetime import datetime
 
 from utils.bundle_dir import BUNDLE_DIR
 from visual.screens.finished_screen import FinishedScreen

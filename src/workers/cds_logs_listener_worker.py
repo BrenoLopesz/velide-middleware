@@ -39,7 +39,7 @@ class _NewFileHandler(FileSystemEventHandler):
             if filename.startswith("ent") and filename.endswith(".json"):
                 self.logger.debug(f"Novo potencial pedido encontrado: {filename}")
                 self._process_file(filepath)
-        except Exception as e:
+        except Exception:
             # Catch any unexpected errors during event handling
             self.logger.exception("Um erro inesperado ocorreu no gerenciador de arquivos adicionados.")
             
@@ -57,11 +57,11 @@ class _NewFileHandler(FileSystemEventHandler):
             self.logger.debug(f"Conteúdo JSON lido com sucesso de: {filepath}")
             # Emit the signal via the signals object
             self.signals.new_order.emit(content)
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             self.logger.exception(f"Falha ao decodificar JSON do arquivo: {filepath}")
-        except (IOError, OSError, PermissionError) as e:
+        except (IOError, OSError, PermissionError):
             self.logger.exception(f"Erro no sistema de arquivos ao ler arquivo: {filepath}")
-        except Exception as e:
+        except Exception:
             self.logger.exception(f"Um erro inesperado ocorreu ao ler o arquivo: {filepath}")
 
 class CdsLogsListenerSignals(QObject):
@@ -144,7 +144,7 @@ class CdsLogsListenerWorker(QRunnable):
             self._observer.stop()
             self._observer.join()  # Wait for the thread to terminate
             self.logger.info(f"Monitoramento de arquivos foi parado: {self.folder_path}")
-        except Exception as e:
+        except Exception:
             self.logger.exception("Um erro ocorreu ao tentar interromper o observador de arquivos.")
         finally:
             self.finished.emit()

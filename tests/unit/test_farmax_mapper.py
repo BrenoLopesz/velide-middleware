@@ -1,12 +1,10 @@
-from pydantic import ValidationError
 import pytest
 from datetime import date, time, datetime
-from unittest.mock import Mock
 
 # Import your classes and models here
 # Adjust paths as necessary based on your project structure
 from connectors.farmax.farmax_mapper import FarmaxMapper
-from models.farmax_models import FarmaxDelivery, DeliveryLog, FarmaxAction
+from models.farmax_models import FarmaxDelivery, DeliveryLog
 from models.velide_delivery_models import Order
 
 class TestFarmaxMapperToOrder:

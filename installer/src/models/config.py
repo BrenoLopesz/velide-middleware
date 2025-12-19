@@ -1,8 +1,8 @@
 import logging
-from typing import List, Type, TypeVar
+from typing import Type, TypeVar
 from pathlib import Path
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 T = TypeVar('T', bound='InstallerConfig')
 

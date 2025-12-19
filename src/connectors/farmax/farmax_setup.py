@@ -110,8 +110,8 @@ class FarmaxSetup:
 
         # Use a more specific exception
         except SQLAlchemyError:
-            self.logger.exception(f"Falha ao realizar setup inicial do database do Farmax.")
+            self.logger.exception("Falha ao realizar setup inicial do database do Farmax.")
             raise
         except Exception:
-            self.logger.exception(f"Um erro inesperado ocorreu durante o setup.")
+            self.logger.exception("Um erro inesperado ocorreu durante o setup.")
             raise

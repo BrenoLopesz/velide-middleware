@@ -5,7 +5,7 @@ import hashlib
 import json
 from tqdm import tqdm
 from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives import hashes
 from cryptography.exceptions import InvalidSignature
 import base64
 

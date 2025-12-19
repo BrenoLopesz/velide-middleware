@@ -5,10 +5,7 @@ from PyQt5.QtCore import QObject
 from pydantic import ValidationError
 from models.delivery_table_model import DeliveryRowModel, DeliveryRowStatus, DeliveryTableModel
 from models.velide_delivery_models import Order
-from services.auth_service import AuthService
-from services.deliveries_service import DeliveriesService
 from visual.main_view import MainView
-from visual.screens.dashboard_screen import DashboardScreen
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from models.app_context_model import Services
@@ -49,10 +46,10 @@ class DashboardPresenter(QObject):
         try:
             model: DeliveryTableModel = self._dashboard_view.deliveries_table.model()
             model.add_delivery_acknowledge(order_id, order)
-        except ValidationError as e:
+        except ValidationError:
             self.logger.exception("Ocorreu um erro ao converter dados da entrega para serem adicionados a tabela! " \
             "Entrega pode ter ser adicionada no Velide mas não será listada.")
-        except Exception as e:
+        except Exception:
             self.logger.exception("Ocorreu um erro inesperado ao adicionar entrega à tabela! " \
             "Entrega pode ter ser adicionada no Velide mas não será listada.")
 

@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 from PyQt5.QtCore import QThreadPool
 
 # Adjust imports based on your actual file structure

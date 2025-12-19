@@ -2,7 +2,7 @@
 import logging
 from typing import Optional
 import uuid
-from PyQt5.QtCore import pyqtSignal, QThreadPool
+from PyQt5.QtCore import QThreadPool
 from pydantic import ValidationError
 from models.velide_delivery_models import Order
 from models.cds_order_model import CdsOrder
@@ -49,10 +49,10 @@ class CdsStrategy(IConnectableStrategy):
             cds_order: CdsOrder = CdsOrder.model_validate(delivery_data)
             normalized_order = self._transform(cds_order)
             self.order_normalized.emit(normalized_order)
-        except ValidationError as e:
+        except ValidationError:
             self.logger.exception("Não foi possível adicionar uma entrega devido aos dados serem inválidos!")
             return
-        except Exception as e:
+        except Exception:
             self.logger.exception("Ocorreu um erro inesperado ao processar uma nova entrega.")
             return
 

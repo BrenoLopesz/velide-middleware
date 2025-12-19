@@ -42,10 +42,10 @@ class FarmaxRepository:
             with self._engine.begin() as conn:
                 conn.execute(query, params)
         except SQLAlchemyError:
-            self.logger.exception(f"Falha ao atualizar entrega após rota iniciar.")
+            self.logger.exception("Falha ao atualizar entrega após rota iniciar.")
             raise
         except Exception:
-            self.logger.exception(f"Um erro inesperado ocorreu ao atualizar entrega após rota iniciar.")
+            self.logger.exception("Um erro inesperado ocorreu ao atualizar entrega após rota iniciar.")
             raise
     
     def update_delivery_as_done(self, delivery: FarmaxDelivery, ended_at: time):
@@ -70,10 +70,10 @@ class FarmaxRepository:
                 conn.execute(update_entregas_query, params)
                 conn.execute(update_vendas_query, params)
         except SQLAlchemyError:
-            self.logger.exception(f"Falha ao atualizar entrega após rota finalizar.")
+            self.logger.exception("Falha ao atualizar entrega após rota finalizar.")
             raise
         except Exception:
-            self.logger.exception(f"Um erro inesperado ocorreu ao atualizar entrega após rota finalizar.")
+            self.logger.exception("Um erro inesperado ocorreu ao atualizar entrega após rota finalizar.")
             raise
 
     def fetch_sales_statuses_by_id(self, cd_vendas: Tuple[float]) -> List[FarmaxSale]:

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 
 # 1. Define the Base Model with CANONICAL names
 # These are the attribute names you will use internally in your Python code.

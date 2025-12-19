@@ -1,12 +1,10 @@
 from __future__ import annotations
-from PyQt5.QtCore import QState, QFinalState, pyqtSignal
+from PyQt5.QtCore import QState, pyqtSignal
 
 from typing import TYPE_CHECKING
 from utils.device_code import DeviceCodeDict
 if TYPE_CHECKING:
     from models.app_context_model import Services
-    from states.logged_out_state import LoggedOutState
-    from states.main_state_machine import MainStateMachine
 
 class DeviceFlowState(QState):
     _device_code_stored = pyqtSignal()

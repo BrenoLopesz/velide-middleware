@@ -21,17 +21,17 @@ class ConfigLoadService(QObject):
         except (FileNotFoundError, TypeError) as e:
             self.logger.exception(e)
             self.error.emit(e)
-        except yaml.YAMLError as e:
+        except yaml.YAMLError:
             # Handle errors during YAML parsing
             msg = "Erro ao ler arquivo YAML."
             self.logger.exception(msg)
             self.emit.emit(msg)
-        except ValidationError as e:
+        except ValidationError:
             # Handle errors during Pydantic validation
             msg = "Falha ao validar o arquivo de configuração."
             self.logger.exception(msg)
             self.emit.emit(msg)
-        except Exception as e:
+        except Exception:
             msg = "Ocorreu um erro inesperado durante a leitura do arquivo de configuração."
             self.logger.exception(msg)
             self.emit.emit(msg)

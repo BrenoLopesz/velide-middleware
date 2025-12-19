@@ -128,7 +128,7 @@ class DeliveriesService(QObject):
         try:
             self._dispatcher.queue_add(internal_id, normalized_order)
             self.delivery_update.emit(internal_id, DeliveryRowStatus.SENDING)
-        except Exception as e:
+        except Exception:
             self.logger.exception(f"Falha inesperada ao adicionar pedido {internal_id} à fila.")
             self.delivery_update.emit(internal_id, DeliveryRowStatus.ERROR)
 

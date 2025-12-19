@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 from datetime import date, datetime
 
 # Adjust imports to match your project structure

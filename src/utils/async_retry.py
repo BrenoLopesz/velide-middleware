@@ -1,7 +1,6 @@
 import asyncio
 import functools
 import logging
-from typing import Optional
 
 import httpx
 

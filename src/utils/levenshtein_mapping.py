@@ -1,5 +1,5 @@
 import difflib
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from models.base_models import BaseLocalDeliveryman
 from models.velide_delivery_models import DeliverymanResponse
 

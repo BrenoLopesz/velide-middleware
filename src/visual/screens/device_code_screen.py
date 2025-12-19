@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QPushButton, QLabel, QWidget, QVBoxLayout, QSpacerItem, QStackedWidget
+from PyQt5.QtWidgets import QLabel, QWidget, QVBoxLayout, QStackedWidget
 from PyQt5.QtCore import Qt, pyqtSignal
 from utils.device_code import DeviceCodeDict
 from visual.fonts import get_fonts

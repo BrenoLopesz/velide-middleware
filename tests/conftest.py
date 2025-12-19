@@ -1,6 +1,5 @@
 # tests/conftest.py
 import pytest
-import os
 from services.sqlite_service import SQLiteService
 from services.tracking_persistence_service import TrackingPersistenceService
 from api.sqlite_manager import SQLiteManager

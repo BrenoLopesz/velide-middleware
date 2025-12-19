@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import QLabel, QWidget, QVBoxLayout
 from visual.components.loading_icon import LoadingIcon
 from visual.fonts import get_fonts
-from PyQt5.QtCore import Qt, QPropertyAnimation, pyqtProperty, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, QPropertyAnimation, pyqtProperty, QTimer
 import sys
 
 class UpdateScreen(QWidget):
@@ -22,7 +22,7 @@ class UpdateScreen(QWidget):
         self.info_label.setFont(self._fonts["light"])
         self.info_label.setAlignment(Qt.AlignCenter)
 
-        self.new_version_label = QLabel(f"")
+        self.new_version_label = QLabel("")
         self.new_version_label.setFont(self._fonts["light"])
         self.new_version_label.setAlignment(Qt.AlignCenter)
         

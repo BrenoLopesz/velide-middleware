@@ -1,6 +1,6 @@
 # in src/services/delivery_strategy.py
 from abc import ABC, ABCMeta, abstractmethod
-from typing import Optional, Tuple
+from typing import Optional
 from PyQt5.QtCore import QObject, pyqtSignal
 from models.velide_delivery_models import Order
 

@@ -3,7 +3,6 @@ import sys
 import atexit
 import msvcrt  # Windows-specific module for file locking
 from utils.bundle_dir import BUNDLE_DIR
-from PyQt5.QtWidgets import QMessageBox
 
 LOCK_FILE_PATH = os.path.join(BUNDLE_DIR, 'resources', 'velide.lock')
 _lock_file_handle = None

@@ -15,11 +15,10 @@ pip install PyQt5 httpx
 import logging
 import sys
 import traceback
-from typing import Tuple, Optional
 
 import httpx
 from packaging.version import Version, parse, InvalidVersion
-from PyQt5.QtCore import pyqtSignal, QRunnable, QObject, pyqtSlot
+from PyQt5.QtCore import pyqtSignal, QRunnable, QObject
 
 from models.config import InstallerConfig
 
@@ -152,7 +151,7 @@ class UpdateCheckWorker(QRunnable):
             self.logger.error(msg, exc_info=True)
             self.signals.error.emit(msg, traceback.format_exc())
 
-        except httpx.RequestError as exc:
+        except httpx.RequestError:
             msg = "Erro de conexão: Falha ao conectar com o servidor."
             self.logger.error(msg, exc_info=True)
             self.signals.error.emit(msg, traceback.format_exc())

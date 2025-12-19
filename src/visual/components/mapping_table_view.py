@@ -1,6 +1,6 @@
-from typing import List, Any, Dict, Optional, Tuple
-from PyQt5.QtWidgets import QTableView, QComboBox, QCompleter, QStyledItemDelegate, QHeaderView, QStyleOptionComboBox, QStyle
-from PyQt5.QtCore import Qt, QEvent
+from typing import List, Any, Dict, Optional
+from PyQt5.QtWidgets import QTableView, QComboBox, QStyledItemDelegate, QHeaderView
+from PyQt5.QtCore import Qt
 
 from models.base_models import BaseLocalDeliveryman
 from models.mapping_table_model import MappingTableModel

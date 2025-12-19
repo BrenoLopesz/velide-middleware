@@ -2,7 +2,6 @@ from __future__ import annotations
 from PyQt5.QtCore import QState, QFinalState, pyqtSignal
 
 from typing import TYPE_CHECKING
-from states.gathering_deliverymen_state import GatheringDeliverymenState
 if TYPE_CHECKING:
     from models.app_context_model import Services
 

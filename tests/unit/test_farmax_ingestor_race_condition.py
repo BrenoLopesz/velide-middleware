@@ -1,6 +1,5 @@
 import pytest
 from PyQt5.QtCore import QObject, pyqtSignal
-from unittest.mock import MagicMock, call
 
 # Import your classes (adjust paths as necessary)
 from connectors.farmax.farmax_delivery_ingestor import FarmaxDeliveryIngestor, FarmaxIngestorConfig

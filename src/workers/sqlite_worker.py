@@ -180,7 +180,7 @@ class SQLiteWorker(QRunnable):
                 # Emit the result back to the main thread
                 self.signals.result.emit(op_result)
                 
-        except Exception as e:
+        except Exception:
             # An error occurred, emit the error signal with traceback info
             self.logger.exception(f"Erro no SQLiteWorker executando {self.operation_name}")
             tb_info = sys.exc_info()
