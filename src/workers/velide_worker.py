@@ -136,7 +136,7 @@ class VelideWorker(QRunnable):
             if self._operation == "add_delivery":
                 order = self._kwargs.get('order')
                 if not order:
-                    raise ValueError("An 'order' is required for the 'add_delivery' operation.")
+                    raise ValueError("Uma 'order' é necessária para a operação 'add_delivery'.")
                     
                 response = await client.add_delivery(order)
                 self.logger.info(f"Nova entrega adicionada: {response.location.properties.name}")

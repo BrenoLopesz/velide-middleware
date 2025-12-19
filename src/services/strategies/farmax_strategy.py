@@ -105,6 +105,7 @@ class FarmaxStrategy(IConnectableStrategy):
         """
         for delivery in deliveries:
             # Convert raw ERP data to the Normalized Order Model
+            # TODO: Checks if validation was succesful
             order = FarmaxMapper.to_order(delivery)
             
             # TODO: Inject the specific status from persistence if your Order model supports it
@@ -185,7 +186,7 @@ class FarmaxStrategy(IConnectableStrategy):
         self._persistence.mark_as_cancelled(order.internal_id)
         # TODO: Add a property on the order to allow checking if 
         # the cancellation was requested internally or not.
-        self.logger.info(f"Uma entrega ({order.internal_id}) foi deletada no Velide.")
+        self._logger.info(f"Uma entrega ({order.internal_id}) foi deletada no Velide.")
 
     # --- Internal Slots ---
 
