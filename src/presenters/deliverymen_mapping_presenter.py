@@ -73,6 +73,10 @@ class DeliverymenMappingPresenter(QObject):
         )
 
     def on_deliverymen_received(self):
+        # TODO: BUG - Currently ignoring retrieved 'deliverymen_mappings'. 
+        # Merge DB results with 'generate_levenshtein_mappings' so saved 
+        # user choices aren't overwritten by auto-guesses.
+
         # 1. Populate table
         headers = ["Entregadores Velide", "Entregadores Locais"]
         velide_deliverymen, local_deliverymen = self._services.deliverymen_retriever.get_deliverymen()
@@ -87,6 +91,9 @@ class DeliverymenMappingPresenter(QObject):
         self._view.deliverymen_mapping_screen.set_screen(1)
 
     def validate_mapping(self):
+        # TODO: Ensure 'request_add_many_mappings' performs an UPSERT (INSERT OR REPLACE). 
+        # Standard INSERT will crash on existing IDs.
+
         # 1. Get the {velide_id: local_name} mappings from the view
         name_mappings = self._view.deliverymen_mapping_screen.get_mappings()
 

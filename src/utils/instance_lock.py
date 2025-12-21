@@ -86,6 +86,7 @@ def show_already_running_message():
     # Using QMessageBox might be problematic if QApplication isn't initialized.
     # A simple print might be more reliable if called very early.
     print("Error: Another instance of vel2farmax is already running.")
+    # TODO: Add this message box
     # msgBox = QMessageBox()
     # msgBox.setIcon(QMessageBox.Warning)
     # msgBox.setWindowTitle("Application Already Running")
