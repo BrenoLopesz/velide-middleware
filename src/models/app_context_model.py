@@ -10,6 +10,7 @@ from repositories.deliveries_repository import DeliveryRepository
 from services.auth_service import AuthService
 from services.deliveries_service import DeliveriesService
 from services.deliverymen_retriever_service import DeliverymenRetrieverService
+from services.reconciliation_service import ReconciliationService
 from services.sqlite_service import SQLiteService
 from services.velide_action_handler import VelideActionHandler
 from services.velide_websockets_service import VelideWebsocketsService
@@ -31,4 +32,5 @@ class Services(BaseModel):
     sqlite: SQLiteService
     websockets: VelideWebsocketsService
     velide_action_handler: VelideActionHandler
+    reconciliation: ReconciliationService
     # tracking_persistance: TrackingPersistenceService

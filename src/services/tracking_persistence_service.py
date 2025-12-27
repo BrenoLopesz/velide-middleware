@@ -145,6 +145,20 @@ class TrackingPersistenceService(QObject):
         """
         norm_id = self._normalize_id(internal_id)
         return self._status_cache.get(norm_id)
+    
+    def get_active_cache_snapshot(self) -> List[Tuple[str, str, DeliveryStatus]]:
+        """
+        Returns a snapshot of the current in-memory active cache.
+        
+        Returns:
+            List of (internal_id, external_id, status)
+        """
+        snapshot = []
+        for norm_id, status in self._status_cache.items():
+            ext_id = self._id_map.get(norm_id)
+            if ext_id:
+                snapshot.append((norm_id, ext_id, status))
+        return snapshot
 
     def get_tracked_ids(self) -> List[float]:
         """

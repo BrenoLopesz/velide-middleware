@@ -26,11 +26,13 @@ class DashboardPresenter(QObject):
     def start(self):
         """Called when the dashboard becomes active."""
         self._services.deliveries.start_listening()
+        self._services.reconciliation.start_service()
         
     def on_authenticate(self):
         access_token = self._machine.logged_in_state.property("access_token")
         self._services.websockets.set_access_token(access_token)
         self._services.deliveries.set_access_token(access_token)
+        self._services.reconciliation.set_access_token(access_token)
 
     def _connect_signals(self):
         # TODO: Create states for this.

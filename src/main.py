@@ -15,6 +15,7 @@ from models.app_context_model import Services
 from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_service import DeliveriesService
 from services.deliverymen_retriever_service import DeliverymenRetrieverService
+from services.reconciliation_service import ReconciliationService
 from services.sqlite_service import SQLiteService
 from services.strategies.cds_strategy import CdsStrategy
 from services.auth_service import AuthService
@@ -149,6 +150,11 @@ def build_services(app_config: Settings) -> Services:
     )
     sqlite_service = SQLiteService(os.path.join(BUNDLE_DIR, app_config.sqlite_path))
     tracking_persistance_service = TrackingPersistenceService(sqlite_service)
+    reconciliation_service = ReconciliationService(
+        tracking_service=tracking_persistance_service,
+        api_config=app_config.api, 
+        target_system=app_config.target_system
+    )
     websockets_service = VelideWebsocketsService(app_config.api)
     
     strategy = create_strategy(app_config, tracking_persistance_service, websockets_service)
@@ -163,7 +169,8 @@ def build_services(app_config: Settings) -> Services:
         deliverymen_retriever=deliverymen_retriever_service,
         websockets=websockets_service,
         delivery_repository=delivery_repository,
-        velide_action_handler=velide_action_handler
+        velide_action_handler=velide_action_handler,
+        reconciliation=reconciliation_service
     )
 
 # --- Main Execution ---

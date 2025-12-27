@@ -96,10 +96,42 @@ class GetDeliverymenData(BaseModel):
 class DeleteDeliveryData(BaseModel):
     deleteDelivery: bool
 
+class SnapshotDelivery(BaseModel):
+    """Minimal delivery info for snapshot (just ID)"""
+    id: str
+
+class SnapshotRoute(BaseModel):
+    """Route info nested inside deliveryman"""
+    id: str
+    deliveries: List[SnapshotDelivery] = Field(default_factory=list)
+
+class SnapshotDeliveryman(BaseModel):
+    """Deliveryman info for snapshot"""
+    id: str
+    name: str
+    # Route is optional because a deliveryman might be idle
+    route: Optional[SnapshotRoute] = None 
+
+class GlobalSnapshotData(BaseModel):
+    """
+    Data wrapper for the Global Snapshot query.
+    Maps to the two root keys returned by the GraphQL query.
+    """
+    # Unassigned deliveries
+    deliveries: List[SnapshotDelivery] = Field(default_factory=list)
+    # Deliverymen (who might have assigned deliveries)
+    deliverymen: List[SnapshotDeliveryman] = Field(default_factory=list)
+
 class GraphQLResponse(BaseModel):
     """Complete GraphQL response"""
     # Add DeleteDeliveryData to the Union, or allow Dict[str, Any] as a fallback
-    data: Optional[Union[AddDeliveryData, GetDeliverymenData, DeleteDeliveryData]] = None
+    data: Optional[Union[
+        AddDeliveryData, 
+        GetDeliverymenData, 
+        DeleteDeliveryData,
+        GlobalSnapshotData
+    ]] = None
+    
     errors: Optional[list] = None
     
     @field_validator('data')

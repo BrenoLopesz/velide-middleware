@@ -30,6 +30,7 @@ class VelideWorkerSignals(QObject):
     delivery_added = pyqtSignal(dict)
     delivery_deleted = pyqtSignal(str)
     deliverymen_retrieved = pyqtSignal(list)
+    snapshot_retrieved = pyqtSignal(dict)
     error = pyqtSignal(str)
     finished = pyqtSignal()
 
@@ -72,6 +73,11 @@ class VelideWorker(QRunnable):
         Creates a worker configured to fetch the list of deliverymen.
         """
         return cls(velide, "get_deliverymen")
+    
+    @classmethod
+    def for_snapshot(cls, velide: Velide) -> 'VelideWorker':
+        """Creates a worker to fetch the global delivery snapshot."""
+        return cls(velide, "get_global_snapshot")
 
     def run(self):
         """
@@ -156,5 +162,10 @@ class VelideWorker(QRunnable):
                 else:
                     raise Exception("A API retornou falha na deleção.")
                 
+            elif self._operation == "get_global_snapshot":
+                # Call the new method we added to Velide class
+                result_map = await client.get_active_deliveries_snapshot()
+                self.signals.snapshot_retrieved.emit(result_map)
+            
             else:
                 raise NotImplementedError(f"Operação desconhecida do VelideWorker: {self._operation}")

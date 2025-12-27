@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List, Optional, TypeVar
+from typing import Any, List, Optional, TypeVar
 import httpx
 
 from models.velide_delivery_models import (
@@ -7,6 +7,7 @@ from models.velide_delivery_models import (
     DeleteDeliveryVariables,
     DeliveryResponse,
     DeliverymanResponse,
+    GlobalSnapshotData,
     GraphQLParseError,
     GraphQLPayload,
     GraphQLRequestError,
@@ -68,6 +69,24 @@ class Velide:
             deliverymen {
                 id
                 name
+            }
+        }
+    """
+
+    GET_GLOBAL_SNAPSHOT_QUERY = """
+        query GetGlobalSnapshot {
+            deliveries {
+                id
+            }
+            deliverymen {
+                id
+                name
+                route {
+                    id
+                    deliveries {
+                        id
+                    }
+                }
             }
         }
     """
@@ -182,6 +201,29 @@ class Velide:
         # Use the new generic parser with the correct key (and fix the bug)
         return self._parse_response(response, data_key="deliverymen")
 
+    @async_retry(
+        operation_desc="buscar snapshot global",
+        max_retries=3
+    )
+    async def get_active_deliveries_snapshot(self) -> dict:
+        """
+        Fetches ALL unassigned deliveries and ALL active routes.
+        Returns a simplified dictionary mapping Delivery IDs to their current status.
+        
+        Returns:
+            dict: { "delivery_id": "STATUS" } 
+            e.g. { "abc-123": "PENDING", "xyz-789": "ROUTED" }
+        """
+        payload = GraphQLPayload(query=self.GET_GLOBAL_SNAPSHOT_QUERY)
+        
+        response = await self._execute_request(payload)
+        
+        # Pass None to get the full data structure containing both keys
+        raw_data = self._parse_response(response, data_key=None)
+        
+        # Flatten the data for easier processing
+        return self._flatten_snapshot(raw_data)
+
     def _build_variables_to_add_delivery(
         self, 
         order: Order
@@ -252,6 +294,26 @@ class Velide:
         
         return round(offset_in_milliseconds)    
     
+    def _flatten_snapshot(self, data: GlobalSnapshotData) -> dict:
+        """
+        Helper to convert the strictly typed Snapshot data into a simple Status Map.
+        """
+        snapshot_map = {}
+        
+        # 1. Process Unassigned Deliveries (Status: PENDING)
+        # Pydantic ensures 'data.deliveries' is a list (never None) due to default_factory
+        for item in data.deliveries:
+            snapshot_map[item.id] = "PENDING"
+
+        # 2. Process Assigned Deliveries (Status: ROUTED)
+        for dm in data.deliverymen:
+            # Pydantic ensures dm.route is either a SnapshotRoute object or None
+            if dm.route:
+                for item in dm.route.deliveries:
+                    snapshot_map[item.id] = "ROUTED"
+
+        return snapshot_map
+    
     async def _execute_request(self, payload: GraphQLPayload) -> httpx.Response:
         """
         Execute GraphQL request.
@@ -275,7 +337,7 @@ class Velide:
         
         return response
     
-    def _parse_response(self, response: httpx.Response, data_key: str) -> T:
+    def _parse_response(self, response: httpx.Response, data_key: Optional[str] = None) -> T:
         """
         Generically parse and validate a GraphQL response, extracting data from a specific key.
         
@@ -315,6 +377,10 @@ class Velide:
         if not graphql_response.data:
             raise GraphQLResponseError(f"No 'data' in response: {response_json}")
         
+        # If no specific key is requested, return the whole data object/dict
+        if data_key is None:
+            return graphql_response.data
+
         # 5. Extract specific data using the key
         try:
             # Use getattr to dynamically access the attribute
