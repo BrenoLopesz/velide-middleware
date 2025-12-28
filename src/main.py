@@ -110,7 +110,8 @@ def configure_logging(view: MainView):
 def create_strategy(
         app_config: Settings, 
         tracking_persistence_service: TrackingPersistenceService,
-        websockets_service: VelideWebsocketsService
+        websockets_service: VelideWebsocketsService,
+        reconciliation_service: ReconciliationService
     ):
     """Factory function to create the correct delivery strategy."""
     if app_config.target_system == TargetSystem.CDS:
@@ -131,7 +132,8 @@ def create_strategy(
             # farmax_setup=farmax_setup, 
             farmax_repository=farmax_repository,
             persistence_service=tracking_persistence_service,
-            websockets_service=websockets_service
+            websockets_service=websockets_service,
+            reconciliation_service=reconciliation_service
         )
     
     # Handles missing strategy
@@ -157,7 +159,12 @@ def build_services(app_config: Settings) -> Services:
     )
     websockets_service = VelideWebsocketsService(app_config.api)
     
-    strategy = create_strategy(app_config, tracking_persistance_service, websockets_service)
+    strategy = create_strategy(
+        app_config, 
+        tracking_persistance_service, 
+        websockets_service,
+        reconciliation_service
+    )
     deliveries_service.set_strategy(strategy)
     
     deliverymen_retriever_service = DeliverymenRetrieverService(app_config.api, app_config.target_system, strategy)

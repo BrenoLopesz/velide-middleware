@@ -1,4 +1,4 @@
-from models.velide_delivery_models import DeliveryStatus as LocalStatus
+from api.sqlite_manager import DeliveryStatus as LocalStatus
 
 def map_velide_status_to_local(velide_status: str) -> LocalStatus:
     """
@@ -8,7 +8,7 @@ def map_velide_status_to_local(velide_status: str) -> LocalStatus:
     v_status = velide_status.strip().upper()
 
     mapping = {
-        "PENDING": LocalStatus.PENDING,       # Waiting for assignment
+        "PENDING": LocalStatus.ADDED,         # Waiting for assignment
         "ROUTED": LocalStatus.IN_PROGRESS,    # Left the warehouse
         "COMPLETED": LocalStatus.DELIVERED,   # Success
         "CANCELLED": LocalStatus.CANCELLED,   # Cancelled

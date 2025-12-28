@@ -12,6 +12,7 @@ from connectors.farmax.farmax_worker import FarmaxWorker
 from models.delivery_table_model import map_db_status_to_ui
 from models.farmax_models import FarmaxDelivery
 from models.velide_delivery_models import Order
+from services.reconciliation_service import ReconciliationService
 from services.strategies.connectable_strategy import IConnectableStrategy
 from services.tracking_persistence_service import TrackingPersistenceService
 from api.sqlite_manager import DeliveryStatus
@@ -30,7 +31,8 @@ class FarmaxStrategy(IConnectableStrategy):
         farmax_config: FarmaxConfig, 
         farmax_repository: FarmaxRepository,
         persistence_service: TrackingPersistenceService,
-        websockets_service: VelideWebsocketsService
+        websockets_service: VelideWebsocketsService,
+        reconciliation_service: ReconciliationService
     ):
         super().__init__()
         self._logger = logging.getLogger(__name__)
@@ -38,6 +40,7 @@ class FarmaxStrategy(IConnectableStrategy):
         self._repository = farmax_repository
         self._persistence = persistence_service
         self._websockets = websockets_service
+        self._reconciliation = reconciliation_service
         self._thread_pool = None # Initialized by globalInstance usually, or in workers
 
         # --- Initialize Sub-Services ---
@@ -140,11 +143,15 @@ class FarmaxStrategy(IConnectableStrategy):
         # Subscribes to Velide Websockets
         self._websockets.start_service()
 
+        # Starts reconciliation job
+        self._reconciliation.start_service()
+
     def stop_listening(self):
         """Stops all polling services."""
         self._logger.info("Parando o rastreamento Farmax...")
         self._ingestor.stop()
         self._status_tracker.stop()
+        # TODO: Stop reconciliation job
 
     def requires_initial_configuration(self) -> bool:
         return True
