@@ -62,7 +62,7 @@ class DeliveryRowModel(BaseModel):
     order: Order = Field(..., description="Original order details.")
 
     def get_formatted_created_at(self) -> str:
-        return self.order.created_at.strftime("%m/%d %H:%M:%S")
+        return self.order.created_at.strftime("%d/%m %H:%M:%S")
 
 class DeliveryTableModel(QAbstractTableModel):
     """

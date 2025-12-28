@@ -20,15 +20,13 @@ class DeliveriesService(QObject):
             self, 
             api_config: ApiConfig, 
             target_system: TargetSystem, 
-            delivery_repository: DeliveryRepository,
-            velide_action_handler: VelideActionHandler
+            delivery_repository: DeliveryRepository
         ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         
         # 1. DEPENDENCY INJECTION / COMPOSITION
         self._repository = delivery_repository
-        self._action_handler = velide_action_handler
         self._dispatcher = DeliveryDispatcher(QThreadPool.globalInstance())
         
         # 2. CONFIGURATION
@@ -42,9 +40,6 @@ class DeliveriesService(QObject):
         self._dispatcher.delivery_success.connect(self._on_add_delivery_request_success)
         self._dispatcher.deletion_success.connect(self._on_deletion_request_success)
         self._dispatcher.task_failed.connect(self._on_delivery_request_failure)
-
-        # 4. CONNECT VELIDE ACTION HANDLER SIGNALS
-        self._action_handler.delivery_deleted.connect(self._on_delivery_deleted_in_velide)
 
     def set_access_token(self, access_token: str):
         self._velide_api = Velide(access_token, self._api_config, self._target_system)
@@ -86,6 +81,9 @@ class DeliveriesService(QObject):
         Handles orders recovered from persistence (Startup).
         Logic: Update Memory + Update UI. Do NOT send to API.
         """
+        # Sanitize ID before anything else
+        self._sanitize_order_id(restored_order)
+
         internal_id = restored_order.internal_id
         
         # 1. Update Repository
@@ -111,6 +109,9 @@ class DeliveriesService(QObject):
         Handles NEW orders coming from the ERP.
         Logic: Update Memory + Update UI + Send to API (via Dispatcher).
         """
+        # Sanitize ID before anything else
+        self._sanitize_order_id(normalized_order)
+
         internal_id = normalized_order.internal_id
         
         # 1. Update Repository
@@ -160,6 +161,15 @@ class DeliveriesService(QObject):
             self._repository.remove(internal_id)
 
     # =========================================================================
+    # RECONCILIATION CALLBACKS
+    # =========================================================================
+
+    def on_reconciliation_detects_route_start(self, internal_id: str):
+        # TODO: Handle missing order (is it needed?)
+        order = self.get_order(internal_id)
+        self.on_delivery_route_started_in_velide(order)
+
+    # =========================================================================
     # DISPATCHER CALLBACKS (Results from API)
     # =========================================================================
 
@@ -195,7 +205,25 @@ class DeliveriesService(QObject):
         # Original code removed it on failure. Depending on retry logic, you might want to keep it.
         # self._repository.remove(internal_id)
 
-    def _on_delivery_deleted_in_velide(self, order: Order):
+    def on_delivery_deleted_in_velide(self, order: Order):
         self.logger.debug("Solicitando strategy para lidar com a entrega deletada.")
         self._active_strategy.on_delivery_deleted_on_velide(order)
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.CANCELLED)
+
+    def on_delivery_route_started_in_velide(self, order: Order):
+        self.logger.debug("Solicitando strategy para lidar com a entrega em rota.")
+        self._active_strategy.on_delivery_route_started_on_velide(order)
+        self.delivery_update.emit(order.internal_id, DeliveryRowStatus.IN_PROGRESS)
+
+    def _sanitize_order_id(self, order: Order):
+        """
+        Force the internal_id to be a clean string integer (no decimals).
+        Fixes mismatch between Strategy (Float) and Persistence (Int/Str).
+        """
+        try:
+            # "650257.0" -> 650257 -> "650257"
+            clean_id = str(int(float(order.internal_id)))
+            order.internal_id = clean_id
+        except (ValueError, TypeError):
+            # Fallback if it's alphanumeric like "ORD-A1"
+            order.internal_id = str(order.internal_id)

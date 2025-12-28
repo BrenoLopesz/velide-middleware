@@ -52,3 +52,7 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):
     def on_delivery_deleted_on_velide(self, order: Order):
         """Optional callback function called when a deleted deliver is detected through Websockets."""
         pass
+
+    def on_delivery_route_started_on_velide(self, order: Order):
+        """Optional callback function called when a deleted deliver is detected through Websockets."""
+        pass

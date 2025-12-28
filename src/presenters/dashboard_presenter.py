@@ -38,6 +38,8 @@ class DashboardPresenter(QObject):
         self._services.deliveries.delivery_acknowledged.connect(self._on_delivery_acknowledged)
         self._services.deliveries.delivery_update.connect(self._on_delivery_status_update)
         self._services.websockets.action_received.connect(self._services.velide_action_handler.handle_action)
+        self._services.velide_action_handler.delivery_deleted.connect(self._services.deliveries.on_delivery_deleted_in_velide)
+        self._services.reconciliation.delivery_in_route.connect(self._services.deliveries.on_reconciliation_detects_route_start)
 
     def _on_log_received(self, created_at, level, message):
         self._dashboard_view.log_table.add_row(created_at, level, message)

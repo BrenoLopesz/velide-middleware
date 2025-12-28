@@ -6,6 +6,7 @@ from PyQt5.QtCore import QObject, pyqtSignal, QTimer, QThreadPool
 
 from api.velide import Velide
 from config import ApiConfig, TargetSystem
+from models.velide_delivery_models import Order
 from utils.velide_status_to_local import map_velide_status_to_local
 from workers.velide_worker import VelideWorker
 # We import the SERVICE, not the DB Manager
@@ -21,6 +22,8 @@ class ReconciliationService(QObject):
     sync_started = pyqtSignal()
     sync_finished = pyqtSignal(int)  # Emits number of updates performed
     sync_error = pyqtSignal(str)
+
+    delivery_in_route = pyqtSignal(str)
 
     COOLDOWN_SECONDS = 60.0 
     SYNC_INTERVAL_MS = 600_000  # 10 Minutes
@@ -126,6 +129,7 @@ class ReconciliationService(QObject):
             # --- CHECK 2: ZOMBIE ---
             if velide_id not in snapshot_map:
                 # Still just logging, as per strategy
+                # TODO: This means that the delivery might have been deleted or done. Something should happen here.
                 self.logger.debug(f"Entrega {velide_id} ausente no snapshot.")
                 continue
 
@@ -144,6 +148,9 @@ class ReconciliationService(QObject):
                 
                 # Update Farmax (Placeholder)
                 self._sync_to_farmax(internal_id, expected_local_enum)
+
+                # Emit signal to update UI
+                self.delivery_in_route.emit(internal_id)
                 
                 updates_count += 1
 

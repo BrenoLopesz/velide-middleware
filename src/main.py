@@ -147,8 +147,7 @@ def build_services(app_config: Settings) -> Services:
     deliveries_service = DeliveriesService(
         api_config=app_config.api, 
         target_system=app_config.target_system, 
-        delivery_repository=delivery_repository,
-        velide_action_handler=velide_action_handler
+        delivery_repository=delivery_repository
     )
     sqlite_service = SQLiteService(os.path.join(BUNDLE_DIR, app_config.sqlite_path))
     tracking_persistance_service = TrackingPersistenceService(sqlite_service)
