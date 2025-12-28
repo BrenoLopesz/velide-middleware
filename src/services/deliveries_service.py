@@ -95,12 +95,10 @@ class DeliveriesService(QObject):
         # 2. Acknowledge to UI
         self.delivery_acknowledged.emit(internal_id, restored_order)
         
-        # TODO: Use real status
-        # 3. Restore the correct Status icon in the UI
-        # We need to assume the Order comes with a status, or we default to ADDED 
-        # since it was restored from a persistence layer that tracks active/added orders.
-        # You might want to map persistence status to DeliveryRowStatus here.
-        self.delivery_update.emit(internal_id, DeliveryRowStatus.ADDED)
+        # Use actual status
+        order_status = getattr(restored_order, "ui_status_hint", DeliveryRowStatus.ADDED)
+
+        self.delivery_update.emit(internal_id, order_status)
         
         self.logger.debug(f"Pedido {internal_id} restaurado na interface visual.")
 
