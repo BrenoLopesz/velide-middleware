@@ -1,17 +1,15 @@
 import time
 import logging
-from typing import Dict, List
+from typing import Dict
 
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer, QThreadPool
 
 from api.velide import Velide
 from config import ApiConfig, TargetSystem
-from models.velide_delivery_models import Order
 from utils.velide_status_to_local import map_velide_status_to_local
 from workers.velide_worker import VelideWorker
 # We import the SERVICE, not the DB Manager
 from services.tracking_persistence_service import TrackingPersistenceService
-from api.sqlite_manager import DeliveryStatus 
 
 class ReconciliationService(QObject):
     """

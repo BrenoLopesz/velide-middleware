@@ -60,9 +60,7 @@ class VelideActionHandler(QObject):
         # Assuming the event carries the External ID
         order = self._repository.get_by_external(action.delivery.id)
         
-        if order:
-            internal_id = order.internal_id
-            
+        if order:            
             # Commented out; Do not remove from repository, if we want
             # to display its status as "CANCELLED".
             # 2. Update State (Repository)

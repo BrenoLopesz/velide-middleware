@@ -9,7 +9,6 @@ from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_dispatcher import DeliveryDispatcher
 from services.strategies.connectable_strategy import IConnectableStrategy
 from models.velide_delivery_models import Order
-from services.velide_action_handler import VelideActionHandler
 
 class DeliveriesService(QObject):
     delivery_acknowledged = pyqtSignal(str, Order)

@@ -118,7 +118,7 @@ def create_strategy(
         return CdsStrategy(app_config.api, app_config.folder_to_watch)
     
     elif app_config.target_system == TargetSystem.FARMAX:
-        sqlite_manager = SQLiteManager(app_config.sqlite_path)
+        # sqlite_manager = SQLiteManager(app_config.sqlite_path)
         engine = create_engine(
             get_farmax_engine_string(app_config.farmax),
             pool_size=3,

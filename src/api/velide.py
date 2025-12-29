@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Any, List, Optional, TypeVar
+from typing import List, Optional, TypeVar
 import httpx
 
 from models.velide_delivery_models import (
