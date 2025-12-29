@@ -5,6 +5,7 @@ from PyQt5.QtCore import pyqtSlot, QThreadPool
 
 from config import FarmaxConfig
 from connectors.farmax.farmax_delivery_ingestor import FarmaxDeliveryIngestor
+from connectors.farmax.farmax_delivery_updater import FarmaxDeliveryUpdater
 from connectors.farmax.farmax_mapper import FarmaxMapper
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_status_tracker import FarmaxStatusTracker
@@ -56,6 +57,11 @@ class FarmaxStrategy(IConnectableStrategy):
         self._status_tracker = FarmaxStatusTracker(
             repository=self._repository,
             persistence=self._persistence
+        )
+
+        # 3. Updater: Handles WRITING updates to Farmax
+        self._updater = FarmaxDeliveryUpdater(
+            repository=self._repository
         )
 
         # --- Wire Signals ---
@@ -197,10 +203,12 @@ class FarmaxStrategy(IConnectableStrategy):
 
     def on_delivery_route_started_on_velide(self, order):
         self._persistence.update_status(order.internal_id, DeliveryStatus.IN_PROGRESS)
+        self._updater.mark_as_in_route(order)
 
     def on_delivery_route_ended_on_velide(self, order):
         self._persistence.mark_as_finished(order.internal_id)
         self._logger.info(f"Pedido ({order.internal_id}) foi entregue no Velide.")
+        self._updater.mark_as_done(order)
 
     # --- Internal Slots ---
 

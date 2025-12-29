@@ -27,31 +27,34 @@ class FarmaxRepository:
         params = {f"v{i}": v for i, v in enumerate(values)}
         return placeholders, params
 
-    def update_delivery_as_in_route(self, delivery: FarmaxDelivery, deliveryman: FarmaxDeliveryman, left_at: time):
+    def update_delivery_as_in_route(self, sale_id: float, driver_id: str, left_at: time):
+        """
+        Updates the delivery status to 'R' (Route) and assigns the driver.
+        """
         query = text(
             "UPDATE ENTREGAS SET CD_ENTREGADOR = :man_id, HORA_SAIDA = :time, "
             "STATUS = 'R' WHERE CD_VENDA = :sale_id"
         )
         params = {
-            "man_id": deliveryman.id,
+            "man_id": driver_id,
             "time": left_at,
-            "sale_id": delivery.sale_id
+            "sale_id": sale_id
         }
 
         try: 
             with self._engine.begin() as conn:
                 conn.execute(query, params)
         except SQLAlchemyError:
-            self.logger.exception("Falha ao atualizar entrega após rota iniciar.")
+            self.logger.exception(f"Falha ao atualizar entrega {sale_id} para Em Rota.")
             raise
         except Exception:
-            self.logger.exception("Um erro inesperado ocorreu ao atualizar entrega após rota iniciar.")
+            self.logger.exception(f"Erro inesperado ao atualizar entrega {sale_id} para Em Rota.")
             raise
     
-    def update_delivery_as_done(self, delivery: FarmaxDelivery, ended_at: time):
-        """Atomically updates a delivery to 'Done' status in both ENTREGAS and VENDAS."""
-    
-        # Both queries will pick the parameters they need from the 'params' dict.
+    def update_delivery_as_done(self, sale_id: float, ended_at: time):
+        """
+        Atomically updates a delivery to 'Done' status in both ENTREGAS and VENDAS.
+        """
         update_entregas_query = text(
             "UPDATE ENTREGAS SET HORA_CHEGADA = :time, STATUS = 'V' "
             "WHERE CD_VENDA = :sale_id"
@@ -62,7 +65,7 @@ class FarmaxRepository:
         )
         params = {
             "time": ended_at,
-            "sale_id": delivery.sale_id
+            "sale_id": sale_id
         }
 
         try:
@@ -70,10 +73,10 @@ class FarmaxRepository:
                 conn.execute(update_entregas_query, params)
                 conn.execute(update_vendas_query, params)
         except SQLAlchemyError:
-            self.logger.exception("Falha ao atualizar entrega após rota finalizar.")
+            self.logger.exception(f"Falha ao finalizar entrega {sale_id}.")
             raise
         except Exception:
-            self.logger.exception("Um erro inesperado ocorreu ao atualizar entrega após rota finalizar.")
+            self.logger.exception(f"Erro inesperado ao finalizar entrega {sale_id}.")
             raise
 
     def fetch_sales_statuses_by_id(self, cd_vendas: Tuple[float]) -> List[FarmaxSale]:

@@ -180,16 +180,16 @@ class FarmaxWorker(QRunnable):
     def for_update_delivery_as_in_route(
         cls, 
         repository: FarmaxRepository, 
-        delivery: FarmaxDelivery, 
-        deliveryman: FarmaxDeliveryman, 
+        sale_id: float, 
+        driver_id: str, 
         left_at: time
     ) -> 'FarmaxWorker':
         """Creates a worker to update a delivery to 'In Route'."""
         return cls(
             repository, 
             "update_delivery_as_in_route", 
-            delivery=delivery, 
-            deliveryman=deliveryman, 
+            sale_id=sale_id, 
+            driver_id=driver_id, 
             left_at=left_at
         )
 
@@ -197,13 +197,13 @@ class FarmaxWorker(QRunnable):
     def for_update_delivery_as_done(
         cls, 
         repository: FarmaxRepository, 
-        delivery: FarmaxDelivery, 
+        sale_id: float, 
         ended_at: time
     ) -> 'FarmaxWorker':
         """Creates a worker to update a delivery to 'Done'."""
         return cls(
             repository, 
             "update_delivery_as_done", 
-            delivery=delivery, 
+            sale_id=sale_id, 
             ended_at=ended_at
         )
