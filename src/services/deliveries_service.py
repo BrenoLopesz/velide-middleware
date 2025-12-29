@@ -167,6 +167,9 @@ class DeliveriesService(QObject):
         order = self.get_order(internal_id)
         self.on_delivery_route_started_in_velide(order)
 
+    def on_reconciliation_misses_delivery(self, internal_id: str):
+        self.delivery_update.emit(internal_id, DeliveryRowStatus.MISSING)
+
     # =========================================================================
     # DISPATCHER CALLBACKS (Results from API)
     # =========================================================================

@@ -42,6 +42,7 @@ class DashboardPresenter(QObject):
         self._services.velide_action_handler.delivery_in_route.connect(self._services.deliveries.on_delivery_route_started_in_velide)
         self._services.velide_action_handler.delivery_delivered.connect(self._services.deliveries.on_delivery_route_ended_in_velide)
         self._services.reconciliation.delivery_in_route.connect(self._services.deliveries.on_reconciliation_detects_route_start)
+        self._services.reconciliation.delivery_missing.connect(self._services.deliveries.on_reconciliation_misses_delivery)
 
     def _on_log_received(self, created_at, level, message):
         self._dashboard_view.log_table.add_row(created_at, level, message)

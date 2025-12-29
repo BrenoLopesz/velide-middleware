@@ -80,6 +80,9 @@ class FarmaxStrategy(IConnectableStrategy):
         Triggered when TrackingPersistenceService finishes loading from SQLite.
         We must fetch the details of these deliveries to show them in the UI.
         """
+        # Starts reconciliation job
+        self._reconciliation.start_service()
+
         # Get IDs of everything currently being tracked/monitored
         tracked_ids = self._persistence.get_tracked_ids()
         
@@ -142,9 +145,6 @@ class FarmaxStrategy(IConnectableStrategy):
 
         # Subscribes to Velide Websockets
         self._websockets.start_service()
-
-        # Starts reconciliation job
-        self._reconciliation.start_service()
 
     def stop_listening(self):
         """Stops all polling services."""

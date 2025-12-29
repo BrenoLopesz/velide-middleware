@@ -24,6 +24,7 @@ class ReconciliationService(QObject):
     sync_error = pyqtSignal(str)
 
     delivery_in_route = pyqtSignal(str)
+    delivery_missing = pyqtSignal(str)
 
     COOLDOWN_SECONDS = 60.0 
     SYNC_INTERVAL_MS = 600_000  # 10 Minutes
@@ -52,26 +53,26 @@ class ReconciliationService(QObject):
         self.timer.timeout.connect(self.trigger_reconciliation)
         # Don't start timer yet; let the main app start it.
 
-        # Start wasn't requested yet
-        self._start_intended = False
+        self._is_missing_api = False
 
     def set_access_token(self, access_token: str):
         self._velide_api = Velide(access_token, self._api_config, self._target_system)
-        if not self.timer.isActive() and self._start_intended:
+        # If didn't start previosly due to missing API, start it now.
+        if self._is_missing_api:
             self.start_service()
 
     def start_service(self):
         """Starts the automatic background timer."""
-        self._start_intended = True
         if self._velide_api is None:
             self.logger.error("É preciso estar autenticado para iniciar a reconciliação automática!")
+            self._is_missing_api = True
             return
 
         self.logger.info("Iniciando serviço de reconciliação automática.")
+        # OBS: Not needed actually. Initially it won't have any deliveries to check against.
         # Ensure the cache is loaded before we try to reconcile
-        if not self.tracking_service._status_cache:
-             self.logger.warning("Cache vazio. Aguardando hidratação...")
-             # You might want to connect to tracking_service.hydrated signal here
+        # if not self.tracking_service._status_cache:
+        #     self.logger.warning("Cache vazio. Aguardando hidratação...")
              
         self.trigger_reconciliation()
         self.timer.start(self.SYNC_INTERVAL_MS)
@@ -129,8 +130,13 @@ class ReconciliationService(QObject):
             # --- CHECK 2: ZOMBIE ---
             if velide_id not in snapshot_map:
                 # Still just logging, as per strategy
-                # TODO: This means that the delivery might have been deleted or done. Something should happen here.
-                self.logger.debug(f"Entrega {velide_id} ausente no snapshot.")
+                self.logger.warning(
+                    f"Entrega {velide_id} ausente no Velide. Considere como entregue ou deletada. Nenhuma ação será realizada no ERP."
+                )
+                self.tracking_service.mark_as_missing(internal_id)
+                # Emit signal to update UI
+                self.delivery_missing.emit(internal_id)
+                updates_count += 1
                 continue
 
             # --- CHECK 3: STATUS MISMATCH ---

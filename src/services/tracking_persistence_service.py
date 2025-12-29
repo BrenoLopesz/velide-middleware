@@ -83,7 +83,8 @@ class TrackingPersistenceService(QObject):
             is_terminal = (
                 status == DeliveryStatus.CANCELLED or 
                 status == DeliveryStatus.DELIVERED or
-                status == DeliveryStatus.FAILED
+                status == DeliveryStatus.FAILED or 
+                status == DeliveryStatus.MISSING
             )
 
             if not is_terminal:
@@ -258,5 +259,14 @@ class TrackingPersistenceService(QObject):
         """
         # 1. Persist the status change
         self.update_status(internal_id, DeliveryStatus.DELIVERED)
+        # 2. Remove from polling cache
+        self.stop_tracking(internal_id)
+
+    def mark_as_missing(self, internal_id: RawID):
+        """
+        Updates status to CANCELLED and stops tracking to prevent further polls.
+        """
+        # 1. Persist the status change
+        self.update_status(internal_id, DeliveryStatus.MISSING)
         # 2. Remove from polling cache
         self.stop_tracking(internal_id)

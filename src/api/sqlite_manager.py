@@ -21,6 +21,7 @@ class DeliveryStatus(Enum):
     SENDING = "ENVIANDO"
     ADDED = "ADICIONADO"
     IN_PROGRESS = "EM_ANDAMENTO"
+    MISSING = "AUSENTE"
     DELIVERED = "ENTREGUE"
     FAILED = "FALHA"
     CANCELLED = "CANCELADA"
@@ -471,7 +472,8 @@ class SQLiteManager:
         terminal_states = (
             DeliveryStatus.DELIVERED.value,
             DeliveryStatus.FAILED.value,
-            DeliveryStatus.CANCELLED.value
+            DeliveryStatus.CANCELLED.value,
+            DeliveryStatus.MISSING.value
         )
         
         # Create placeholders for the query (?, ?, ?)
