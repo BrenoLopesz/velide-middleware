@@ -76,7 +76,7 @@ class DeliveriesService(QObject):
     # CORE EVENT HANDLERS (Refactored Logic)
     # =========================================================================
 
-    def _on_order_restored(self, restored_order: Order):
+    def _on_order_restored(self, restored_order: Order, external_id: Optional[str]):
         """
         Handles orders recovered from persistence (Startup).
         Logic: Update Memory + Update UI. Do NOT send to API.
@@ -89,8 +89,8 @@ class DeliveriesService(QObject):
         # 1. Update Repository
         self._repository.add(restored_order)
         # If the restored order has an external ID, ensure we link it immediately
-        if hasattr(restored_order, 'external_id') and restored_order.external_id:
-            self._repository.link_ids(internal_id, restored_order.external_id)
+        if external_id is not None:
+            self._repository.link_ids(internal_id, external_id)
         
         # 2. Acknowledge to UI
         self.delivery_acknowledged.emit(internal_id, restored_order)
@@ -212,6 +212,11 @@ class DeliveriesService(QObject):
         self.logger.debug("Solicitando strategy para lidar com a entrega em rota.")
         self._active_strategy.on_delivery_route_started_on_velide(order)
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.IN_PROGRESS)
+    
+    def on_delivery_route_ended_in_velide(self, order: Order):
+        self.logger.debug("Solicitando strategy para lidar com o pedido entregue.")
+        self._active_strategy.on_delivery_route_ended_on_velide(order)
+        self.delivery_update.emit(order.internal_id, DeliveryRowStatus.DELIVERED)
 
     def _sanitize_order_id(self, order: Order):
         """

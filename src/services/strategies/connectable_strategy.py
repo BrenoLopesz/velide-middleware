@@ -15,7 +15,7 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):
     """
     # This signal emits the FINAL, NORMALIZED order model
     order_normalized = pyqtSignal(Order)
-    order_restored = pyqtSignal(Order)
+    order_restored = pyqtSignal(Order, object) # Order and external ID (optional)
     order_cancelled = pyqtSignal(str, object) # Internal ID, (optional) external ID
     # normalization_failed = pyqtSignal(dict, str) # raw_data, error_message
 
@@ -54,5 +54,9 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):
         pass
 
     def on_delivery_route_started_on_velide(self, order: Order):
-        """Optional callback function called when a deleted deliver is detected through Websockets."""
+        """Optional callback function called when delivery route start is detected through Websockets."""
+        pass
+
+    def on_delivery_route_ended_on_velide(self, order: Order):
+        """Optional callback function called when a delivery route end is detected through Websockets."""
         pass

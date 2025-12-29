@@ -22,6 +22,7 @@ class DeliveryRowStatus(Enum):
     SENDING = "Enviando..."
     ADDED = "Adicionado"
     IN_PROGRESS = "Em Rota"
+    DELIVERED = "Entregue"
     DELETING = "Deletando..."
     CANCELLED = "Cancelado"
     ERROR = "Erro"
@@ -32,6 +33,7 @@ STATUS_COLORS = {
     DeliveryRowStatus.SENDING: QBrush(QColor(0, 152, 210)),
     DeliveryRowStatus.ADDED: QBrush(QColor(74, 160, 53)),
     DeliveryRowStatus.IN_PROGRESS: QBrush(QColor(5, 129, 206)),
+    DeliveryRowStatus.DELIVERED: QBrush(QColor(13, 84, 43)),
     DeliveryRowStatus.ERROR: QBrush(QColor(231, 98, 104)), 
     DeliveryRowStatus.DELETING: QBrush(QColor(233, 149, 33)),
     DeliveryRowStatus.CANCELLED: QBrush(QColor(211, 118, 0)),
@@ -46,7 +48,6 @@ DB_TO_UI_MAP = {
     DeliveryStatus.IN_PROGRESS: DeliveryRowStatus.IN_PROGRESS,
     
     # Terminal States (Mapped for completeness/live updates)
-    # TODO: Use a specific 'DONE' status
     DeliveryStatus.DELIVERED:   DeliveryRowStatus.ADDED, 
     DeliveryStatus.CANCELLED:   DeliveryRowStatus.CANCELLED,
     DeliveryStatus.FAILED:      DeliveryRowStatus.ERROR,

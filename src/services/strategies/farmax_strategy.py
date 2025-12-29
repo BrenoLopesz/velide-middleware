@@ -111,8 +111,8 @@ class FarmaxStrategy(IConnectableStrategy):
             # TODO: Checks if validation was succesful
             order = FarmaxMapper.to_order(delivery)
             
-            # TODO: Inject the specific status from persistence if your Order model supports it
-            # current_status = self._persistence.get_current_status(order.internal_id)
+            # Get external ID
+            external_id = self._persistence.get_external_id(order.internal_id)
             
             # Get the PERSISTED status
             current_db_status = self._persistence.get_current_status(order.internal_id)
@@ -123,7 +123,7 @@ class FarmaxStrategy(IConnectableStrategy):
                 # If persistence doesn't have it (weird edge case), default to Acknowledge
                 order.ui_status_hint = None 
                 
-            self.order_restored.emit(order)
+            self.order_restored.emit(order, external_id)
 
     # --- Public Interface Implementation (IConnectableStrategy) ---
 
@@ -194,6 +194,13 @@ class FarmaxStrategy(IConnectableStrategy):
         # TODO: Add a property on the order to allow checking if 
         # the cancellation was requested internally or not.
         self._logger.info(f"Uma entrega ({order.internal_id}) foi deletada no Velide.")
+
+    def on_delivery_route_started_on_velide(self, order):
+        self._persistence.update_status(order.internal_id, DeliveryStatus.IN_PROGRESS)
+
+    def on_delivery_route_ended_on_velide(self, order):
+        self._persistence.mark_as_finished(order.internal_id)
+        self._logger.info(f"Pedido ({order.internal_id}) foi entregue no Velide.")
 
     # --- Internal Slots ---
 

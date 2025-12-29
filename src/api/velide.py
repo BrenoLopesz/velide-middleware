@@ -86,6 +86,7 @@ class Velide:
                     id
                     deliveries {
                         id
+                        createdAt
                     }
                 }
             }

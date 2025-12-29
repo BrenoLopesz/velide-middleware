@@ -145,9 +145,6 @@ class ReconciliationService(QObject):
                 # CRITICAL: We update the SERVICE, not the DB directly.
                 # This updates the in-memory cache AND triggers the async SQLite write.
                 self.tracking_service.update_status(internal_id, expected_local_enum)
-                
-                # Update Farmax (Placeholder)
-                self._sync_to_farmax(internal_id, expected_local_enum)
 
                 # Emit signal to update UI
                 self.delivery_in_route.emit(internal_id)
@@ -157,13 +154,6 @@ class ReconciliationService(QObject):
         self._cleanup_cooldowns(current_time)
         self.logger.debug(f"Ciclo finalizado. {updates_count} correções aplicadas.")
         self.sync_finished.emit(updates_count)
-
-    def _sync_to_farmax(self, farmax_id: str, new_status: DeliveryStatus):
-        """
-        Placeholder: logic to actually push the update to the ERP.
-        """
-        # TODO: Call your Farmax Connector here
-        pass
 
     def _cleanup_cooldowns(self, current_time):
         """Remove expired entries to save memory."""
