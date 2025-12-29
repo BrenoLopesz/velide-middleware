@@ -71,19 +71,24 @@ class Location(BaseModel):
     """Location information from GraphQL response"""
     properties: LocationProperties
 
+class DeliveryResponse(BaseModel):
+    """Delivery data from GraphQL response"""
+    id: str
+    route_id: Optional[str] = Field(None, alias="routeId")
+    ended_at: Optional[datetime] = Field(None, alias="endedAt")
+    created_at: datetime = Field(..., alias="createdAt")
+    location: Optional[Location] = None
+
+class RouteResponse(BaseModel):
+    """Route info nested inside deliveryman"""
+    id: str
+    deliveries: List[DeliveryResponse] = Field(default_factory=list)
+
 class DeliverymanResponse(BaseModel):
     """Deliveryman information from GraphQL response"""
     id: str
     name: str
-
-class DeliveryResponse(BaseModel):
-    """Delivery data from GraphQL response"""
-    id: str
-    route_id: Optional[str] = Field(alias="routeId")
-    ended_at: Optional[datetime] = Field(alias="endedAt")
-    created_at: datetime = Field(..., alias="createdAt")
-    location: Optional[Location] = None
-
+    route: Optional[RouteResponse] = None
 
 class AddDeliveryData(BaseModel):
     """Data wrapper for addDeliveryFromIntegration"""
@@ -96,31 +101,15 @@ class GetDeliverymenData(BaseModel):
 class DeleteDeliveryData(BaseModel):
     deleteDelivery: bool
 
-class SnapshotDelivery(BaseModel):
-    """Minimal delivery info for snapshot (just ID)"""
-    id: str
-
-class SnapshotRoute(BaseModel):
-    """Route info nested inside deliveryman"""
-    id: str
-    deliveries: List[SnapshotDelivery] = Field(default_factory=list)
-
-class SnapshotDeliveryman(BaseModel):
-    """Deliveryman info for snapshot"""
-    id: str
-    name: str
-    # Route is optional because a deliveryman might be idle
-    route: Optional[SnapshotRoute] = None 
-
 class GlobalSnapshotData(BaseModel):
     """
     Data wrapper for the Global Snapshot query.
     Maps to the two root keys returned by the GraphQL query.
     """
     # Unassigned deliveries
-    deliveries: List[SnapshotDelivery] = Field(default_factory=list)
+    deliveries: List[DeliveryResponse] = Field(default_factory=list)
     # Deliverymen (who might have assigned deliveries)
-    deliverymen: List[SnapshotDeliveryman] = Field(default_factory=list)
+    deliverymen: List[DeliverymanResponse] = Field(default_factory=list)
 
 class GraphQLResponse(BaseModel):
     """Complete GraphQL response"""

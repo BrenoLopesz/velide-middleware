@@ -77,6 +77,7 @@ class Velide:
         query GetGlobalSnapshot {
             deliveries {
                 id
+                createdAt
             }
             deliverymen {
                 id

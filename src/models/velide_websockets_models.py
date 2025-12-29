@@ -3,7 +3,7 @@ from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from models.velide_delivery_models import DeliveryResponse, DeliverymanResponse
+from models.velide_delivery_models import DeliveryResponse, DeliverymanResponse, RouteResponse
 
 class ActionType(Enum):
     ADD_DELIVERY = "ADD_DELIVERY"
@@ -24,8 +24,9 @@ class LatestAction(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     action_type: ActionType = Field(description="The kind of action taken by an user.", alias="actionType")
     timestamp: datetime = Field(description="When the event was acknowledge by the serer.")
-    deliveryman: Optional[DeliverymanResponse] = Field(description="The deliveryman related to the action, if any.")
-    delivery: Optional[DeliveryResponse] = Field(description="The delivery related to the action, if any.")
+    route: Optional[RouteResponse] = Field(None, description="Route related to the action, if any.")
+    deliveryman: Optional[DeliverymanResponse] = Field(None, description="The deliveryman related to the action, if any.")
+    delivery: Optional[DeliveryResponse] = Field(None, description="The delivery related to the action, if any.")
     offset: int = Field(
         default=0,  # Handles missing field
         description="Offset related to the 'timestemp', that defines when the action was really taken."

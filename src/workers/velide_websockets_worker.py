@@ -106,12 +106,20 @@ class VelideWebsocketsWorker(QRunnable):
                     deliveryman {
                         id
                         name
+                        
                     }
                     delivery {
                         id
                         routeId
                         createdAt
                         endedAt
+                    }
+                    route {
+                        id
+                        deliveries {
+                            id
+                            createdAt
+                        }
                     }
                 }
             }
