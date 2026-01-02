@@ -77,8 +77,16 @@ class VelideWebsocketsWorker(QRunnable):
         """Method to call from the main thread to stop the worker."""
         self._is_running = False
         self.logger.info("Solicitação de parada do WebSocket recebida.")
-        # Optional: You could try to force close self._transport here if 
-        # the loop is stuck, but usually the loop checks _is_running fast enough.
+        # 3. IMPROVEMENT: Force close transport to break the await immediately
+        if self._transport:
+            # We schedule the close, as we are likely in a different thread
+            try:
+                loop = asyncio.get_event_loop()
+                # Check if loop is running to avoid RuntimeError
+                if loop.is_running():
+                    asyncio.run_coroutine_threadsafe(self._transport.close(), loop)
+            except Exception:
+                pass
 
     def run(self) -> None:
         try:

@@ -30,7 +30,7 @@ class FarmaxDelivery(BaseModel):
     customer_contact: Optional[str] = Field(default=None, alias="fone")
     route_start_time: Optional[time] = Field(default=None, alias="hora_saida")  # HORA_SAIDA could be NULL
     neighborhood: Optional[str] = Field(default=None, alias="bairro") # BAIRRO could be NULL
-    address: Optional[str] = Field(default=None, alias="tempendereco")
+    address: str = Field(..., alias="tempendereco")
     reference: Optional[str] = Field(default=None, alias="tempreferencia")
     delivery_date: date = Field(..., alias="data") 
     delivery_time: time = Field(..., alias="hora")

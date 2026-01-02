@@ -187,6 +187,7 @@ class TrackingPersistenceService(QObject):
         self._status_cache[norm_id] = final_status
         self._id_map[norm_id] = external_id
         
+        # TODO: Check if this was succesful. Rollback everything if not.
         # 2. Async Persist to SQLite (Sending the CLEAN STRING ID)
         self._sqlite.request_add_delivery_mapping(
             external_id=external_id,

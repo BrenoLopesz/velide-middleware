@@ -61,8 +61,8 @@ class DashboardPresenter(QObject):
 
     def _on_delivery_status_update(self, order_id: str, status: str):
         order = self._services.deliveries.get_order(order_id)
+        # Very rare or impossible to happen. Handle it anyways.
         if order is None:
-            # TODO: Raise error on `get_order` instead.
             self.logger.error("Entrega não encontrada! Não foi possível atualizar o seu status.")
             return
         

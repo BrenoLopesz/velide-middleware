@@ -230,6 +230,8 @@ class FarmaxDeliveryIngestor(QObject):
             for delivery in deliveries:
                 # Double check reservation to prevent race conditions or duplicates
                 if self._persistence.reserve_id(delivery.sale_id):
+                    # Handling validation isn't needed:
+                    # 'FarmaxDelivery' can ALWAYS be converted to 'Order', by design.
                     order = FarmaxMapper.to_order(delivery)
                     processed_orders.append(order)
                     self._logger.info(f"Ingerindo novo pedido: {delivery.sale_id}")

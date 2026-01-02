@@ -144,7 +144,8 @@ class DeliveriesService(QObject):
         if was_pending:
             self.logger.info(f"Pedido {internal_id} removido da fila de envio antes do processamento.")
             self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
-            self._repository.remove(internal_id) # Cleanup memory
+            # We won't care about this order anymore. We can cleanup from memory.
+            self._repository.remove(internal_id)
             return
 
         # 2. If not pending, we must delete via API if we have an External ID
@@ -200,6 +201,7 @@ class DeliveriesService(QObject):
 
     def _on_delivery_request_failure(self, internal_id: str, error_msg: str):
         """Called when Dispatcher encounters an error."""
+        # TODO: Retry adding delivery to Velide (?)
         self.delivery_failed.emit(internal_id, error_msg)
         self.delivery_update.emit(internal_id, DeliveryRowStatus.ERROR)
         # Original code removed it on failure. Depending on retry logic, you might want to keep it.

@@ -28,7 +28,6 @@ class FarmaxStatusTracker(QObject):
 
     # Signals
     order_cancelled = pyqtSignal(str, object)   # Emits internal_id (str), External ID (or None)
-    order_delivered = pyqtSignal(str)   # Emits internal_id (str)
     error_occurred = pyqtSignal(str)
 
     def __init__(
@@ -171,8 +170,9 @@ class FarmaxStatusTracker(QObject):
 
                 # Optional: Check for "Finished/Delivered" in ERP to close local loop
                 elif self._is_finished(raw_status):
-                    self._logger.debug(f"Pedido {sale_id} finalizado no Farmax. Removendo do monitoramento.")
-                    self._persistence.mark_as_finished(sale_id)
+                    self._logger.warning(f"Pedido {sale_id} finalizado no Farmax mas não foi entregue no Velide! Para melhor sincronização informe o retorno sempre através do Velide.")
+                    # EDIT: Do not mark as finished, so it keeps being tracked through Velide.
+                    # self._persistence.mark_as_finished(sale_id)
 
         except Exception as e:
             self._logger.error(f"Erro ao processar atualizações de status: {e}")

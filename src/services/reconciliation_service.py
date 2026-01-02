@@ -24,6 +24,7 @@ class ReconciliationService(QObject):
     delivery_in_route = pyqtSignal(str)
     delivery_missing = pyqtSignal(str)
 
+    # TODO: Use config
     COOLDOWN_SECONDS = 60.0 
     SYNC_INTERVAL_MS = 600_000  # 10 Minutes
 
@@ -113,7 +114,7 @@ class ReconciliationService(QObject):
         updates_count = 0
         current_time = time.time()
         
-        self.logger.info(f"Snapshot recebido ({len(snapshot_map)} itens). Comparando com cache local...")
+        self.logger.debug(f"Snapshot recebido ({len(snapshot_map)} itens). Comparando com cache local...")
 
         # 1. Get the "Source of Truth" from the Tracking Service
         local_active_items = self.tracking_service.get_active_cache_snapshot()
@@ -142,8 +143,8 @@ class ReconciliationService(QObject):
             expected_local_enum = map_velide_status_to_local(remote_status_str)
             
             if expected_local_enum != local_status:
-                self.logger.info(
-                    f"CORREÇÃO: {internal_id} | Local: {local_status.name} -> Remote: {remote_status_str}"
+                self.logger.warning(
+                    f"Encontrado inconsistência em um pedido ({internal_id}). Local: {local_status.name} -> Remoto: {remote_status_str}. Aplicando correções..."
                 )
                 
                 # CRITICAL: We update the SERVICE, not the DB directly.
