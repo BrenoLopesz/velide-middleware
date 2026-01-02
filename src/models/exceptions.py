@@ -24,9 +24,12 @@ class TokenPollingError(AuthorizationError):
         self.error_code = error_code
         self.error_description = error_description
         super().__init__(f"Erro no polling do OAuth: {error_code} - {error_description}")
-
+        
 class TokenStorageError(AuthorizationError):
-    """Raised when the token cannot be written to the file system."""
-    def __init__(self, original_exception):
+    """Raised when the token cannot be accessed (read/write/decode) on the file system."""
+    
+    def __init__(self, original_exception: Exception, message: str = "Falha em armazenar token no disco"):
         self.original_exception = original_exception
-        super().__init__(f"Falha em armazenar token no disco: {original_exception}")
+        # If the caller provides a specific message, use it. 
+        # Otherwise, fall back to the default "Falha em armazenar..."
+        super().__init__(f"{message}: {original_exception}")

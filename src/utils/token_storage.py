@@ -76,7 +76,7 @@ def read_token_from_file() -> Optional[dict]:
             return None
 
         token_json_string = _decode_string_base64(encoded_token)
-        token = json.loads(token_json_string)
+        token: dict = json.loads(token_json_string)
         return token
 
     except FileNotFoundError:

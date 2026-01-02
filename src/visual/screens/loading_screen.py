@@ -27,7 +27,7 @@ class LoadingScreen(QWidget):
         self.main_layout.addStretch()
 
 
-    @pyqtProperty(int)
+    @pyqtProperty(int) # type: ignore[attr-defined]
     def rotation(self):
         return self._rotation
 

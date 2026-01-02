@@ -32,7 +32,7 @@ class LoadingIcon(QLabel):
         return self._rotation
 
     # Define a Q_PROPERTY for rotation, so QPropertyAnimation can use it
-    rotation = pyqtProperty(float, getRotation, setRotation)
+    rotation = pyqtProperty(float, getRotation, setRotation) # type: ignore[attr-defined]
 
     def paintEvent(self, event):
          # Create a QPainter object to handle drawing
