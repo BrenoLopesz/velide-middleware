@@ -75,7 +75,8 @@ class CdsStrategy(IConnectableStrategy):
             reference=cds_order.referencia,
             neighbourhood=neighbourhood,
             # CDS doesn't provide an internal ID, so we generate one.
-            internal_id=str(uuid.uuid4())
+            internal_id=str(uuid.uuid4()),
+            ui_status_hint=None
         )
 
 

@@ -185,7 +185,8 @@ def test_on_statuses_retrieved_handles_delivery(tracker, mock_persistence):
 
     # Assert
     tracker.order_cancelled.emit.assert_not_called()
-    mock_persistence.mark_as_finished.assert_called_with(456.0)
+    # EDIT: Do not mark as finished, so it keeps being tracked through Velide.
+    # mock_persistence.mark_as_finished.assert_called_with(456.0)
 
 def test_on_statuses_retrieved_ignores_active_orders(tracker, mock_persistence):
     """Status 'A' (Active) should result in no changes."""

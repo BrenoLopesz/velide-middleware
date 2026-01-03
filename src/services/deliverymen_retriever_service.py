@@ -36,7 +36,7 @@ class DeliverymenRetrieverService(QObject):
         if self._waiting_for_token:
             self.fetch_deliverymen()
 
-    def get_deliverymen(self) -> Tuple[list, list]:
+    def get_deliverymen(self) -> Tuple[Optional[list], Optional[list]]:
         return (self._velide_deliverymen, self._local_deliverymen)
 
     def check_if_mapping_is_required(self):
@@ -80,7 +80,7 @@ class DeliverymenRetrieverService(QObject):
         if self._local_deliverymen is not None:
             self._emit_deliverymen()
     
-    def _on_receive_local_deliverymen(self, deliverymen: list):
+    def _on_receive_local_deliverymen(self, deliverymen: List[BaseLocalDeliveryman]):
         self._local_deliverymen = deliverymen
         if self._velide_deliverymen is not None:
             self._emit_deliverymen()

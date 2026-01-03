@@ -3,6 +3,7 @@ from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
 from workers.velide_worker import VelideWorker
 from api.velide import Velide
 from models.velide_delivery_models import Order
+from typing import Deque, Optional
 
 # Define Task Types
 TASK_ADD = "ADD"
@@ -23,9 +24,9 @@ class DeliveryDispatcher(QObject):
     def __init__(self, thread_pool: QThreadPool):
         super().__init__()
         self._thread_pool = thread_pool
-        self._queue = collections.deque()
+        self._queue: Deque[dict] = collections.deque()
         self._is_processing = False
-        self._velide_api = None
+        self._velide_api: Optional[Velide] = None
 
     def set_api(self, api: Velide):
         self._velide_api = api

@@ -8,6 +8,7 @@ fonts = None
 class FontsDict(TypedDict):
     light: QFont
     regular: QFont
+    regular_small: QFont
     bold: QFont
 
 def load_fonts() -> FontsDict:
@@ -21,12 +22,12 @@ def load_fonts() -> FontsDict:
     regular_font_family = QFontDatabase.applicationFontFamilies(regular_font_id)[0]
     bold_font_family = QFontDatabase.applicationFontFamilies(bold_font_id)[0]
     # Create a QFont object with the custom font
-    loaded_fonts = {
-        'light': QFont(light_font_family, 12),  # Adjust the font size as needed,
-        'regular': QFont(regular_font_family, 12),
-        'bold': QFont(bold_font_family, 12, weight=QFont.Bold),
-        'regular_small': QFont(regular_font_family, 9)
-    }
+    loaded_fonts = FontsDict(
+        light=QFont(light_font_family, 12),  # Adjust the font size as needed,
+        regular=QFont(regular_font_family, 12),
+        bold=QFont(bold_font_family, 12, weight=QFont.Bold),
+        regular_small=QFont(regular_font_family, 9)
+    )
 
     fonts = loaded_fonts
     return loaded_fonts

@@ -30,7 +30,7 @@ class VelideWebsocketsService(QObject):
         super().__init__()
         self.api_config = api_config
         self.logger = logging.getLogger(__name__)
-        self.access_token = None
+        self.access_token: Optional[str] = None
 
         # We keep a reference to the worker to call stop() later
         self._worker: Optional[VelideWebsocketsWorker] = None

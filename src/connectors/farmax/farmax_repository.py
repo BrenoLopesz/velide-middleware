@@ -79,7 +79,7 @@ class FarmaxRepository:
             self.logger.exception(f"Erro inesperado ao finalizar entrega {sale_id}.")
             raise
 
-    def fetch_sales_statuses_by_id(self, cd_vendas: Tuple[float]) -> List[FarmaxSale]:
+    def fetch_sales_statuses_by_id(self, cd_vendas: Tuple[float, ...]) -> List[FarmaxSale]:
         """
         Fetches the status for a given list of sale IDs.
         Returns an empty list if no IDs are provided.
@@ -102,7 +102,7 @@ class FarmaxRepository:
             row_dicts = [{k.lower(): v for k, v in row._mapping.items()} for row in rows]
             return [FarmaxSale.model_validate(row_dict) for row_dict in row_dicts]
 
-    def fetch_deliveries_by_id(self, cd_vendas: Tuple[float]) -> List[FarmaxDelivery]:
+    def fetch_deliveries_by_id(self, cd_vendas: Tuple[float, ...]) -> List[FarmaxDelivery]:
         """
         Fetches detailed delivery info from both ENTREGAS and VENDAS
         in a single query.

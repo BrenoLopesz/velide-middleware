@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 
 from PyQt5.QtCore import QRunnable, QObject, pyqtSignal
 from gql import gql, Client
@@ -103,7 +103,7 @@ class VelideWebsocketsWorker(QRunnable):
             # 3. ADDED: Emit 'finished' so the Service knows the thread is dead
             self.signals.finished.emit()
 
-    async def _run_async(self):
+    async def _run_async(self) -> None:
         # Defines the subscription query
         subscription_query = gql("""
             subscription LatestAction($authorization: String!) {
@@ -133,7 +133,7 @@ class VelideWebsocketsWorker(QRunnable):
             }
         """)
 
-        variables: Dict[str, Any] = {"authorization": self.access_token}
+        variables: Dict[str, str] = {"authorization": self.access_token}
 
         retry_delay = 2
         

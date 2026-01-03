@@ -1,6 +1,6 @@
 from typing import List, Any, Dict, Optional
-from PyQt5.QtWidgets import QTableView, QComboBox, QStyledItemDelegate, QHeaderView
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QWidget, QTableView, QComboBox, QStyledItemDelegate, QHeaderView
+from PyQt5.QtCore import QModelIndex, Qt
 
 from models.base_models import BaseLocalDeliveryman
 from models.mapping_table_model import MappingTableModel
@@ -23,15 +23,29 @@ class ComboBoxDelegate(QStyledItemDelegate):
 
         return combo
     
-    def setEditorData(self, editor: QComboBox, index: Any) -> None:
+    def setEditorData(self, editor: Optional[QWidget], index: QModelIndex) -> None:
         """Sets the editor's current value from the model's data."""
-        value = index.model().data(index, Qt.EditRole)
-        editor.setCurrentText(str(value))
+        # 1. Check if editor exists
+        if not editor:
+            return
 
-    def setModelData(self, editor: QComboBox, model: Any, index: Any) -> None:
+        # 2. Check if editor is actually a QComboBox before calling specific methods
+        if isinstance(editor, QComboBox):
+            current_data = index.data(Qt.EditRole)
+            editor.setCurrentText(str(current_data))
+        else:
+            # Fallback for other widget types (optional)
+            super().setEditorData(editor, index)
+
+    def setModelData(self, editor: Optional[QWidget], model, index: QModelIndex) -> None:
         """Saves the editor's current value back to the model."""
-        value = editor.currentText()
-        model.setData(index, value, Qt.EditRole)
+        if not editor:
+            return
+
+        if isinstance(editor, QComboBox):
+            model.setData(index, editor.currentText(), Qt.EditRole)
+        else:
+            super().setModelData(editor, model, index)
 
     def update_options(self, editor: Optional[QComboBox] = None) -> None:
         """Helper to update options in a combo box or for the delegate itself."""
@@ -99,7 +113,7 @@ class MappingTableView(QTableView):
         # The source column (col 0) will hold the full source object
         # The destination column (col 1) will hold the mapped string name
         table_data = [
-            [source, mappings.get(source.id, "")] for source in source_items
+            (source, mappings.get(source.id, "")) for source in source_items
         ]
 
         # Extract the names from the destination objects
@@ -111,9 +125,9 @@ class MappingTableView(QTableView):
         # Load the prepared data into the model
         self._model.load_data(table_data, headers)
 
-        # # After loading data, make the editors in column 1 persistent
+        # After loading data, make the editors in column 1 persistent
         for row in range(self._model.rowCount()):
-            index_to_edit = self._model.index(row, 1)  # Get the index for column 1
+            index_to_edit = self._model.index(row, 1)
             self.openPersistentEditor(index_to_edit)
 
     def get_mappings(self) -> Dict[str, str]:

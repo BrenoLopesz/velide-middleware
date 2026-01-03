@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QLabel, QWidget, QVBoxLayout
-from PyQt5.QtCore import Qt, QPropertyAnimation, pyqtProperty
+from PyQt5.QtCore import Qt, QPropertyAnimation, pyqtProperty # type: ignore[attr-defined]
 from visual.components.loading_icon import LoadingIcon
 from visual.fonts import get_fonts
 
@@ -27,14 +27,14 @@ class LoadingScreen(QWidget):
         self.main_layout.addStretch()
 
 
-    @pyqtProperty(int) # type: ignore[attr-defined]
+    @pyqtProperty(int) # type: ignore[type-var]
     def rotation(self):
         return self._rotation
 
-    @rotation.setter
-    def rotation(self, rotation):
-        self._rotation = rotation
-        self.valueChanged.emit(rotation)
+    @rotation.setter # type: ignore[type-var]
+    def set_rotation(self, new_rotation):
+        self._rotation = new_rotation
+        self.valueChanged.emit(new_rotation)
 
     def add_loading_icon(self):
         self.loading_icon = LoadingIcon()

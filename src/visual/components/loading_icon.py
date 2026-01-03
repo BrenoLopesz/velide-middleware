@@ -1,5 +1,5 @@
 import math
-from PyQt5.QtCore import Qt, pyqtProperty
+from PyQt5.QtCore import Qt, pyqtProperty # type: ignore[attr-defined]
 from PyQt5.QtWidgets import QLabel
 from PyQt5.QtGui import QPainter, QTransform, QPixmap
 

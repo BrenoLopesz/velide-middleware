@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import QLabel, QWidget, QVBoxLayout
 from visual.components.loading_icon import LoadingIcon
 from visual.fonts import get_fonts
-from PyQt5.QtCore import Qt, QPropertyAnimation, pyqtProperty, QTimer
+from PyQt5.QtCore import Qt, QPropertyAnimation, pyqtProperty, QTimer # type: ignore[attr-defined]
 import sys
 
 class UpdateScreen(QWidget):

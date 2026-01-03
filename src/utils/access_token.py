@@ -1,9 +1,17 @@
-# utils/access_token.py
-
+from typing import TypedDict, cast
 import requests
 import json
-from requests.exceptions import RequestException
+from requests.exceptions import RequestException, HTTPError
 from models.exceptions import NetworkError, ApiError, TokenPollingError
+
+# 1. Define the structure of the Auth0/OAuth Token Response
+class AccessTokenDict(TypedDict, total=False):
+    access_token: str
+    token_type: str
+    expires_in: int
+    refresh_token: str
+    scope: str
+    id_token: str
 
 class AccessToken():
     def __init__(self, domain: str, client_id: str, device_code: str):
@@ -15,10 +23,10 @@ class AccessToken():
             'device_code': device_code,
         }
 
-    def request(self) -> dict:
+    def request(self) -> AccessTokenDict:
         """
         Polls the token endpoint for an access token.
-        - On success: returns the token dictionary.
+        - On success: returns the strictly typed token dictionary.
         - On failure: raises NetworkError, ApiError, or TokenPollingError.
         """
         try:
@@ -31,7 +39,7 @@ class AccessToken():
             # We handle both by checking for an 'error' key.
             if 'error' in response_data:
                 error_code = response_data.get('error')
-                # These are expected polling responses, not true exceptions.
+                # These are expected polling responses ("authorization_pending", etc.)
                 # We raise a specific error so the caller can handle them.
                 raise TokenPollingError(
                     error_code=error_code,
@@ -40,7 +48,8 @@ class AccessToken():
             
             # If no 'error' key and status is OK, we have the token.
             if response.ok and 'access_token' in response_data:
-                return response_data
+                # 2. Use cast to tell mypy this dict matches our AccessTokenDict structure
+                return cast(AccessTokenDict, response_data)
             
             # For any other non-OK status, raise a generic ApiError.
             response.raise_for_status()
@@ -48,12 +57,15 @@ class AccessToken():
             # Fallback for unexpected successful responses without a token
             raise ApiError(response.status_code, "Resposta não possui o 'access_token'.")
 
+        # Catch HTTPError BEFORE RequestException
+        # HTTPError is a subclass of RequestException. If you catch RequestException first,
+        # the specific HTTPError block is unreachable.
+        except HTTPError as e:
+            raise ApiError(status_code=e.response.status_code, response_text=e.response.text) from e
+
         except RequestException as e:
             raise NetworkError(original_exception=e) from e
         
-        except requests.HTTPError as e:
-            # This catches non-2xx responses from raise_for_status()
-            raise ApiError(status_code=e.response.status_code, response_text=e.response.text) from e
-        
         except json.JSONDecodeError as e:
+            # We use response.text safely here assuming response exists if we got to JSON decoding
             raise ApiError(status_code=response.status_code, response_text=f"Falha ao decodificar JSON: {response.text}") from e

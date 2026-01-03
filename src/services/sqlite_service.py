@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool, pyqtSlot
 
@@ -77,7 +77,7 @@ class SQLiteService(QObject):
         self, 
         factory_method, 
         *args, 
-        result_signal: pyqtSignal
+        result_signal: Any
     ):
         """
         Internal helper method to create, connect, and run a worker.

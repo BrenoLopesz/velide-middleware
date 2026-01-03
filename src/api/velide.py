@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List, Optional, TypeVar
+from typing import List, Optional, Any
 import httpx
 
 from models.velide_delivery_models import (
@@ -18,8 +18,6 @@ from models.velide_delivery_models import (
 )
 from config import ApiConfig, TargetSystem
 from utils.async_retry import async_retry
-
-T = TypeVar('T')
 
 class Velide:
     """Client for interacting with Velide delivery API via GraphQL."""
@@ -124,7 +122,8 @@ class Velide:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Called when exiting the 'async with' block. Ensures cleanup."""
         # Cleanly close the client and its connections.
-        await self._client.aclose()
+        if self._client:
+            await self._client.aclose()
 
     @async_retry(
         operation_desc="enviar nova entrega",  # <--- Friendly Name
@@ -158,7 +157,8 @@ class Velide:
         response = await self._execute_request(payload)
         
         # Use the new generic parser
-        return self._parse_response(response, data_key="addDeliveryFromIntegration")
+        parsed_response = self._parse_response(response, data_key="addDeliveryFromIntegration")
+        return DeliveryResponse.model_validate(parsed_response)
     
     @async_retry(
         operation_desc="deletar entrega",
@@ -183,7 +183,7 @@ class Velide:
         response = await self._execute_request(payload)
         
         # Return a boolean for success.
-        return self._parse_response(response, data_key="deleteDelivery")
+        return self._parse_response(response, data_key="deleteDelivery") is True
 
     @async_retry(
         operation_desc="buscar entregadores",
@@ -201,7 +201,8 @@ class Velide:
         response = await self._execute_request(payload)
         
         # Use the new generic parser with the correct key (and fix the bug)
-        return self._parse_response(response, data_key="deliverymen")
+        parsed_response = self._parse_response(response, data_key="deliverymen")
+        return [DeliverymanResponse.model_validate(dm) for dm in parsed_response]
 
     @async_retry(
         operation_desc="buscar snapshot global",
@@ -221,7 +222,7 @@ class Velide:
         response = await self._execute_request(payload)
         
         # Pass None to get the full data structure containing both keys
-        raw_data = self._parse_response(response, data_key=None)
+        raw_data: GlobalSnapshotData = self._parse_response(response, data_key=None)
         
         # Flatten the data for easier processing
         return self._flatten_snapshot(raw_data)
@@ -283,6 +284,10 @@ class Velide:
         
         # Fix Naive Datetime if necessary
         # The Pydantic model uses datetime.combine(), which returns a naive datetime.
+        # RISKY: f the input datetime is naive (no timezone), .astimezone() assumes it 
+        # belongs to the local system time of the machine running the code.
+        # TODO: Enforce timezone-aware datetimes in the Order model or explicitly 
+        # attach the expected timezone (e.g., UTC) rather than relying on system local time.
         if created_at_time.tzinfo is None:
             # .astimezone() without args assumes the datetime is in the 
             # local system timezone and makes it aware.
@@ -329,6 +334,10 @@ class Velide:
         Raises:
             GraphQLRequestError: When HTTP request fails
         """
+        # Guard clause: Ensure client is initialized
+        if self._client is None:
+            raise RuntimeError("Client is not initialized. Ensure you are using 'async with Velide(...)'.")
+
         response = await self._client.post(
             self._api_config.velide_server,
             json=payload.model_dump(mode='json', by_alias=True)
@@ -339,7 +348,7 @@ class Velide:
         
         return response
     
-    def _parse_response(self, response: httpx.Response, data_key: Optional[str] = None) -> T:
+    def _parse_response(self, response: httpx.Response, data_key: Optional[str] = None) -> Any:
         """
         Generically parse and validate a GraphQL response, extracting data from a specific key.
         
@@ -348,12 +357,12 @@ class Velide:
             data_key: The key within the 'data' object to extract (e.g., 'addDeliveryFromIntegration')
             
         Returns:
-            T: The extracted data (e.g., a DeliveryResponse or List[DeliverymanResponse])
+            Any: The extracted data (Validated by Pydantic internals)
             
         Raises:
             GraphQLParseError: When JSON parsing fails
             GraphQLResponseError: When response structure is invalid, contains errors,
-                                 or the data_key is missing.
+                                  or the data_key is missing.
         """
         # 1. Parse JSON
         try:

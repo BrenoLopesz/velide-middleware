@@ -45,7 +45,7 @@ class DeliveriesService(QObject):
         # Pass API to dispatcher so it can create workers
         self._dispatcher.set_api(self._velide_api)
 
-    def get_order(self, order_id: str) -> Order:
+    def get_order(self, order_id: str) -> Optional[Order]:
         """Facade for the repository."""
         return self._repository.get_by_internal(order_id)
 
@@ -163,8 +163,11 @@ class DeliveriesService(QObject):
     # =========================================================================
 
     def on_reconciliation_detects_route_start(self, internal_id: str):
-        # TODO: Handle missing order (is it needed?)
         order = self.get_order(internal_id)
+        if not order:
+            self.logger.warning("Uma rota foi iniciada no Velide, mas não está sendo gerenciada pela integração.")
+            return
+
         self.on_delivery_route_started_in_velide(order)
 
     def on_reconciliation_misses_delivery(self, internal_id: str):
@@ -209,16 +212,31 @@ class DeliveriesService(QObject):
 
     def on_delivery_deleted_in_velide(self, order: Order):
         self.logger.debug("Solicitando strategy para lidar com a entrega deletada.")
+        if not self._active_strategy:
+            # Likely impossible to happen, but handle it anyways
+            self.logger.critical("Não há nenhum software conectado! Impossível lidar com entrega deletada.")
+            return
+
         self._active_strategy.on_delivery_deleted_on_velide(order)
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.CANCELLED)
 
     def on_delivery_route_started_in_velide(self, order: Order):
         self.logger.debug("Solicitando strategy para lidar com a entrega em rota.")
+        if not self._active_strategy:
+            # Likely impossible to happen, but handle it anyways
+            self.logger.critical("Não há nenhum software conectado! Impossível lidar com rota iniciada.")
+            return
+
         self._active_strategy.on_delivery_route_started_on_velide(order)
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.IN_PROGRESS)
     
     def on_delivery_route_ended_in_velide(self, order: Order):
         self.logger.debug("Solicitando strategy para lidar com o pedido entregue.")
+        if not self._active_strategy:
+            # Likely impossible to happen, but handle it anyways
+            self.logger.critical("Não há nenhum software conectado! Impossível lidar com rota finalizada.")
+            return
+        
         self._active_strategy.on_delivery_route_ended_on_velide(order)
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.DELIVERED)
 

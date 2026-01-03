@@ -5,10 +5,10 @@ from PyQt5.QtCore import QObject, pyqtSignal
 from models.velide_delivery_models import Order
 
 # This new class inherits the "blueprints" from both QObject's metaclass and ABC's metaclass.
-class QABCMeta(type(QObject), ABCMeta):
+class QABCMeta(type(QObject), ABCMeta): # type: ignore[misc]
     pass
 
-class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):
+class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta): # type: ignore[misc]
     """
     The interface (contract) for any delivery source.
     Its job is to listen for source-specific data and normalize it into a common Order model.
@@ -35,8 +35,8 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):
         pass
 
     @abstractmethod
-    def fetch_deliverymen(self, success, error) -> list:
-        """Returns the local registered deliverymen on the software."""
+    def fetch_deliverymen(self, success, error) -> None:
+        """Request he local registered deliverymen on the software."""
         pass
 
     @abstractmethod

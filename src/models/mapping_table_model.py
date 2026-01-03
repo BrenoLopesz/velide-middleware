@@ -44,10 +44,10 @@ class MappingTableModel(QAbstractTableModel):
 
         # Return the string value for display or editing
         if role in (Qt.DisplayRole, Qt.EditRole):
-            if index.column() == 0:
+            if index.column() == 0 and hasattr(value, 'name'):
                 return value.name
             else:
-                return value
+                return str(value)
 
         return None
 
@@ -58,9 +58,8 @@ class MappingTableModel(QAbstractTableModel):
         This is called by the delegate when an editor's value is committed.
         """
         if role == Qt.EditRole and index.column() == 1:
-            # The original code would fail here because tuples are immutable.
-            # By using a list of lists, this assignment is now valid.
-            self._data[index.row()][index.column()] = str(value)
+            old_tuple = self._data[index.row()]
+            self._data[index.row()] = (old_tuple[0], str(value))
             self.dataChanged.emit(index, index, [role])
             return True
         return False

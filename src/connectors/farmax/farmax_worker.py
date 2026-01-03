@@ -4,10 +4,6 @@ from datetime import datetime, time
 from PyQt5.QtCore import QRunnable, QObject, pyqtSignal
 
 from connectors.farmax.farmax_repository import FarmaxRepository
-from models.farmax_models import (
-    FarmaxDelivery, 
-    FarmaxDeliveryman, 
-)
 
 class FarmaxWorkerSignals(QObject):
     """
@@ -154,7 +150,7 @@ class FarmaxWorker(QRunnable):
     def for_fetch_deliveries_by_id(
         cls, 
         repository: FarmaxRepository, 
-        cd_vendas: Tuple[float]
+        cd_vendas: Tuple[float, ...]
     ) -> 'FarmaxWorker':
         """Creates a worker to fetch full delivery details by ID."""
         return cls(
@@ -167,7 +163,7 @@ class FarmaxWorker(QRunnable):
     def for_fetch_sales_statuses_by_id(
         cls, 
         repository: FarmaxRepository, 
-        cd_vendas: Tuple[float]
+        cd_vendas: Tuple[float, ...]
     ) -> 'FarmaxWorker':
         """Creates a worker to fetch sale statuses by ID."""
         return cls(

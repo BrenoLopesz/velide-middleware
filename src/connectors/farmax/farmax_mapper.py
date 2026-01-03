@@ -31,17 +31,21 @@ class FarmaxMapper:
         # (e.g., formatting phone numbers, cleaning strings) here centrally.
         
         return Order(
-            customerName=FarmaxMapper._safe_str(delivery.customer_name),
+            customerName=str(delivery.customer_name).strip(),
             customerContact=FarmaxMapper._safe_str(getattr(delivery, "customer_contact", None)),
             
             # Address Block
-            address=FarmaxMapper._safe_str(delivery.address),
+            address=str(delivery.address).strip(),
             neighbourhood=FarmaxMapper._safe_str(getattr(delivery, "neighborhood", None)),
             reference=FarmaxMapper._safe_str(getattr(delivery, "reference", None)),
             
+            address2=None,
+            ui_status_hint=None,
+            
             # Metadata
             createdAt=delivery.created_at,
-            internal_id=str(delivery.sale_id)
+            internal_id=str(delivery.sale_id),
+
         )
 
     @staticmethod

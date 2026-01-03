@@ -7,10 +7,9 @@ import traceback
 from PyQt5.QtWidgets import QApplication
 from sqlalchemy import create_engine
 
-from api.sqlite_manager import SQLiteManager
 from config import Settings, TargetSystem, config
 from connectors.farmax.farmax_repository import FarmaxRepository
-from connectors.farmax.farmax_setup import FarmaxSetup
+# from connectors.farmax.farmax_setup import FarmaxSetup
 from models.app_context_model import Services
 from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_service import DeliveriesService
@@ -50,7 +49,7 @@ def is_update_checked() -> bool:
         help="If update wasn't checked, it will close and run the update auto-installer first instead."
     )
     args = parser.parse_args()
-    return args.is_update_checked
+    return bool(args.is_update_checked)
 
 def open_installer(installer_path: str):
     """Launches the installer executable in a detached process."""
@@ -115,9 +114,16 @@ def create_strategy(
     ):
     """Factory function to create the correct delivery strategy."""
     if app_config.target_system == TargetSystem.CDS:
+        # GUARD CLAUSE: Ensure the specific config for this strategy exists
+        if not app_config.folder_to_watch:
+            raise ValueError("Configuração inválida: 'folder_to_watch' é obrigatório para o sistema CDS.")
+        
         return CdsStrategy(app_config.api, app_config.folder_to_watch)
     
     elif app_config.target_system == TargetSystem.FARMAX:
+        if not app_config.farmax:
+            raise ValueError("Configuração inválida: 'farmax' é obrigatório para o sistema Farmax.")
+
         # sqlite_manager = SQLiteManager(app_config.sqlite_path)
         engine = create_engine(
             get_farmax_engine_string(app_config.farmax),
@@ -125,7 +131,7 @@ def create_strategy(
             max_overflow=5,
             pool_pre_ping=True
         )
-        farmax_setup = FarmaxSetup(engine)
+        # farmax_setup = FarmaxSetup(engine)
         farmax_repository = FarmaxRepository(engine)
         return FarmaxStrategy(
             farmax_config=app_config.farmax,

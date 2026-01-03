@@ -26,7 +26,7 @@ class _CursorState:
     Encapsulates the state of the polling cursor.
     Determines whether the next poll should be based on Time or ID.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         self.last_log_id: Optional[int] = None
         self.last_check_time: Optional[datetime] = None
         self._pending_id: Optional[int] = None
@@ -77,7 +77,7 @@ class FarmaxDeliveryIngestor(QObject):
         repository: FarmaxRepository,
         persistence: TrackingPersistenceService,
         config: FarmaxIngestorConfig = FarmaxIngestorConfig()
-    ):
+    ) -> None:
         super().__init__()
         self._logger = logging.getLogger(__name__)
         self._repository = repository
@@ -142,23 +142,33 @@ class FarmaxDeliveryIngestor(QObject):
         
         self._is_processing_cycle = True
 
-        # Factory logic for worker based on cursor state
-        if self._cursor.is_steady_state:
-            self._logger.debug(f"Consultando logs > ID {self._cursor.last_log_id}...")
+        # FIX: Grab the value into a local variable first
+        last_id = self._cursor.last_log_id
+
+        if last_id is not None:
+            self._logger.debug(f"Consultando logs > ID {last_id}...")
             worker = FarmaxWorker.for_fetch_recent_changes_by_id(
                 self._repository, 
-                last_id=self._cursor.last_log_id
+                last_id=last_id # Mypy is happy now: it knows this is 'int', not 'Optional[int]'
             )
         else:
-            self._logger.debug(f"Consultando logs >= Hora {self._cursor.last_check_time}...")
+            # Ensure we have a valid fallback if time is None (though logic implies it won't be)
+            check_time = self._cursor.last_check_time or self._get_midnight_timestamp()
+            
+            self._logger.debug(f"Consultando logs >= Hora {check_time}...")
             worker = FarmaxWorker.for_fetch_recent_changes(
                 self._repository, 
-                last_check_time=self._cursor.last_check_time
+                last_check_time=check_time
             )
 
         worker.signals.success.connect(self._on_logs_retrieved)
         worker.signals.error.connect(self._on_poll_error)
-        self._thread_pool.start(worker)
+        
+        # Check if thread pool is valid (Optional safety)
+        if self._thread_pool:
+            self._thread_pool.start(worker)
+        else:
+            self._logger.critical("ThreadPool não inicializado!")
 
     def _on_logs_retrieved(self, logs: List[DeliveryLog]) -> None:
         """
@@ -213,7 +223,8 @@ class FarmaxDeliveryIngestor(QObject):
         # Use partial to pass the payload to the error handler for retry context
         worker.signals.error.connect(partial(self._on_fetch_details_error, payload=sale_ids))
         
-        self._thread_pool.start(worker)
+        if self._thread_pool:
+            self._thread_pool.start(worker)
 
     def _on_details_retrieved(self, deliveries: List[FarmaxDelivery]) -> None:
         """

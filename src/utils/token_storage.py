@@ -3,6 +3,7 @@ import json
 import base64
 import binascii
 from typing import Optional
+from utils.access_token import AccessTokenDict
 from utils.bundle_dir import BUNDLE_DIR
 from models.exceptions import TokenStorageError
 
@@ -29,7 +30,7 @@ def _decode_string_base64(encoded_string: str) -> str:
 
 # --- TOKEN STORAGE FUNCTIONS ---
 
-def store_token_at_file(token: dict):
+def store_token_at_file(token: AccessTokenDict):
     """
     Encodes and saves the token dictionary to a file.
     Raises TokenStorageError on failure.

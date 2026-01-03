@@ -1,3 +1,4 @@
+from typing import cast
 from PyQt5.QtCore import QObject, pyqtSignal, QRunnable
 import requests
 import json
@@ -5,6 +6,7 @@ import logging
 
 from config import AuthenticationConfig
 from models.exceptions import TokenStorageError
+from utils.access_token import AccessTokenDict
 from utils.token_storage import store_token_at_file
 
 class RefreshTokenSignals(QObject):
@@ -84,9 +86,10 @@ class RefreshTokenWorker(QRunnable):
             # new refresh token. We must re-add the one we just used
             # to ensure it's stored correctly for future use.
             jsonResponse["refresh_token"] = self._refresh_token
+            jsonResponse = cast(AccessTokenDict, jsonResponse)
             
             access_token = jsonResponse["access_token"]
-            
+
             # Emit success signal
             self.signals.token.emit(access_token)
 

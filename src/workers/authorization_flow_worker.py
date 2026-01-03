@@ -1,10 +1,10 @@
 from PyQt5.QtCore import QObject, pyqtSignal, QRunnable
-from utils.device_code import DeviceCode
+from utils.device_code import DeviceCode, DeviceCodeDict
 from utils.access_token import AccessToken
 import logging
 import time
 import traceback
-from typing import Dict
+from typing import Dict, Optional
 from config import AuthenticationConfig
 from models.exceptions import NetworkError, ApiError, TokenPollingError
 from utils.token_storage import store_token_at_file
@@ -70,7 +70,7 @@ class AuthorizationFlowWorker(QRunnable):
         self.signals = AuthorizationFlowSignals()
         self._is_running = True # Flag to allow for cancellation
 
-    def _emit_error(self, message: str, exception: Exception = None):
+    def _emit_error(self, message: str, exception: Optional[Exception] = None):
         """
         Helper method to format and emit the error signal.
         
@@ -82,7 +82,7 @@ class AuthorizationFlowWorker(QRunnable):
         self.logger.error(f"{message} - Traceback: {stacktrace}")
         self.signals.error.emit(message, stacktrace)
 
-    def _get_device_code(self) -> Dict:
+    def _get_device_code(self) -> DeviceCodeDict:
         """
         Requests the initial device code and verification URI from the
         authorization server.
@@ -102,7 +102,7 @@ class AuthorizationFlowWorker(QRunnable):
         )
         return device_code_handler.request()
 
-    def _poll_for_access_token(self, device_code_info: Dict) -> str:
+    def _poll_for_access_token(self, device_code_info: Dict) -> Optional[str]:
         """
         Polls the token endpoint until an access token is granted, the
         code expires, or the task is cancelled.

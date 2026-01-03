@@ -2,13 +2,13 @@ from typing import Dict, Optional
 from models.velide_delivery_models import Order
 
 class DeliveryRepository:
-    def __init__(self):
+    def __init__(self) -> None:
         # Primary storage: Internal ID -> Order
         self._orders: Dict[str, Order] = {}
         # Index: External ID -> Internal ID (for fast lookup via WebSockets)
         self._external_to_internal: Dict[str, str] = {}
 
-    def add(self, order: Order):
+    def add(self, order: Order) -> None:
         self._orders[order.internal_id] = order
 
     def get_by_internal(self, internal_id: str) -> Optional[Order]:
@@ -20,7 +20,7 @@ class DeliveryRepository:
             return self._orders.get(internal_id)
         return None
 
-    def remove(self, internal_id: str):
+    def remove(self, internal_id: str) -> None:
         order = self._orders.pop(internal_id, None)
         # Clean up the reverse index if it exists
         if order:
@@ -30,7 +30,7 @@ class DeliveryRepository:
             for k in keys_to_remove:
                 del self._external_to_internal[k]
 
-    def link_ids(self, internal_id: str, external_id: str):
+    def link_ids(self, internal_id: str, external_id: str) -> None:
         """Maps the Velide ID to the ERP ID."""
         if internal_id in self._orders:
             self._external_to_internal[external_id] = internal_id

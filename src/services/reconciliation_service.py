@@ -1,6 +1,6 @@
 import time
 import logging
-from typing import Dict
+from typing import Dict, Optional
 
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer, QThreadPool
 
@@ -36,7 +36,7 @@ class ReconciliationService(QObject):
         ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
-        self._velide_api = None
+        self._velide_api: Optional[Velide] = None
         
         # Dependency Injection
         self.tracking_service = tracking_service

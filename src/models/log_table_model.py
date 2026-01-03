@@ -1,6 +1,6 @@
 # models/log_table_model.py
 
-from typing import List
+from typing import Any, List, Optional
 from PyQt5.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PyQt5.QtGui import QBrush, QColor
 from pydantic import BaseModel, Field
@@ -24,18 +24,18 @@ class LogTableModel(QAbstractTableModel):
     """
     A model to hold log data for the LogTable QTableView.
     """
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._headers = ["Horário", "Tipo", "Mensagem"]
         self._data: List[LogRowModel] = []
 
-    def rowCount(self, parent=QModelIndex()):
+    def rowCount(self, parent=QModelIndex()) -> int:
         return len(self._data)
 
-    def columnCount(self, parent=QModelIndex()):
+    def columnCount(self, parent=QModelIndex()) -> int:
         return len(self._headers)
 
-    def _font_data(self, index):
+    def _font_data(self, index) -> Optional[QBrush]:
         """
         Provides a hook for custom font/color styling based on data.
         Currently returns None, but can be expanded to, for example,
@@ -50,7 +50,7 @@ class LogTableModel(QAbstractTableModel):
         item = self._data[row]
         return STATUS_COLORS.get(item.level, None)
 
-    def data(self, index, role=Qt.DisplayRole):
+    def data(self, index, role=Qt.DisplayRole) -> Any:
         if not index.isValid():
             return None
 
@@ -74,12 +74,12 @@ class LogTableModel(QAbstractTableModel):
         
         return None
 
-    def headerData(self, section, orientation, role=Qt.DisplayRole):
+    def headerData(self, section, orientation, role=Qt.DisplayRole) -> Any:
         if role == Qt.DisplayRole and orientation == Qt.Horizontal:
             return self._headers[section]
         return None
 
-    def add_log_entry(self, timestamp: str, level: str, message: str):
+    def add_log_entry(self, timestamp: str, level: str, message: str) -> None:
         """Adds a new log entry to the end of the model."""
         row_position = self.rowCount()
         self.beginInsertRows(QModelIndex(), row_position, row_position)

@@ -1,7 +1,7 @@
 # models/delivery_table_model.py
 
 from enum import Enum
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 from PyQt5.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PyQt5.QtGui import QColor, QBrush
 from pydantic import BaseModel, Field
@@ -28,7 +28,7 @@ class DeliveryRowStatus(Enum):
     CANCELLED = "Cancelado"
     ERROR = "Erro"
 
-STATUS_COLORS = {
+STATUS_COLORS: Dict[DeliveryRowStatus, Optional[QBrush]] = {
     DeliveryRowStatus.UNDEFINED: None,
     DeliveryRowStatus.ACKNOWLEDGE: None,
     DeliveryRowStatus.SENDING: QBrush(QColor(0, 152, 210)),
@@ -42,7 +42,7 @@ STATUS_COLORS = {
 }
 
 # This serves as the single source of truth for converting Backend -> UI.
-DB_TO_UI_MAP = {
+DB_TO_UI_MAP: Dict[DeliveryStatus, DeliveryRowStatus] = {
     # Backend (SQLite)          # UI (Table Row)
     DeliveryStatus.PENDING:     DeliveryRowStatus.SENDING,
     DeliveryStatus.SENDING:     DeliveryRowStatus.SENDING,
@@ -72,19 +72,19 @@ class DeliveryTableModel(QAbstractTableModel):
     """
     A model to hold delivery data for the QTableView.
     """
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._headers = ["Horário", "Status", "Endereço"]
         self._data: List[DeliveryRowModel] = []
         self._id_map: Dict[str, int] = {} # For fast lookups
 
-    def rowCount(self, parent=QModelIndex()):
+    def rowCount(self, parent=QModelIndex()) -> int:
         return len(self._data)
 
-    def columnCount(self, parent=QModelIndex()):
+    def columnCount(self, parent=QModelIndex()) -> int:
         return len(self._headers)
     
-    def _font_data(self, index):
+    def _font_data(self, index) -> Optional[QBrush]:
         row = index.row()
         col = index.column()
 
@@ -97,7 +97,7 @@ class DeliveryTableModel(QAbstractTableModel):
         return STATUS_COLORS[status]
 
 
-    def data(self, index, role=Qt.DisplayRole):
+    def data(self, index, role=Qt.DisplayRole) -> Any:
         if not index.isValid():
             return None
         
@@ -121,12 +121,12 @@ class DeliveryTableModel(QAbstractTableModel):
         
         return None
 
-    def headerData(self, section, orientation, role=Qt.DisplayRole):
+    def headerData(self, section, orientation, role=Qt.DisplayRole) -> Any:
         if role == Qt.DisplayRole and orientation == Qt.Horizontal:
             return self._headers[section]
         return None
 
-    def add_delivery_acknowledge(self, id: str, order_data: Order):
+    def add_delivery_acknowledge(self, id: str, order_data: Order) -> None:
         """Adds a new delivery to the model with 'Reconhecido' status."""
         row_position = self.rowCount()
         self.beginInsertRows(QModelIndex(), row_position, row_position)
@@ -142,7 +142,7 @@ class DeliveryTableModel(QAbstractTableModel):
 
         self.endInsertRows()
 
-    def update_delivery(self, id: str, order: Order, new_status: DeliveryRowStatus):
+    def update_delivery(self, id: str, order: Order, new_status: DeliveryRowStatus) -> None:
         """
         Finds a delivery by its ID and updates its status and order data.
 
