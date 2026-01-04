@@ -162,13 +162,13 @@ class DeliveriesService(QObject):
     # RECONCILIATION CALLBACKS
     # =========================================================================
 
-    def on_reconciliation_detects_route_start(self, internal_id: str):
+    def on_reconciliation_detects_route_start(self, internal_id: str, deliveryman_external_id: str):
         order = self.get_order(internal_id)
         if not order:
             self.logger.warning("Uma rota foi iniciada no Velide, mas não está sendo gerenciada pela integração.")
             return
 
-        self.on_delivery_route_started_in_velide(order)
+        self.on_delivery_route_started_in_velide(order, deliveryman_external_id)
 
     def on_reconciliation_misses_delivery(self, internal_id: str):
         self.delivery_update.emit(internal_id, DeliveryRowStatus.MISSING)
@@ -220,14 +220,14 @@ class DeliveriesService(QObject):
         self._active_strategy.on_delivery_deleted_on_velide(order)
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.CANCELLED)
 
-    def on_delivery_route_started_in_velide(self, order: Order):
+    def on_delivery_route_started_in_velide(self, order: Order, deliveryman_external_id: str):
         self.logger.debug("Solicitando strategy para lidar com a entrega em rota.")
         if not self._active_strategy:
             # Likely impossible to happen, but handle it anyways
             self.logger.critical("Não há nenhum software conectado! Impossível lidar com rota iniciada.")
             return
 
-        self._active_strategy.on_delivery_route_started_on_velide(order)
+        self._active_strategy.on_delivery_route_started_on_velide(order, deliveryman_external_id)
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.IN_PROGRESS)
     
     def on_delivery_route_ended_in_velide(self, order: Order):

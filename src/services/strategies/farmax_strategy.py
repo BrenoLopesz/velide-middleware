@@ -13,6 +13,7 @@ from connectors.farmax.farmax_worker import FarmaxWorker
 from models.delivery_table_model import map_db_status_to_ui
 from models.farmax_models import FarmaxDelivery
 from models.velide_delivery_models import Order
+from services.deliverymen_retriever_service import DeliverymenRetrieverService
 from services.reconciliation_service import ReconciliationService
 from services.strategies.connectable_strategy import IConnectableStrategy
 from services.tracking_persistence_service import TrackingPersistenceService
@@ -33,7 +34,8 @@ class FarmaxStrategy(IConnectableStrategy):
         farmax_repository: FarmaxRepository,
         persistence_service: TrackingPersistenceService,
         websockets_service: VelideWebsocketsService,
-        reconciliation_service: ReconciliationService
+        reconciliation_service: ReconciliationService,
+        deliverymen_retriever: DeliverymenRetrieverService
     ):
         super().__init__()
         self._logger = logging.getLogger(__name__)
@@ -42,6 +44,7 @@ class FarmaxStrategy(IConnectableStrategy):
         self._persistence = persistence_service
         self._websockets = websockets_service
         self._reconciliation = reconciliation_service
+        self._deliverymen_retriever = deliverymen_retriever
         self._thread_pool = None # Initialized by globalInstance usually, or in workers
 
         # --- Initialize Sub-Services ---
@@ -61,7 +64,8 @@ class FarmaxStrategy(IConnectableStrategy):
 
         # 3. Updater: Handles WRITING updates to Farmax
         self._updater = FarmaxDeliveryUpdater(
-            repository=self._repository
+            repository=self._repository,
+            deliverymen_retriever=self._deliverymen_retriever
         )
 
         # --- Wire Signals ---
@@ -201,9 +205,9 @@ class FarmaxStrategy(IConnectableStrategy):
         # the cancellation was requested internally or not.
         self._logger.info(f"Uma entrega ({order.internal_id}) foi deletada no Velide.")
 
-    def on_delivery_route_started_on_velide(self, order):
+    def on_delivery_route_started_on_velide(self, order: Order, deliveryman_external_id: str):
         self._persistence.update_status(order.internal_id, DeliveryStatus.IN_PROGRESS)
-        self._updater.mark_as_in_route(order)
+        self._updater.mark_as_in_route(order, deliveryman_external_id)
 
     def on_delivery_route_ended_on_velide(self, order):
         self._persistence.mark_as_finished(order.internal_id)

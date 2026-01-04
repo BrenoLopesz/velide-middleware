@@ -1,6 +1,6 @@
 import sys
 import logging
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from PyQt5.QtCore import QObject, QRunnable, pyqtSignal
 
@@ -120,10 +120,13 @@ class SQLiteWorker(QRunnable):
 
     @classmethod
     def for_update_delivery_status(
-        cls, signals: SQLiteWorkerSignals, db_path: str, external_id: str, new_status
+        cls, signals: SQLiteWorkerSignals, db_path: str, external_id: str, new_status, deliveryman_id: Optional[str] = None
     ) -> 'SQLiteWorker':
-        """Factory method to create a worker for 'update_delivery_status'."""
-        return cls(signals, db_path, 'update_delivery_status', external_id, new_status)
+        """
+        Factory method to create a worker for 'update_delivery_status'.
+        """
+        # We append deliveryman_id to the args list passed to the generic __init__
+        return cls(signals, db_path, 'update_delivery_status', external_id, new_status, deliveryman_id)
 
     @classmethod
     def for_get_delivery_by_external(

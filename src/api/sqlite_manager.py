@@ -140,6 +140,7 @@ class SQLiteManager:
             external_delivery_id TEXT PRIMARY KEY NOT NULL,
             internal_delivery_id TEXT UNIQUE NOT NULL,
             status TEXT NOT NULL CHECK(status IN ({status_values})),
+            deliveryman_id TEXT,
             create_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
@@ -370,26 +371,36 @@ class SQLiteManager:
             self.logger.exception("Ocorreu um erro inesperado durante o 'add_many_delivery_mappings'.")
             raise # Re-raise to trigger rollback in __exit__
 
-    def update_delivery_status(self, external_id: str, new_status: DeliveryStatus) -> bool:
+    def update_delivery_status(self, external_id: str, new_status: DeliveryStatus, deliveryman_id: Optional[str] = None) -> bool:
         """
         Updates the status of an existing delivery mapping.
 
         Args:
             external_id (str): The external ID of the delivery to update.
             new_status (DeliveryStatus): The new status to set.
+            deliveryman_id (str): Deliveryman internal ID related to this delivery.
 
         Returns:
             bool: True if a row was updated, False if no matching row was found.
         """
         conn = self._get_conn()
-        query = "UPDATE DeliveryMapping SET status = ? WHERE external_delivery_id = ?"
+        
+        # We update both Status and Deliveryman ID
+        query = "UPDATE DeliveryMapping SET status = ?, deliveryman_id = ? WHERE external_delivery_id = ?"
+        
         try:
-            cursor = conn.execute(query, (new_status.value, external_id))
+            # Note: If deliveryman_id is None, it saves NULL in the DB, which is correct
+            # (e.g. if status changes back to PENDING, deliveryman should be cleared).
+            cursor = conn.execute(query, (new_status.value, deliveryman_id, external_id))
+            
             if cursor.rowcount > 0:
-                self.logger.info(f"Status da entrega {external_id} atualizado para {new_status.name}")
+                if not deliveryman_id:
+                    self.logger.debug(f"Entrega {external_id} atualizada: {new_status.name}")
+                else:
+                    self.logger.debug(f"Entrega {external_id} atualizada: {new_status.name} (Entregador: {deliveryman_id})")
                 return True
             else:
-                self.logger.warning(f"Nenhuma entrega encontrada para atualizar status (ID: {external_id})")
+                self.logger.warning(f"Nenhuma entrega encontrada para atualizar (ID: {external_id})")
                 return False
         except sqlite3.Error:
             self.logger.exception(f"Erro ao atualizar status da entrega {external_id}.")

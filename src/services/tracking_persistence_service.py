@@ -195,7 +195,8 @@ class TrackingPersistenceService(QObject):
             status=final_status
         )
 
-    def update_status(self, internal_id: RawID, new_status: DeliveryStatus):
+    # Update the method signature to accept deliveryman_id
+    def update_status(self, internal_id: RawID, new_status: DeliveryStatus, deliveryman_id: Optional[str] = None):
         """
         Updates an existing delivery status.
         """
@@ -211,7 +212,15 @@ class TrackingPersistenceService(QObject):
         # 2. Async Persist
         ext_id = self._id_map.get(norm_id)
         if ext_id:
-            self._sqlite.request_update_delivery_status(external_id=ext_id, new_status=new_status)
+            if deliveryman_id:
+                self.logger.info(f"Atualizando ID {norm_id}: Status={new_status.name}, EntregadorID={deliveryman_id}")
+                
+            self._sqlite.request_update_delivery_status(
+                external_id=ext_id, 
+                new_status=new_status, 
+                deliveryman_id=deliveryman_id
+            )
+            
         else:
             self.logger.error(f"Erro de integridade: ID Interno {norm_id} existe no cache mas sem ID Externo.")
 

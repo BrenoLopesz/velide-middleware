@@ -27,7 +27,7 @@ class FarmaxRepository:
         params = {f"v{i}": v for i, v in enumerate(values)}
         return placeholders, params
 
-    def update_delivery_as_in_route(self, sale_id: float, driver_id: str, left_at: time):
+    def update_delivery_as_in_route(self, sale_id: float, driver_id: float, left_at: time):
         """
         Updates the delivery status to 'R' (Route) and assigns the driver.
         """

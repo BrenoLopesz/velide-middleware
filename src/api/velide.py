@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List, Optional, Any
+from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from models.velide_delivery_models import (
@@ -301,23 +301,24 @@ class Velide:
         
         return round(offset_in_milliseconds)    
     
-    def _flatten_snapshot(self, data: GlobalSnapshotData) -> dict:
+    def _flatten_snapshot(self, data: GlobalSnapshotData) -> Dict[str, Tuple[str, Optional[str]]]:
         """
         Helper to convert the strictly typed Snapshot data into a simple Status Map.
         """
-        snapshot_map = {}
+        snapshot_map: Dict[str, Tuple[str, Optional[str]]] = {}
         
         # 1. Process Unassigned Deliveries (Status: PENDING)
         # Pydantic ensures 'data.deliveries' is a list (never None) due to default_factory
         for item in data.deliveries:
-            snapshot_map[item.id] = "PENDING"
+            # None indicates no deliveryman assigned
+            snapshot_map[item.id] = ("PENDING", None)
 
         # 2. Process Assigned Deliveries (Status: ROUTED)
         for dm in data.deliverymen:
-            # Pydantic ensures dm.route is either a SnapshotRoute object or None
             if dm.route:
                 for item in dm.route.deliveries:
-                    snapshot_map[item.id] = "ROUTED"
+                    # Store a tuple: (STATUS, DELIVERYMEN_EXTERNAL_ID)
+                    snapshot_map[item.id] = ("ROUTED", dm.id)
 
         return snapshot_map
     

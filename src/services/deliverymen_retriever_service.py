@@ -1,5 +1,6 @@
 
 
+import logging
 from typing import List, Optional, Tuple
 from api.velide import Velide
 from config import ApiConfig, TargetSystem
@@ -19,33 +20,48 @@ class DeliverymenRetrieverService(QObject):
     mapping_finished = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, api_config: ApiConfig, target_system: TargetSystem, strategy: IConnectableStrategy):
+    def __init__(self, api_config: ApiConfig, target_system: TargetSystem):
         super().__init__()
-        self._strategy = strategy
+        self.logger = logging.getLogger(__name__)
+        
         self._api_config = api_config
         self._target_system = target_system
+        self._strategy: Optional[IConnectableStrategy] = None
         self._velide_api: Optional[Velide] = None
         self._waiting_for_token = False
 
         self._velide_deliverymen: Optional[list] = None
-        self._local_deliverymen: Optional[list] = None
+        self._local_deliverymen: Optional[List[BaseLocalDeliveryman]] = None
         self.thread_pool = QThreadPool.globalInstance()
 
-    def set_access_token(self, access_token: str):
+    def set_access_token(self, access_token: str) -> None:
         self._velide_api = Velide(access_token, self._api_config, self._target_system)
         if self._waiting_for_token:
             self.fetch_deliverymen()
 
+    def set_strategy(self, strategy: IConnectableStrategy):
+        """Sets the active deliverymen source strategy."""
+        self._strategy = strategy
+
     def get_deliverymen(self) -> Tuple[Optional[list], Optional[list]]:
         return (self._velide_deliverymen, self._local_deliverymen)
+    
+    def get_deliveryman_by_external_id(self, external_id: str) -> Optional[BaseLocalDeliveryman]:
+        if not self._local_deliverymen:
+            return None
+        return next((deliveryman for deliveryman in self._local_deliverymen if deliveryman.id == external_id), None)
 
-    def check_if_mapping_is_required(self):
+    def check_if_mapping_is_required(self) -> None:
+        if not self._strategy:
+            self.logger.error("Não há nenhum software conectado para verificar se é necessário buscar os entregadores.")
+            return
+        
         if self._strategy.requires_initial_configuration():
             self.mapping_is_required.emit()
         else:
             self.mapping_not_required.emit()
 
-    def mark_mapping_as_finished(self):
+    def mark_mapping_as_finished(self) -> None:
         self.mapping_finished.emit()
 
     def check_if_mapping_is_complete(
@@ -53,7 +69,7 @@ class DeliverymenRetrieverService(QObject):
         mappings: list, 
         velide_deliverymen: List[DeliverymanResponse], 
         local_deliverymen: List[BaseLocalDeliveryman]
-    ):
+    ) -> None:
         # Create a set of valid local IDs for fast lookup
         valid_local_ids = {d.id for d in local_deliverymen}
 
@@ -75,22 +91,26 @@ class DeliverymenRetrieverService(QObject):
         # All Velide users have a *valid* and *current* mapping
         self.mapping_is_complete.emit()
 
-    def _on_receive_velide_deliverymen(self, deliverymen: list):
+    def _on_receive_velide_deliverymen(self, deliverymen: list) -> None:
         self._velide_deliverymen = deliverymen
         if self._local_deliverymen is not None:
             self._emit_deliverymen()
     
-    def _on_receive_local_deliverymen(self, deliverymen: List[BaseLocalDeliveryman]):
+    def _on_receive_local_deliverymen(self, deliverymen: List[BaseLocalDeliveryman]) -> None:
         self._local_deliverymen = deliverymen
         if self._velide_deliverymen is not None:
             self._emit_deliverymen()
 
-    def _emit_deliverymen(self):
+    def _emit_deliverymen(self) -> None:
         self.deliverymen_received.emit((self._velide_deliverymen, self._local_deliverymen))
 
-    def fetch_deliverymen(self):
+    def fetch_deliverymen(self) -> None:
         if self._velide_api is None:
             self._waiting_for_token = True
+            return
+        
+        if not self._strategy:
+            self.logger.error("Não há nenhum software conectado para buscar os entregadores!")
             return
         
         velide_deliverymen_retriever = VelideWorker.for_get_deliverymen(self._velide_api)

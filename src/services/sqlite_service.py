@@ -191,14 +191,17 @@ class SQLiteService(QObject):
             result_signal=self.add_many_deliveries_result
         )
 
-    @pyqtSlot(str, object)
-    def request_update_delivery_status(self, external_id: str, new_status):
-        """Asynchronously updates the status of a delivery."""
-        self.logger.debug(f"Solicitando atualização de status para {external_id} -> {new_status}")
+    @pyqtSlot(str, object, str) # str, Enum, str (Optional is technically just `object` or `str` in signals)
+    def request_update_delivery_status(self, external_id: str, new_status, deliveryman_id: Optional[str] = None):
+        """
+        Asynchronously updates the status of a delivery.
+        """
+        self.logger.debug(f"Solicitando atualização: {external_id} -> {new_status} (Entregador: {deliveryman_id})")
         self._create_and_run_worker(
             SQLiteWorker.for_update_delivery_status,
             external_id,
             new_status,
+            deliveryman_id,
             result_signal=self.update_status_result
         )
 

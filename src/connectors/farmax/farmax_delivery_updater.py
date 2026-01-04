@@ -5,6 +5,7 @@ from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_worker import FarmaxWorker
 from models.velide_delivery_models import Order
+from services.deliverymen_retriever_service import DeliverymenRetrieverService
 
 class FarmaxDeliveryUpdater(QObject):
     """
@@ -16,33 +17,30 @@ class FarmaxDeliveryUpdater(QObject):
     update_success = pyqtSignal(str, str) # internal_id, operation
     update_failed = pyqtSignal(str, str, str) # internal_id, operation, error_message
 
-    def __init__(self, repository: FarmaxRepository):
+    def __init__(self, repository: FarmaxRepository, deliverymen_retriever: DeliverymenRetrieverService):
         super().__init__()
         self._logger = logging.getLogger(__name__)
         self._repository = repository
         self._thread_pool = QThreadPool.globalInstance()
+        self._deliverymen_retriever = deliverymen_retriever
 
-    def mark_as_in_route(self, order: Order) -> None:
+    def mark_as_in_route(self, order: Order, deliveryman_external_id: str) -> None:
         """
         Updates the ERP to indicate the delivery has left (In Route).
         """
-        # Validation: We need a driver to assign the delivery in Farmax
-        if not order.driver or not order.driver.external_id:
-            msg = f"Impossível atualizar pedido {order.internal_id}: Motorista sem ID."
-            self._logger.warning(msg)
-            self.update_failed.emit(str(order.internal_id), "IN_ROUTE", msg)
-            return
-
         # Simple extraction of primitives
         sale_id = float(order.internal_id)
-        driver_id = str(order.driver.external_id)
+        driver = self._deliverymen_retriever.get_deliveryman_by_external_id(deliveryman_external_id)
+        if not driver:
+            self._logger.error(f"Não foi possível definir uma entrega ({order.internal_id}) como rota iniciada! Entregador não foi encontrado.")
+            return
         current_time = datetime.now().time()
 
         # No Pydantic construction needed!
         worker = FarmaxWorker.for_update_delivery_as_in_route(
             self._repository,
             sale_id=sale_id,
-            driver_id=driver_id,
+            driver_id=float(driver.id),
             left_at=current_time
         )
 

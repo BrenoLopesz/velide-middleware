@@ -177,7 +177,7 @@ class FarmaxWorker(QRunnable):
         cls, 
         repository: FarmaxRepository, 
         sale_id: float, 
-        driver_id: str, 
+        driver_id: float, 
         left_at: time
     ) -> 'FarmaxWorker':
         """Creates a worker to update a delivery to 'In Route'."""

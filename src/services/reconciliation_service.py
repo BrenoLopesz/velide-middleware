@@ -21,7 +21,7 @@ class ReconciliationService(QObject):
     sync_finished = pyqtSignal(int)  # Emits number of updates performed
     sync_error = pyqtSignal(str)
 
-    delivery_in_route = pyqtSignal(str)
+    delivery_in_route = pyqtSignal(str, str) # Delivery ID, Deliveryman ID
     delivery_missing = pyqtSignal(str)
 
     # TODO: Use config
@@ -104,12 +104,12 @@ class ReconciliationService(QObject):
         # Run in global thread pool (assuming you have access to QThreadPool.globalInstance())
         QThreadPool.globalInstance().start(worker)
 
-    def _handle_snapshot_results(self, snapshot_map: Dict[str, str]):
+    def _handle_snapshot_results(self, snapshot_map: Dict[str, tuple]):
         """
         Step 2: Compare Snapshot Data vs Local SQLite Data.
         
         Args:
-            snapshot_map: { "velide_id": "VELIDE_STATUS_STRING" }
+            snapshot_map: { "velide_id": ("STATUS", "DELIVERYMAN_ID") }
         """
         updates_count = 0
         current_time = time.time()
@@ -139,7 +139,9 @@ class ReconciliationService(QObject):
                 continue
 
             # --- CHECK 3: STATUS MISMATCH ---
-            remote_status_str = snapshot_map[velide_id]
+            # Unpack the tuple from Velide._flatten_snapshot
+            remote_status_str, remote_deliveryman_id = snapshot_map[velide_id]
+            
             expected_local_enum = map_velide_status_to_local(remote_status_str)
             
             if expected_local_enum != local_status:
@@ -149,10 +151,18 @@ class ReconciliationService(QObject):
                 
                 # CRITICAL: We update the SERVICE, not the DB directly.
                 # This updates the in-memory cache AND triggers the async SQLite write.
-                self.tracking_service.update_status(internal_id, expected_local_enum)
+                self.tracking_service.update_status(
+                    internal_id, 
+                    expected_local_enum, 
+                    deliveryman_id=remote_deliveryman_id
+                )
 
                 # Emit signal to update UI
-                self.delivery_in_route.emit(internal_id)
+                # Only emit deliveryman ID if status is 'ROUTED'/'IN_ROUTE' and ID exists
+                if expected_local_enum.name == "IN_ROUTE" and remote_deliveryman_id:
+                    self.delivery_in_route.emit(internal_id, remote_deliveryman_id)
+                
+                # (Optional) Handle other status changes via generic signal if needed
                 
                 updates_count += 1
 

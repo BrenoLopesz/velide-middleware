@@ -53,7 +53,7 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta): # type: ignore[mis
         """Optional callback function called when a deleted deliver is detected through Websockets."""
         pass
 
-    def on_delivery_route_started_on_velide(self, order: Order):
+    def on_delivery_route_started_on_velide(self, order: Order, deliveryman_external_id: str):
         """Optional callback function called when delivery route start is detected through Websockets."""
         pass
 

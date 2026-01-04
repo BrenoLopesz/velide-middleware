@@ -9,7 +9,6 @@ from sqlalchemy import create_engine
 
 from config import Settings, TargetSystem, config
 from connectors.farmax.farmax_repository import FarmaxRepository
-# from connectors.farmax.farmax_setup import FarmaxSetup
 from models.app_context_model import Services
 from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_service import DeliveriesService
@@ -110,7 +109,8 @@ def create_strategy(
         app_config: Settings, 
         tracking_persistence_service: TrackingPersistenceService,
         websockets_service: VelideWebsocketsService,
-        reconciliation_service: ReconciliationService
+        reconciliation_service: ReconciliationService,
+        deliverymen_retriever: DeliverymenRetrieverService
     ):
     """Factory function to create the correct delivery strategy."""
     if app_config.target_system == TargetSystem.CDS:
@@ -139,7 +139,8 @@ def create_strategy(
             farmax_repository=farmax_repository,
             persistence_service=tracking_persistence_service,
             websockets_service=websockets_service,
-            reconciliation_service=reconciliation_service
+            reconciliation_service=reconciliation_service,
+            deliverymen_retriever=deliverymen_retriever
         )
     
     # Handles missing strategy
@@ -163,16 +164,18 @@ def build_services(app_config: Settings) -> Services:
         target_system=app_config.target_system
     )
     websockets_service = VelideWebsocketsService(app_config.api)
+    deliverymen_retriever_service = DeliverymenRetrieverService(app_config.api, app_config.target_system)
     
     strategy = create_strategy(
         app_config, 
         tracking_persistance_service, 
         websockets_service,
-        reconciliation_service
+        reconciliation_service,
+        deliverymen_retriever_service
     )
+
     deliveries_service.set_strategy(strategy)
-    
-    deliverymen_retriever_service = DeliverymenRetrieverService(app_config.api, app_config.target_system, strategy)
+    deliverymen_retriever_service.set_strategy(strategy)
 
     return Services(
         auth=auth_service,
