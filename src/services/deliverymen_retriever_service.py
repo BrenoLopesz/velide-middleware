@@ -143,7 +143,7 @@ class DeliverymenRetrieverService(QObject):
         velide_deliverymen_retriever.signals.deliverymen_retrieved.connect(
             self._on_receive_velide_deliverymen
         )
-        velide_deliverymen_retriever.signals.error.connect(self.error)
+        velide_deliverymen_retriever.signals.error.connect(self.error.emit)
         self.thread_pool.start(velide_deliverymen_retriever)
 
         self._strategy.fetch_deliverymen(

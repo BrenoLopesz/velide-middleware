@@ -53,7 +53,7 @@ def setup_logging(log_handler: QLogHandler):
     # It will keep the logs for the last 7 days (backupCount=7).
     info_log_path = os.path.join(logs_folder, "app.log")
     info_handler = logging.handlers.TimedRotatingFileHandler(
-        info_log_path, when="midnight", interval=1, backupCount=7
+        info_log_path, when="midnight", interval=1, backupCount=7, encoding='utf-8'
     )
     info_handler.setLevel(logging.INFO)
     info_handler.setFormatter(
@@ -65,7 +65,7 @@ def setup_logging(log_handler: QLogHandler):
     # This also rotates daily and keeps 7 days of history.
     error_log_path = os.path.join(logs_folder, "error.log")
     error_handler = logging.handlers.TimedRotatingFileHandler(
-        error_log_path, when="midnight", interval=1, backupCount=7
+        error_log_path, when="midnight", interval=1, backupCount=7, encoding='utf-8'
     )
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(default_formatter)  # Use the standard default formatter

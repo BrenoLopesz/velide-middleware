@@ -97,21 +97,19 @@ class VelideWorker(QRunnable):
         # --- Unified Exception Handling ---
 
         except ValidationError as e:
-            error_message = (
-                f"Dados da operação inválidos ou incompletos.\n\nDetalhes: {e}"
-            )
-            self.logger.error(
-                f"Não foi possível executar '{self._operation}'. Dados inválidos: {e}"
+            error_message = "Dados da operação inválidos ou incompletos."
+            self.logger.exception(
+                "Erro durante a operação devido à dados inválidos."
             )
             self.signals.error.emit(error_message)
 
         except GraphQLRequestError as e:
             error_message = (
                 "Falha de comunicação com a API Velide "
-                f"(Código: {e.status_code}).\n"
+                f"(Código: {e.status_code}). "
                 "Verifique sua conexão e credenciais."
             )
-            self.logger.error(f"Erro ao solicitar a Velide API: {e}")
+            self.logger.exception("Erro ao solicitar a Velide API.")
             self.signals.error.emit(error_message)
 
         except GraphQLParseError as e:
@@ -119,18 +117,17 @@ class VelideWorker(QRunnable):
                 "A API Velide retornou uma resposta inesperada " \
                 "e ilegível. O problema pode ser temporário no servidor."
             )
-            self.logger.error(
-                "Não foi possível decodificar a Velide API. "
-                "Resposta: %s",
-                e.response_text
+            self.logger.exception(
+                "Não foi possível decodificar a Velide API."
             )
             self.signals.error.emit(error_message)
 
         except GraphQLResponseError as e:
             error_message = (
-                f"A API Velide recusou a operação com a seguinte mensagem:\n\n'{e}'"
+                "A API Velide recusou a operação. Tente novamente ou "
+                "entre em contato com o suporte."
             )
-            self.logger.error(f"Velide API recusou a operação: {e}")
+            self.logger.exception("A API do Velide recusou a operação.")
             self.signals.error.emit(error_message)
 
         except httpx.RequestError as e:

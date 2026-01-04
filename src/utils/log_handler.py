@@ -46,7 +46,7 @@ class QLogHandler(logging.Handler, QObject):
         # We manually format the message components to a list
         timestamp = datetime.fromtimestamp(record.created).strftime("%m/%d %H:%M:%S")
         level = LOG_LEVEL_MAP.get(record.levelname, record.levelname)
-        message = record.message  # Get the formatted message
+        message = record.getMessage()  # Get the formatted message
 
         # Emit the signal with the log data
         self.new_log.emit(timestamp, level, message)

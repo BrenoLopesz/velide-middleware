@@ -110,7 +110,7 @@ def create_application() -> QApplication:
 
 def configure_logging(view: MainView):
     """Sets up logging and connects the handler to the main view."""
-    log_handler = QLogHandler()
+    log_handler = QLogHandler(parent=view)
     filters = [
         "httpx",
         "httpcore",
