@@ -19,14 +19,17 @@ jobs:
       - name: "01. Checkout code"
         uses: "actions/checkout@v4"
 
-      - name: "02. Set up Python"
-        uses: actions/setup-python@v5
+      - name: "02. Set up uv"
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.8" # Required to work in Windows 7
-          cache: "pip"
+          # uv will automatically install Python 3.8 because we ask for it here
+          python-version: "3.8"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
-      - name: "03. Install Python requirements"
-        run: pip install -r requirements.txt
+      - name: "03. Install dependencies"
+        # --frozen ensures we use the EXACT versions from uv.lock
+        run: uv sync --frozen
 
       - name: "04. Create version.txt file"
         # Saves version to a file. The 'shell: bash' is needed for this syntax.
@@ -34,7 +37,10 @@ jobs:
         shell: bash
 
       - name: "05. Build Python executables"
-        run: python installer/src/cli/setup_installer.py build && python installer/src/cli/setup.py build
+        # We use 'uv run' to execute commands inside the environment created by 'uv sync'
+        run: |
+          uv run python installer/src/cli/setup_installer.py build
+          uv run python installer/src/cli/setup.py build
 
       - name: "06. Compile 32-bit Inno Setup Installer"
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.7
@@ -65,9 +71,9 @@ jobs:
           try {
             # Write the key to a temporary file
             Set-Content -Path "private_key.pem" -Value "$env:SIGNING_KEY"
-
-            # Run your signing script
-            python installer/src/cli/prepare_update.py output --key private_key.pem --output output/manifest.json
+            
+            # Run signing script
+            uv run python installer/src/cli/prepare_update.py output --key private_key.pem --output output/manifest.json
           }
           finally {
             # This will always run, even if the python script fails
