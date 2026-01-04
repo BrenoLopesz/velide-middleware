@@ -5,7 +5,13 @@ from typing import List, Tuple
 
 from sqlalchemy import text, Engine
 from sqlalchemy.exc import SQLAlchemyError
-from models.farmax_models import DeliveryLog, FarmaxDelivery, FarmaxDeliveryman, FarmaxSale
+from models.farmax_models import (
+    DeliveryLog,
+    FarmaxDelivery,
+    FarmaxDeliveryman,
+    FarmaxSale,
+)
+
 
 class FarmaxRepository:
     LOG_TABLE_NAME = "DELIVERYLOG"
@@ -27,7 +33,9 @@ class FarmaxRepository:
         params = {f"v{i}": v for i, v in enumerate(values)}
         return placeholders, params
 
-    def update_delivery_as_in_route(self, sale_id: float, driver_id: float, left_at: time):
+    def update_delivery_as_in_route(
+        self, sale_id: float, driver_id: float, left_at: time
+    ):
         """
         Updates the delivery status to 'R' (Route) and assigns the driver.
         """
@@ -35,22 +43,20 @@ class FarmaxRepository:
             "UPDATE ENTREGAS SET CD_ENTREGADOR = :man_id, HORA_SAIDA = :time, "
             "STATUS = 'R' WHERE CD_VENDA = :sale_id"
         )
-        params = {
-            "man_id": driver_id,
-            "time": left_at,
-            "sale_id": sale_id
-        }
+        params = {"man_id": driver_id, "time": left_at, "sale_id": sale_id}
 
-        try: 
+        try:
             with self._engine.begin() as conn:
                 conn.execute(query, params)
         except SQLAlchemyError:
             self.logger.exception(f"Falha ao atualizar entrega {sale_id} para Em Rota.")
             raise
         except Exception:
-            self.logger.exception(f"Erro inesperado ao atualizar entrega {sale_id} para Em Rota.")
+            self.logger.exception(
+                f"Erro inesperado ao atualizar entrega {sale_id} para Em Rota."
+            )
             raise
-    
+
     def update_delivery_as_done(self, sale_id: float, ended_at: time):
         """
         Atomically updates a delivery to 'Done' status in both ENTREGAS and VENDAS.
@@ -63,10 +69,7 @@ class FarmaxRepository:
             "UPDATE VENDAS SET CONCLUIDO = 'S', STATUS = 'V', HORAFINAL = :time "
             "WHERE CD_VENDA = :sale_id"
         )
-        params = {
-            "time": ended_at,
-            "sale_id": sale_id
-        }
+        params = {"time": ended_at, "sale_id": sale_id}
 
         try:
             with self._engine.begin() as conn:
@@ -79,7 +82,9 @@ class FarmaxRepository:
             self.logger.exception(f"Erro inesperado ao finalizar entrega {sale_id}.")
             raise
 
-    def fetch_sales_statuses_by_id(self, cd_vendas: Tuple[float, ...]) -> List[FarmaxSale]:
+    def fetch_sales_statuses_by_id(
+        self, cd_vendas: Tuple[float, ...]
+    ) -> List[FarmaxSale]:
         """
         Fetches the status for a given list of sale IDs.
         Returns an empty list if no IDs are provided.
@@ -87,7 +92,7 @@ class FarmaxRepository:
         # Handle empty IN-clause
         if not cd_vendas:
             return []
-            
+
         placeholders, params = self._build_in_clause_params(cd_vendas)
 
         query = text(
@@ -95,14 +100,18 @@ class FarmaxRepository:
             f"WHERE CD_VENDA IN ({placeholders}) "
             f"ORDER BY CD_VENDA DESC"
         )
-        
+
         with self._engine.connect() as conn:
             result = conn.execute(query, params)
             rows = result.fetchall()
-            row_dicts = [{k.lower(): v for k, v in row._mapping.items()} for row in rows]
+            row_dicts = [
+                {k.lower(): v for k, v in row._mapping.items()} for row in rows
+            ]
             return [FarmaxSale.model_validate(row_dict) for row_dict in row_dicts]
 
-    def fetch_deliveries_by_id(self, cd_vendas: Tuple[float, ...]) -> List[FarmaxDelivery]:
+    def fetch_deliveries_by_id(
+        self, cd_vendas: Tuple[float, ...]
+    ) -> List[FarmaxDelivery]:
         """
         Fetches detailed delivery info from both ENTREGAS and VENDAS
         in a single query.
@@ -174,8 +183,10 @@ class FarmaxRepository:
         with self._engine.connect() as conn:
             result = conn.execute(text(query_str), params)
             rows = result.fetchall()
-            row_dicts = [{k.lower(): v for k, v in row._mapping.items()} for row in rows]
-            
+            row_dicts = [
+                {k.lower(): v for k, v in row._mapping.items()} for row in rows
+            ]
+
             # Directly convert the complete rows to Pydantic models
             return [FarmaxDelivery.model_validate(row_dict) for row_dict in row_dicts]
 
@@ -183,30 +194,28 @@ class FarmaxRepository:
         """
         Fetches all delivery log changes since the last check time.
         """
-        query = text(
-            f"SELECT * FROM {self.LOG_TABLE_NAME} "
-            f"WHERE LOGDATE > :last_check"
-        )
-        
+        query = text(f"SELECT * FROM {self.LOG_TABLE_NAME} WHERE LOGDATE > :last_check")
+
         with self._engine.connect() as conn:
             result = conn.execute(query, {"last_check": last_check_time})
             rows = result.fetchall()
-            row_dicts = [{k.lower(): v for k, v in row._mapping.items()} for row in rows]
+            row_dicts = [
+                {k.lower(): v for k, v in row._mapping.items()} for row in rows
+            ]
             return [DeliveryLog.model_validate(row_dict) for row_dict in row_dicts]
-        
+
     def fetch_recent_changes_by_id(self, last_id: int) -> List[DeliveryLog]:
         """
         Fetches all delivery log changes since the last check time.
         """
-        query = text(
-            f"SELECT * FROM {self.LOG_TABLE_NAME} "
-            f"WHERE ID > :last_id"
-        )
-        
+        query = text(f"SELECT * FROM {self.LOG_TABLE_NAME} WHERE ID > :last_id")
+
         with self._engine.connect() as conn:
             result = conn.execute(query, {"last_id": last_id})
             rows = result.fetchall()
-            row_dicts = [{k.lower(): v for k, v in row._mapping.items()} for row in rows]
+            row_dicts = [
+                {k.lower(): v for k, v in row._mapping.items()} for row in rows
+            ]
             return [DeliveryLog.model_validate(row_dict) for row_dict in row_dicts]
 
     def fetch_deliverymen(self) -> List[FarmaxDeliveryman]:
@@ -218,7 +227,7 @@ class FarmaxRepository:
             "WHERE TIPO_FUNCIONARIO = 'E' "
             "ORDER BY NOME"
         )
-        
+
         with self._engine.connect() as conn:
             result = conn.execute(query)
             rows = result.fetchall()
@@ -226,9 +235,6 @@ class FarmaxRepository:
             deliverymen = []
             for row in rows:
                 # Manually create a dictionary.
-                data_dict = {
-                    'cd_vendedor': row[0],
-                    'nome': row[1]
-                }
+                data_dict = {"cd_vendedor": row[0], "nome": row[1]}
                 deliverymen.append(FarmaxDeliveryman.model_validate(data_dict))
             return deliverymen

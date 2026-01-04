@@ -7,13 +7,15 @@ from connectors.farmax.farmax_mapper import FarmaxMapper
 from models.farmax_models import FarmaxDelivery, DeliveryLog
 from models.velide_delivery_models import Order
 
+
 class TestFarmaxMapperToOrder:
     """Tests for the to_order static method."""
 
     def test_to_order_happy_path(self):
         """
         Scenario: A perfectly valid FarmaxDelivery object.
-        Expected: A populated Order object with timestamps combined and IDs converted to string.
+        Expected: A populated Order object with timestamps 
+                combined and IDs converted to string.
         """
         # Arrange
         raw_delivery = FarmaxDelivery(
@@ -25,7 +27,7 @@ class TestFarmaxMapperToOrder:
             tempendereco="123 Main St",
             tempreferencia="Near the park",
             data=date(2023, 10, 25),
-            hora=time(14, 30)
+            hora=time(14, 30),
         )
 
         # Act
@@ -35,9 +37,11 @@ class TestFarmaxMapperToOrder:
         assert isinstance(result, Order)
         assert result.customer_name == "John Doe"
         assert result.address == "123 Main St"
-        assert result.neighbourhood == "Downtown" # Note: Model uses spelling 'neighbourhood'
+        assert (
+            result.neighbourhood == "Downtown"
+        )  # Note: Model uses spelling 'neighbourhood'
         assert result.internal_id == "12345.0"
-        
+
         # Verify datetime combination
         expected_dt = datetime(2023, 10, 25, 14, 30)
         assert result.created_at == expected_dt
@@ -49,11 +53,11 @@ class TestFarmaxMapperToOrder:
         """
         raw_delivery = FarmaxDelivery(
             cd_venda=1.0,
-            nome="  Jane Doe  ", # Needs trimming
+            nome="  Jane Doe  ",  # Needs trimming
             fone=None,
-            tempendereco="  456 Lane  ",     # Needs trimming
+            tempendereco="  456 Lane  ",  # Needs trimming
             data=date(2023, 1, 1),
-            hora=time(12, 0)
+            hora=time(12, 0),
         )
 
         result = FarmaxMapper.to_order(raw_delivery)
@@ -75,7 +79,7 @@ class TestFarmaxMapperToOrder:
             # Explicitly None
             fone=None,
             bairro=None,
-            tempreferencia=None
+            tempreferencia=None,
         )
 
         result = FarmaxMapper.to_order(raw_delivery)
@@ -99,7 +103,7 @@ class TestFarmaxMapperToOrder:
             tempendereco="123 Main St",
             tempreferencia=None,
             data=date(2023, 10, 25),
-            hora=time(14, 30)
+            hora=time(14, 30),
         )
 
         # 2. Expect the Mapper to fail because Order rejects the empty string
@@ -108,6 +112,7 @@ class TestFarmaxMapperToOrder:
             FarmaxMapper.to_order(raw_delivery)
 
         assert "validation error for Order" in str(excinfo.value)
+
 
 class TestFarmaxMapperFilterIds:
     """Tests for the filter_new_insert_ids static method."""
@@ -142,7 +147,8 @@ class TestFarmaxMapperFilterIds:
 
     def test_filter_deduplicates_ids(self):
         """
-        Scenario: Multiple logs exist for the same Sale ID (e.g. duplicate inserts/logs).
+        Scenario: Multiple logs exist for the same Sale ID 
+                (e.g. duplicate inserts/logs).
         Expected: The returned set contains the ID only once.
         """
         logs = [
@@ -160,7 +166,8 @@ class TestFarmaxMapperFilterIds:
         Scenario: Action comes in as 'insert' (lowercase) or malformed object.
         Expected: Mapper handles normalization (.upper()) and continues.
         """
-        # Using a generic object to simulate a malformed/dynamic object 
+
+        # Using a generic object to simulate a malformed/dynamic object
         # that might pass strict Pydantic checks if data source is messy
         class MockLog:
             def __init__(self, action, sale_id):
@@ -168,8 +175,8 @@ class TestFarmaxMapperFilterIds:
                 self.sale_id = sale_id
 
         logs = [
-            MockLog(action="insert", sale_id=200.0), # Lowercase
-            MockLog(action="INSERT", sale_id=201.0), # Uppercase
+            MockLog(action="insert", sale_id=200.0),  # Lowercase
+            MockLog(action="INSERT", sale_id=201.0),  # Uppercase
         ]
 
         result = FarmaxMapper.filter_new_insert_ids(logs, lambda x: False)
@@ -182,6 +189,7 @@ class TestFarmaxMapperFilterIds:
         Scenario: A log entry somehow has None for sale_id.
         Expected: It is skipped safely.
         """
+
         # We have to bypass Pydantic validation to force a None sale_id
         # or simulate an object that looks like the model but isn't
         class BadLog:
@@ -189,6 +197,6 @@ class TestFarmaxMapperFilterIds:
             sale_id = None
 
         logs = [BadLog()]
-        
+
         result = FarmaxMapper.filter_new_insert_ids(logs, lambda x: False)
         assert len(result) == 0

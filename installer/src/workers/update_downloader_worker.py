@@ -3,6 +3,7 @@
 QRunnable worker to perform asynchronous downloads of the installer and its
 signature file, with progress reports and error handling.
 """
+
 import os
 import time
 import logging
@@ -12,10 +13,12 @@ from typing import List, Tuple
 import httpx
 from PyQt5.QtCore import QObject, pyqtSignal, QRunnable, pyqtSlot
 
+
 class UpdateDownloaderSignals(QObject):
     """
     Defines the signals available for the download worker.
     """
+
     # Signal emitted with (bytes_downloaded, total_bytes) for the installer
     progress = pyqtSignal(int, int)
 
@@ -24,9 +27,10 @@ class UpdateDownloaderSignals(QObject):
 
     # Signal emitted in case of error, sending (friendly_message, traceback_string)
     error = pyqtSignal(str, object)
-    
+
     # Signal emitted when the download process starts
     started = pyqtSignal()
+
 
 class UpdateDownloaderWorker(QRunnable):
     """
@@ -36,6 +40,7 @@ class UpdateDownloaderWorker(QRunnable):
     Receives URLs and destination paths for both files, emits signals for
     progress, success, or failure.
     """
+
     # Throttle progress updates to a maximum of once every 100ms
     PROGRESS_THROTTLE_INTERVAL = 0.1  # seconds
 
@@ -47,7 +52,9 @@ class UpdateDownloaderWorker(QRunnable):
         self._files_to_download = files_to_download
         self.is_cancelled = False
 
-    def _download_file(self, url: str, destination_path: str, report_progress: bool = False):
+    def _download_file(
+        self, url: str, destination_path: str, report_progress: bool = False
+    ):
         """
         Downloads a single file from a URL to a destination path.
 
@@ -70,7 +77,9 @@ class UpdateDownloaderWorker(QRunnable):
             downloaded_bytes = 0
 
             if report_progress:
-                self.logger.info(f"Tamanho total do arquivo do instalador: {total_size} bytes.")
+                self.logger.info(
+                    f"Tamanho total do arquivo do instalador: {total_size} bytes."
+                )
 
             # Create parent directories if they don't exist
             os.makedirs(os.path.dirname(destination_path), exist_ok=True)
@@ -78,24 +87,28 @@ class UpdateDownloaderWorker(QRunnable):
             with open(destination_path, "wb") as f:
                 for chunk in response.iter_bytes(chunk_size=8192):
                     if self.is_cancelled:
-                        self.logger.warning(f"Download de '{url}' cancelado pelo usuário.")
+                        self.logger.warning(
+                            f"Download de '{url}' cancelado pelo usuário."
+                        )
                         return
 
                     f.write(chunk)
                     downloaded_bytes += len(chunk)
-                    
+
                     if report_progress:
                         current_time = time.time()
-                        if current_time - last_progress_time > self.PROGRESS_THROTTLE_INTERVAL:
+                        if (
+                            current_time - last_progress_time
+                            > self.PROGRESS_THROTTLE_INTERVAL
+                        ):
                             self.signals.progress.emit(downloaded_bytes, total_size)
                             last_progress_time = current_time
 
         # After the loop, emit one final signal if needed to ensure the bar reaches 100%
         if report_progress and not self.is_cancelled:
             self.signals.progress.emit(downloaded_bytes, total_size)
-        
-        self.logger.info(f"Download de '{destination_path}' concluído com sucesso.")
 
+        self.logger.info(f"Download de '{destination_path}' concluído com sucesso.")
 
     @pyqtSlot()
     def run(self):
@@ -109,9 +122,7 @@ class UpdateDownloaderWorker(QRunnable):
         try:
             for _file in self._files_to_download:
                 # 1. Download the installer file (with progress reporting)
-                self._download_file(
-                    *_file
-                )
+                self._download_file(*_file)
                 if self.is_cancelled:
                     return
 

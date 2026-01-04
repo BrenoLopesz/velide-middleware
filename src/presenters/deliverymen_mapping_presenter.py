@@ -10,24 +10,21 @@ from visual.main_view import MainView
 if TYPE_CHECKING:
     from models.app_context_model import Services
 
+
 class DeliverymenMappingPresenter(QObject):
     mapping_done = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(
-            self, 
-            view: MainView,
-            services: 'Services',
-            machine: MainStateMachine
-        ):
+    def __init__(self, view: MainView, services: "Services", machine: MainStateMachine):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self._view = view
         self._services = services
         self._machine = machine
-        
 
-        deliverymen_mapping_workflow = self._machine.logged_in_state.deliverymen_mapping_workflow
+        deliverymen_mapping_workflow = (
+            self._machine.logged_in_state.deliverymen_mapping_workflow
+        )
         # Checks if mapping is required
         deliverymen_mapping_workflow.check_mapping_state.entered.connect(
             self._services.deliverymen_retriever.check_if_mapping_is_required
@@ -46,11 +43,15 @@ class DeliverymenMappingPresenter(QObject):
         )
 
         # Display table when deliverymen received
-        deliverymen_mapping_workflow.deliverymen_mapping_state.entered.connect(self.on_deliverymen_received)
+        deliverymen_mapping_workflow.deliverymen_mapping_state.entered.connect(
+            self.on_deliverymen_received
+        )
         # On clicking to save
         self._view.deliverymen_mapping_screen.save_config.connect(self.validate_mapping)
         # After saving mappings
-        deliverymen_mapping_workflow.mapping_stored_state.entered.connect(self.on_mapping_success)
+        deliverymen_mapping_workflow.mapping_stored_state.entered.connect(
+            self.on_mapping_success
+        )
 
         # TODO: Remove this last 'anti-pattern'
         self._services.sqlite.error_occurred.connect(self.error)
@@ -64,34 +65,41 @@ class DeliverymenMappingPresenter(QObject):
         self._services.deliverymen_retriever.fetch_deliverymen()
 
     def _on_mappings_retrieved(self):
-        mappings = self._machine.logged_in_state.deliverymen_mapping_workflow.property("deliverymen_mappings")
-        velide_deliverymen, local_deliverymen = self._services.deliverymen_retriever.get_deliverymen()
+        mappings = self._machine.logged_in_state.deliverymen_mapping_workflow.property(
+            "deliverymen_mappings"
+        )
+        velide_deliverymen, local_deliverymen = (
+            self._services.deliverymen_retriever.get_deliverymen()
+        )
         self._services.deliverymen_retriever.check_if_mapping_is_complete(
-            mappings,
-            velide_deliverymen,
-            local_deliverymen
+            mappings, velide_deliverymen, local_deliverymen
         )
 
     def on_deliverymen_received(self):
-        # TODO: BUG - Currently ignoring retrieved 'deliverymen_mappings'. 
-        # Merge DB results with 'generate_levenshtein_mappings' so saved 
+        # TODO: BUG - Currently ignoring retrieved 'deliverymen_mappings'.
+        # Merge DB results with 'generate_levenshtein_mappings' so saved
         # user choices aren't overwritten by auto-guesses.
 
         # 1. Populate table
         headers = ["Entregadores Velide", "Entregadores Locais"]
-        velide_deliverymen, local_deliverymen = self._services.deliverymen_retriever.get_deliverymen()
-        default_mappings = generate_levenshtein_mappings(velide_deliverymen, local_deliverymen)
+        velide_deliverymen, local_deliverymen = (
+            self._services.deliverymen_retriever.get_deliverymen()
+        )
+        default_mappings = generate_levenshtein_mappings(
+            velide_deliverymen, local_deliverymen
+        )
         self._view.deliverymen_mapping_screen.populate_table(
-            source_items=velide_deliverymen, 
-            destination_options=local_deliverymen, 
-            default_mappings=default_mappings, 
-            headers=headers
+            source_items=velide_deliverymen,
+            destination_options=local_deliverymen,
+            default_mappings=default_mappings,
+            headers=headers,
         )
         # 2. Change view
         self._view.deliverymen_mapping_screen.set_screen(1)
 
     def validate_mapping(self):
-        # TODO: Ensure 'request_add_many_mappings' performs an UPSERT (INSERT OR REPLACE). 
+        # TODO: Ensure 'request_add_many_mappings' performs
+        # an UPSERT (INSERT OR REPLACE).
         # Standard INSERT will crash on existing IDs.
 
         # 1. Get the {velide_id: local_name} mappings from the view
@@ -109,7 +117,7 @@ class DeliverymenMappingPresenter(QObject):
         for velide_id, local_name in name_mappings.items():
             # Find the local_id corresponding to the selected local_name
             local_id = name_to_id_map.get(local_name)
-            
+
             # Only add to the list if a valid mapping was found
             if local_id:
                 mappings_tuple_list.append((velide_id, local_id))
@@ -123,7 +131,9 @@ class DeliverymenMappingPresenter(QObject):
         self._services.sqlite.request_add_many_mappings(mappings_tuple_list)
 
     def on_mapping_success(self):
-        deliverymen_mapping_workflow = self._machine.logged_in_state.deliverymen_mapping_workflow
+        deliverymen_mapping_workflow = (
+            self._machine.logged_in_state.deliverymen_mapping_workflow
+        )
         added = deliverymen_mapping_workflow.property("rows_inserted")
         if added == 0:
             self.logger.warning("Nenhum mapeamento foi alterado.")

@@ -9,30 +9,32 @@ from pydantic import ValidationError
 from websockets.exceptions import ConnectionClosedError
 
 from config import ApiConfig
-from models.velide_websockets_models import LatestAction 
+from models.velide_websockets_models import LatestAction
+
 
 class VelideWebsocketsSignals(QObject):
     """
     Defines signals emitted by the VelideWebsocketsWorker.
-    
+
     Signals:
-        action_received (object): Emitted when a new, validated action is 
-                                  received. The payload is the 
+        action_received (object): Emitted when a new, validated action is
+                                  received. The payload is the
                                   `LatestAction` Pydantic model instance.
-        error_occurred (str): Emitted when any error occurs (connection, 
-                              validation, etc.). The payload is the 
+        error_occurred (str): Emitted when any error occurs (connection,
+                              validation, etc.). The payload is the
                               error message.
-        connection_closed (str): Emitted when the websocket connection is 
-                                 closed, either intentionally or 
+        connection_closed (str): Emitted when the websocket connection is
+                                 closed, either intentionally or
                                  unexpectedly.
     """
+
     action_received = pyqtSignal(object)
     error_occurred = pyqtSignal(str)
     connection_closed = pyqtSignal(str)
-    
+
     # 1. ADDED: This signal was missing
     finished = pyqtSignal()
-    
+
     # 2. ADDED: Essential for the Service Adapter
     status_changed = pyqtSignal(bool)
 
@@ -42,23 +44,23 @@ class VelideWebsocketsWorker(QRunnable):
     A QRunnable worker that connects to the Velide GraphQL WebSocket server,
     listens for subscriptions, validates incoming data, and emits signals.
     """
-    
+
     def __init__(self, api_config: ApiConfig, access_token: str):
         """
         Initializes the worker.
-        
+
         Args:
             api_config: An object containing configuration, including
                         `velide_websockets_server` and `auth_token`.
-                        
+
         Raises:
             ValueError: If required configuration is missing.
         """
         super().__init__()
-        
+
         if not api_config.velide_websockets_server:
             raise ValueError("Velide Websockets server URL is not defined.")
-            
+
         if not access_token:
             raise ValueError("Velide auth_token is not defined.")
 
@@ -66,10 +68,10 @@ class VelideWebsocketsWorker(QRunnable):
         self.access_token = access_token
         self.signals = VelideWebsocketsSignals()
         self.logger = logging.getLogger(__name__)
-        
+
         # Control flag
         self._is_running = True
-        
+
         # Reference to transport to allow forcing close if needed
         self._transport: Optional[WebsocketsTransport] = None
 
@@ -99,7 +101,7 @@ class VelideWebsocketsWorker(QRunnable):
             self.signals.connection_closed.emit("Worker finished.")
             # Ensure we tell the service we are offline effectively
             self.signals.status_changed.emit(False)
-            
+
             # 3. ADDED: Emit 'finished' so the Service knows the thread is dead
             self.signals.finished.emit()
 
@@ -136,57 +138,72 @@ class VelideWebsocketsWorker(QRunnable):
         variables: Dict[str, str] = {"authorization": self.access_token}
 
         retry_delay = 2
-        
+
         while self._is_running:
             try:
                 # Protocol: graphql-transport-ws
-                # We use init_payload={} because the server expects the standard handshake
+                # We use init_payload={} because the server 
+                # expects the standard handshake
                 self._transport = WebsocketsTransport(
                     url=self.api_config.velide_websockets_server,
-                    init_payload={}, 
+                    init_payload={},
                     keep_alive_timeout=60,
-                    ping_interval=30 
+                    ping_interval=30,
                 )
-                
-                async with Client(transport=self._transport, fetch_schema_from_transport=False) as session:
+
+                async with Client(
+                    transport=self._transport, fetch_schema_from_transport=False
+                ) as session:
                     self.logger.info("Conectado ao WebSocket Velide.")
-                    
+
                     # Signal: Connected (Green Light)
                     self.signals.status_changed.emit(True)
-                    
-                    retry_delay = 2 # Reset delay
-                    
-                    async for data in session.subscribe(subscription_query, variable_values=variables):
+
+                    retry_delay = 2  # Reset delay
+
+                    async for data in session.subscribe(
+                        subscription_query, variable_values=variables
+                    ):
                         if not self._is_running:
                             break
-                        
+
                         try:
                             # Use .get to be safe
-                            action_data = data.get('latestAction')
+                            action_data = data.get("latestAction")
                             if action_data:
-                                validated_action = LatestAction.model_validate(action_data)
+                                validated_action = LatestAction.model_validate(
+                                    action_data
+                                )
                                 self.signals.action_received.emit(validated_action)
 
                         except ValidationError as e:
                             self.logger.error(f"Erro de validação: {e}")
-                            # Do not emit error signal here to avoid spamming the UI 
+                            # Do not emit error signal here to avoid spamming the UI
                             # if the server sends bad data repeatedly
                         except KeyError:
                             self.logger.error("Dados incompletos recebidos.")
 
-            except (ConnectionClosedError, ConnectionRefusedError, asyncio.TimeoutError, OSError) as e:
+            except (
+                ConnectionClosedError,
+                ConnectionRefusedError,
+                asyncio.TimeoutError,
+                OSError,
+            ) as e:
                 # Signal: Disconnected (Red Light)
                 self.signals.status_changed.emit(False)
-                
-                self.logger.warning(f"Conexão perdida ({e}). Tentando reconectar em {retry_delay}s...")
-                # Note: We do NOT emit error_occurred here to avoid spamming the UI 
-                # with popups. The status_changed(False) is enough for the UI to turn red.
-                
+
+                self.logger.warning(
+                    f"Conexão perdida ({e}). Tentando reconectar em {retry_delay}s..."
+                )
+                # Note: We do NOT emit error_occurred here to avoid spamming the UI
+                # with popups. The status_changed(False) 
+                # is enough for the UI to turn red.
+
             except Exception as e:
                 self.logger.exception("Erro inesperado no loop Websocket.")
                 self.signals.status_changed.emit(False)
                 self.signals.error_occurred.emit(str(e))
-            
+
             finally:
                 self._transport = None
 

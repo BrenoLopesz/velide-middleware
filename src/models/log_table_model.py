@@ -12,18 +12,22 @@ STATUS_COLORS = {
     "Aviso": QBrush(QColor(211, 118, 0)),
 }
 
+
 class LogRowModel(BaseModel):
     """
     Represents a single row of data in the log table.
     """
+
     timestamp: str = Field(..., description="The formatted timestamp of the log entry.")
     level: str = Field(..., description="The log level (e.g., INFO, ERROR).")
     message: str = Field(..., description="The log message content.")
+
 
 class LogTableModel(QAbstractTableModel):
     """
     A model to hold log data for the LogTable QTableView.
     """
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._headers = ["Horário", "Tipo", "Mensagem"]
@@ -44,7 +48,7 @@ class LogTableModel(QAbstractTableModel):
         row = index.row()
         col = index.column()
 
-        if col != 1: 
+        if col != 1:
             return None
 
         item = self._data[row]
@@ -57,10 +61,10 @@ class LogTableModel(QAbstractTableModel):
         # Handle font/color role, as requested
         if role == Qt.ForegroundRole:
             return self._font_data(index)
-            
+
         if role != Qt.DisplayRole:
             return None
-        
+
         row = index.row()
         col = index.column()
         item = self._data[row]
@@ -71,7 +75,7 @@ class LogTableModel(QAbstractTableModel):
             return item.level
         elif col == 2:
             return item.message
-        
+
         return None
 
     def headerData(self, section, orientation, role=Qt.DisplayRole) -> Any:
@@ -83,13 +87,9 @@ class LogTableModel(QAbstractTableModel):
         """Adds a new log entry to the end of the model."""
         row_position = self.rowCount()
         self.beginInsertRows(QModelIndex(), row_position, row_position)
-        
-        new_entry = LogRowModel(
-            timestamp=timestamp,
-            level=level,
-            message=message
-        )
-        
+
+        new_entry = LogRowModel(timestamp=timestamp, level=level, message=message)
+
         self._data.append(new_entry)
-        
+
         self.endInsertRows()

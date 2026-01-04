@@ -3,6 +3,7 @@ from PyQt5.QtCore import QAbstractTableModel, QModelIndex, Qt
 
 from models.velide_delivery_models import DeliverymanResponse
 
+
 class MappingTableModel(QAbstractTableModel):
     """
     A Qt model for managing a two-column mapping between a source and a destination.
@@ -26,7 +27,9 @@ class MappingTableModel(QAbstractTableModel):
         """Returns the number of columns in the model."""
         return len(self._headers)
 
-    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole) -> Optional[str]:
+    def headerData(
+        self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole
+    ) -> Optional[str]:
         """Returns the data for the given header section."""
         if role == Qt.DisplayRole and orientation == Qt.Horizontal:
             return self._headers[section]
@@ -36,7 +39,7 @@ class MappingTableModel(QAbstractTableModel):
         """Returns the data at the given index for the specified role."""
         if not index.isValid():
             return None
-        
+
         try:
             value = self._data[index.row()][index.column()]
         except IndexError:
@@ -44,7 +47,7 @@ class MappingTableModel(QAbstractTableModel):
 
         # Return the string value for display or editing
         if role in (Qt.DisplayRole, Qt.EditRole):
-            if index.column() == 0 and hasattr(value, 'name'):
+            if index.column() == 0 and hasattr(value, "name"):
                 return value.name
             else:
                 return str(value)
@@ -72,7 +75,11 @@ class MappingTableModel(QAbstractTableModel):
             base_flags |= Qt.ItemIsEditable
         return base_flags
 
-    def load_data(self, data: List[Tuple[DeliverymanResponse, str]], headers: Optional[List[str]] = None) -> None:
+    def load_data(
+        self,
+        data: List[Tuple[DeliverymanResponse, str]],
+        headers: Optional[List[str]] = None,
+    ) -> None:
         """
         Resets the model with new data.
 
@@ -94,7 +101,7 @@ class MappingTableModel(QAbstractTableModel):
         Only includes rows where a destination value has been selected.
         """
         return {
-            source_obj.id: dest_name 
-            for source_obj, dest_name in self._data 
+            source_obj.id: dest_name
+            for source_obj, dest_name in self._data
             if dest_name
         }

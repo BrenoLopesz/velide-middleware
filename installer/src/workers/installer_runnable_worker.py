@@ -22,6 +22,7 @@ class InstallerSignals(QObject):
         finished (object): Emitted when the installer process has finished
                            successfully.
     """
+
     error = pyqtSignal(str)
     finished = pyqtSignal()
 
@@ -56,13 +57,18 @@ class InstallerRunnableWorker(QRunnable):
         try:
             # Step 1: Validate the installer path
             if not os.path.exists(self.installer_path):
-                error_message = f"Erro: O arquivo de instalação não foi encontrado em '{self.installer_path}'."
+                error_message = (
+                    f"Erro: O arquivo de instalação não "
+                    f"foi encontrado em '{self.installer_path}'."
+                )
                 self.logger.error(error_message)
                 self.signals.error.emit(error_message)
                 return
 
             if not os.path.isfile(self.installer_path):
-                error_message = f"Erro: O caminho '{self.installer_path}' não é um arquivo válido."
+                error_message = (
+                    f"Erro: O caminho '{self.installer_path}' não é um arquivo válido."
+                )
                 self.logger.error(error_message)
                 self.signals.error.emit(error_message)
                 return
@@ -72,10 +78,16 @@ class InstallerRunnableWorker(QRunnable):
             # /SP-: Disables the "This will install..." prompt at the beginning
             # of setup.
             # /NOCANCEL: Prevents the user from canceling during installation.
-            # /UPDATE=1: Install the version auto-updater (this application) 
+            # /UPDATE=1: Install the version auto-updater (this application)
             # new version in the "%TEMP%" folder, since wouldn't be possible
             # to update it while running.
-            command = [self.installer_path, "/VERYSILENT", "/SP-", "/NOCANCEL", "/UPDATE=1"]
+            command = [
+                self.installer_path,
+                "/VERYSILENT",
+                "/SP-",
+                "/NOCANCEL",
+                "/UPDATE=1",
+            ]
 
             # Step 3: Execute the installer process
             # We use subprocess.run with check=True, which will raise
@@ -85,12 +97,11 @@ class InstallerRunnableWorker(QRunnable):
                 check=True,
                 capture_output=True,
                 text=True,
-                encoding='latin-1' # Inno Setup logs often use this encoding
+                encoding="latin-1",  # Inno Setup logs often use this encoding
             )
 
             print(f"Installer STDOUT:\n{process.stdout}")
             print(f"Installer STDERR:\n{process.stderr}")
-
 
         except subprocess.CalledProcessError as e:
             # This block catches errors where the installer runs but returns
@@ -119,7 +130,9 @@ class InstallerRunnableWorker(QRunnable):
 
         except Exception:
             # This is a generic catch-all for any other unexpected errors.
-            error_message = "Ocorreu um erro inesperado ao tentar executar o instalador."
+            error_message = (
+                "Ocorreu um erro inesperado ao tentar executar o instalador."
+            )
             self.logger.exception(error_message)
             self.signals.error.emit(error_message)
             return

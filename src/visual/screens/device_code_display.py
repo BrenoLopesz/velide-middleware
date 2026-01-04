@@ -4,6 +4,7 @@ from utils.device_code import DeviceCodeDict
 from visual.fonts import get_fonts
 from visual.components.qr_code import QRCode
 
+
 class DeviceCodeDisplay(QWidget):
     expired = pyqtSignal()
 
@@ -13,12 +14,11 @@ class DeviceCodeDisplay(QWidget):
         self.device_code = device_code
 
         self.main_layout = QVBoxLayout()
-        
-        
+
         self.qr_cta_label = QLabel("Escaneie o <b>QR Code</b>")
         self.qr_cta_label.setFont(self.fonts["regular"])
         self.qr_cta_label.setAlignment(Qt.AlignCenter)
-        
+
         self.link_cta_label = QLabel("Ou acesse")
         self.link_cta_label.setFont(self.fonts["light"])
         self.link_cta_label.setStyleSheet("font-size: 10pt;")
@@ -33,8 +33,13 @@ class DeviceCodeDisplay(QWidget):
         self.code_display.setObjectName("codeDisplay")
         self.code_display.setAlignment(Qt.AlignCenter)
 
-        self.login_link = QLabel('<a href=\"{}\" style=\"color: #0EA5E9\">{}</a>'.format(device_code["verification_uri_complete"], device_code["verification_uri"]))
-        self.login_link.setTextFormat(Qt.RichText) 
+        self.login_link = QLabel(
+            '<a href="{}" style="color: #0EA5E9">{}</a>'.format(
+                device_code["verification_uri_complete"],
+                device_code["verification_uri"],
+            )
+        )
+        self.login_link.setTextFormat(Qt.RichText)
         self.login_link.setObjectName("link")
         self.login_link.setFont(self.fonts["regular"])
         self.login_link.setOpenExternalLinks(True)
@@ -45,7 +50,7 @@ class DeviceCodeDisplay(QWidget):
         self.add_expiration_timer()
 
         self.main_layout.setSpacing(0)
-        
+
         self.main_layout.addStretch()
         self.main_layout.addWidget(self.qr_cta_label, alignment=Qt.AlignHCenter)
         self.main_layout.addSpacing(12)
@@ -79,7 +84,9 @@ class DeviceCodeDisplay(QWidget):
         if self.remaining_time > 0:
             minutes = self.remaining_time // 60
             seconds = self.remaining_time % 60
-            self.expire_label.setText("Expira em {:02d}:{:02d}".format(minutes, seconds))
+            self.expire_label.setText(
+                "Expira em {:02d}:{:02d}".format(minutes, seconds)
+            )
             self.remaining_time -= 1
         else:
             self.expire_label.setText("Código expirado.")

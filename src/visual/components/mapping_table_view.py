@@ -1,5 +1,11 @@
 from typing import List, Any, Dict, Optional
-from PyQt5.QtWidgets import QWidget, QTableView, QComboBox, QStyledItemDelegate, QHeaderView
+from PyQt5.QtWidgets import (
+    QWidget,
+    QTableView,
+    QComboBox,
+    QStyledItemDelegate,
+    QHeaderView,
+)
 from PyQt5.QtCore import QModelIndex, Qt
 
 from models.base_models import BaseLocalDeliveryman
@@ -7,10 +13,12 @@ from models.mapping_table_model import MappingTableModel
 from models.velide_delivery_models import DeliverymanResponse
 from visual.fonts import get_fonts
 
+
 class ComboBoxDelegate(QStyledItemDelegate):
     """
     A delegate that provides a searchable QComboBox as the editor for a table view cell.
     """
+
     def __init__(self, options: List[str], parent: Optional[Any] = None) -> None:
         """Initializes the delegate with a list of options for the combo box."""
         super().__init__(parent)
@@ -19,10 +27,10 @@ class ComboBoxDelegate(QStyledItemDelegate):
     def createEditor(self, parent: Any, option: Any, index: Any) -> QComboBox:
         """Creates the QComboBox editor when a cell is double-clicked."""
         combo = QComboBox(parent)
-        self.update_options(combo) # Use a helper to set options
+        self.update_options(combo)  # Use a helper to set options
 
         return combo
-    
+
     def setEditorData(self, editor: Optional[QWidget], index: QModelIndex) -> None:
         """Sets the editor's current value from the model's data."""
         # 1. Check if editor exists
@@ -37,7 +45,9 @@ class ComboBoxDelegate(QStyledItemDelegate):
             # Fallback for other widget types (optional)
             super().setEditorData(editor, index)
 
-    def setModelData(self, editor: Optional[QWidget], model, index: QModelIndex) -> None:
+    def setModelData(
+        self, editor: Optional[QWidget], model, index: QModelIndex
+    ) -> None:
         """Saves the editor's current value back to the model."""
         if not editor:
             return
@@ -62,19 +72,20 @@ class MappingTableView(QTableView):
     It uses a custom model for data management and a custom delegate
     to provide a searchable QComboBox for the destination column.
     """
+
     def __init__(self, parent: Optional[Any] = None) -> None:
         """Initializes the view and its components."""
         super().__init__(parent)
-        self._fonts = get_fonts() 
+        self._fonts = get_fonts()
         self._model = MappingTableModel(self)
-        self._delegate = ComboBoxDelegate([], self) # Start with empty options
+        self._delegate = ComboBoxDelegate([], self)  # Start with empty options
         self._configure_view()
 
     def _configure_view(self) -> None:
         """Sets up the visual properties and behavior of the table view."""
         self.setModel(self._model)
         self.setItemDelegateForColumn(1, self._delegate)
-        
+
         self.setFont(self._fonts["regular_small"])
 
         # Configure Headers
@@ -94,15 +105,17 @@ class MappingTableView(QTableView):
         source_items: List[DeliverymanResponse],
         destination_options: List[BaseLocalDeliveryman],
         default_mappings: Optional[Dict[str, str]] = None,
-        headers: Optional[List[str]] = None
+        headers: Optional[List[str]] = None,
     ) -> None:
         """
-        Populates the table with data. This is the primary method for setting/updating content.
+        Populates the table with data. This is the primary method for 
+        setting/updating content.
 
         Args:
             source_items: A list of DeliverymanResponse objects for the first column.
             destination_options: A list of FarmaxDeliveryman objects to use as options.
-            default_mappings: An optional dictionary mapping source item IDs (DeliverymanResponse.id)
+            default_mappings: An optional dictionary mapping source 
+                            item IDs (DeliverymanResponse.id)
                             to their default destination name (FarmaxDeliveryman.name).
             headers: An optional list of two strings to set as column headers.
         """
@@ -112,15 +125,13 @@ class MappingTableView(QTableView):
         # Prepare data in the format the model requires: List[List[Any]]
         # The source column (col 0) will hold the full source object
         # The destination column (col 1) will hold the mapped string name
-        table_data = [
-            (source, mappings.get(source.id, "")) for source in source_items
-        ]
+        table_data = [(source, mappings.get(source.id, "")) for source in source_items]
 
         # Extract the names from the destination objects
         dest_names = [option.name for option in destination_options]
 
         # Update the delegate with the new set of options for the dropdown
-        self._delegate.options = sorted(dest_names) # Add a blank option
+        self._delegate.options = sorted(dest_names)  # Add a blank option
 
         # Load the prepared data into the model
         self._model.load_data(table_data, headers)

@@ -3,15 +3,16 @@ from PyQt5.QtCore import Qt, pyqtSignal
 
 from visual.fonts import get_fonts
 
+
 class ErrorScreen(QWidget):
     retry = pyqtSignal()
 
     def __init__(self):
         super().__init__()
         fonts = get_fonts()
-        
+
         self.main_layout = QVBoxLayout()
-        
+
         self.main_title = QLabel("Ocorreu um erro inseperado.")
         # self.main_title = QLabel("Não foi possível realizar<br/>a autenticação.")
         self.main_title.setFont(fonts["bold"])
@@ -25,8 +26,7 @@ class ErrorScreen(QWidget):
         self.error_description.setWordWrap(True)
 
         self.error_description.setSizePolicy(
-            QSizePolicy.Expanding, 
-            QSizePolicy.Expanding
+            QSizePolicy.Expanding, QSizePolicy.Expanding
         )
 
         # Set the horizontal policy to Preferred and the VERTICAL policy to Fixed.
@@ -34,7 +34,7 @@ class ErrorScreen(QWidget):
         # fixed to whatever my content requires. DO NOT shrink me vertically."
         self.error_description.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
-        self.button = QPushButton('Tentar Novamente')
+        self.button = QPushButton("Tentar Novamente")
         self.button.setFont(fonts["bold"])
         self.button.clicked.connect(self.retry)
 
@@ -56,4 +56,4 @@ class ErrorScreen(QWidget):
     def set_error_description(self, error_description: str):
         self.error_description.setText(error_description)
         self.error_description.adjustSize()
-        self.adjustSize() 
+        self.adjustSize()

@@ -1,8 +1,8 @@
 # tests/integration/test_persistence_flow.py
 from api.sqlite_manager import DeliveryStatus
 
-class TestPersistenceIntegration:
 
+class TestPersistenceIntegration:
     def test_register_new_delivery_writes_to_disk(self, persistence_stack, qtbot):
         """
         Tests that register_new_delivery updates the Cache immediately
@@ -16,13 +16,14 @@ class TestPersistenceIntegration:
         # --- ACT ---
         # 1. Setup a "Blocker" to wait for the background thread to finish.
         # We listen to the signal 'add_delivery_result' from SQLiteService.
-        with qtbot.waitSignal(sqlite_service.add_delivery_result, timeout=2000) as blocker:
-            
+        with qtbot.waitSignal(
+            sqlite_service.add_delivery_result, timeout=2000
+        ) as blocker:
             # 2. Trigger the action
             tps.register_new_delivery(
-                internal_id="555.0", # Pass a float/string to test normalization
+                internal_id="555.0",  # Pass a float/string to test normalization
                 external_id="UUID-999",
-                status=DeliveryStatus.ADDED
+                status=DeliveryStatus.ADDED,
             )
 
         # --- ASSERT (Synchronous Cache) ---
@@ -31,16 +32,16 @@ class TestPersistenceIntegration:
         assert tps.get_external_id("555") == "UUID-999"
 
         # --- ASSERT (Asynchronous Disk) ---
-        # The blocker context manager ensures we only reach here AFTER 
+        # The blocker context manager ensures we only reach here AFTER
         # the worker thread has emitted 'add_delivery_result'.
-        
+
         # Verify the worker claimed success (signal emitted True)
-        assert blocker.args[0] is True 
+        assert blocker.args[0] is True
 
         # Verify the actual data on disk using a fresh connection
         with db_manager as db:
             result = db.get_delivery_by_internal_id("555")
-            
+
         assert result is not None
         external_id, status = result
         assert external_id == "UUID-999"
@@ -57,11 +58,9 @@ class TestPersistenceIntegration:
         # 1. Seed the database manually (Backdoor setup)
         with db_manager as db:
             db.add_delivery_mapping(
-                external_id="OLD-UUID",
-                internal_id="100",
-                status=DeliveryStatus.PENDING
+                external_id="OLD-UUID", internal_id="100", status=DeliveryStatus.PENDING
             )
-            
+
         # Ensure cache is empty before we start
         assert tps.get_current_status("100") is None
 

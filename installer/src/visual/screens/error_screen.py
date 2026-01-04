@@ -4,6 +4,7 @@ from PyQt5.QtGui import QCursor
 
 from visual.fonts import get_fonts
 
+
 class ErrorScreen(QWidget):
     retry = pyqtSignal()
     skip = pyqtSignal()
@@ -11,9 +12,9 @@ class ErrorScreen(QWidget):
     def __init__(self):
         super().__init__()
         fonts = get_fonts()
-        
+
         self.main_layout = QVBoxLayout()
-        
+
         self.main_title = QLabel("Não foi possível realizar<br/>a atualização.")
         self.main_title.setFont(fonts["bold"])
         self.main_title.setAlignment(Qt.AlignCenter)
@@ -25,16 +26,17 @@ class ErrorScreen(QWidget):
         self.error_description.setWordWrap(True)
 
         self.error_description.setSizePolicy(
-            QSizePolicy.Expanding, 
-            QSizePolicy.Expanding
+            QSizePolicy.Expanding, QSizePolicy.Expanding
         )
 
-        self.button = QPushButton('Tentar Novamente')
+        self.button = QPushButton("Tentar Novamente")
         self.button.setFont(fonts["bold"])
         self.button.setCursor(QCursor(Qt.PointingHandCursor))
         self.button.clicked.connect(self.retry)
 
-        self.skip_label = QLabel("<span style=\"text-decoration: underline\">Pular atualização</span>")
+        self.skip_label = QLabel(
+            '<span style="text-decoration: underline">Pular atualização</span>'
+        )
         self.skip_label.setCursor(QCursor(Qt.PointingHandCursor))
         self.skip_label.setTextFormat(Qt.RichText)
         self.skip_label.setFont(fonts["light"])
@@ -55,4 +57,4 @@ class ErrorScreen(QWidget):
     def set_error_description(self, error_description: str):
         self.error_description.setText(error_description)
         self.error_description.adjustSize()
-        self.adjustSize() 
+        self.adjustSize()

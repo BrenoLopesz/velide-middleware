@@ -4,8 +4,9 @@ import atexit
 import msvcrt  # Windows-specific module for file locking
 from utils.bundle_dir import BUNDLE_DIR
 
-LOCK_FILE_PATH = os.path.join(BUNDLE_DIR, 'resources', 'velide.lock')
+LOCK_FILE_PATH = os.path.join(BUNDLE_DIR, "resources", "velide.lock")
 _lock_file_handle = None
+
 
 def acquire_lock():
     """
@@ -36,19 +37,21 @@ def acquire_lock():
             show_already_running_message()
             if _lock_file_handle is not None:
                 os.close(_lock_file_handle)
-            sys.exit(1) # Exit indicating an error
+            sys.exit(1)  # Exit indicating an error
         else:
             # Handle other potential IOErrors during file open/lock
-            print(f"Unexpected error acquiring lock: {e}") # Log or show a different error
+            print(
+                f"Unexpected error acquiring lock: {e}"
+            )  # Log or show a different error
             if _lock_file_handle is not None:
                 os.close(_lock_file_handle)
-            sys.exit(1) # Exit indicating an error
+            sys.exit(1)  # Exit indicating an error
     except Exception as e:
         # Catch any other unexpected exceptions
         print(f"An unexpected error occurred during lock acquisition: {e}")
         if _lock_file_handle is not None:
             os.close(_lock_file_handle)
-        sys.exit(1) # Exit indicating an error
+        sys.exit(1)  # Exit indicating an error
 
 
 def release_lock():

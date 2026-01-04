@@ -6,6 +6,7 @@ from workers.updates_checker_worker import UpdateCheckWorker
 
 import logging
 
+
 class UpdateCheckerService(QObject):
     """
     A QObject that checks for new releases on GitHub in a non-blocking way.
@@ -18,6 +19,7 @@ class UpdateCheckerService(QObject):
         current_version (str): The current version of the application (e.g., 'v1.2.3').
         parent (QObject, optional): The parent QObject. Defaults to None.
     """
+
     # Public signals that users of this class can connect to
     update_found = pyqtSignal(str, str, str, str)
     no_update_found = pyqtSignal()
@@ -28,7 +30,7 @@ class UpdateCheckerService(QObject):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.threadpool = QThreadPool.globalInstance()
-        
+
     @pyqtSlot()
     def check_for_update(self, config: InstallerConfig, current_version: Version):
         """
@@ -40,12 +42,12 @@ class UpdateCheckerService(QObject):
         )
 
         worker = UpdateCheckWorker(config, current_version)
-        
+
         # Connect worker signals to this class's public signals
         worker.signals.update_found.connect(self.update_found)
         worker.signals.no_update_found.connect(self.no_update_found)
         worker.signals.error.connect(self.error)
         worker.signals.checking.connect(self.checking_for_update)
-        
+
         # Start the worker in the thread pool
         self.threadpool.start(worker)

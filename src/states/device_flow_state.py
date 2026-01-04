@@ -3,8 +3,10 @@ from PyQt5.QtCore import QState, pyqtSignal
 
 from typing import TYPE_CHECKING
 from utils.device_code import DeviceCodeDict
+
 if TYPE_CHECKING:
     from models.app_context_model import Services
+
 
 class DeviceFlowState(QState):
     _device_code_stored = pyqtSignal()
@@ -27,7 +29,9 @@ class DeviceFlowState(QState):
         self.idle_state.addTransition(self.services.auth.loading, self.loading_state)
         # Loading → Waiting for Login
         self.services.auth.device_code.connect(self._on_device_code_received)
-        self.loading_state.addTransition(self._device_code_stored, self.waiting_for_login)
+        self.loading_state.addTransition(
+            self._device_code_stored, self.waiting_for_login
+        )
         # TODO: Expired or error
 
     def _on_device_code_received(self, code_data: DeviceCodeDict):

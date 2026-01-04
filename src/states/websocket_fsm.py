@@ -3,26 +3,29 @@ import logging
 from PyQt5.QtCore import QObject, QStateMachine, QState, pyqtSignal
 from models.velide_websockets_models import LatestAction
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
-    from models.app_context_model import Services   
+    from models.app_context_model import Services
 
 
 class WebSocketFSM(QObject):
     """
     Finite State Machine for the Velide WebSocket.
-    
+
     Roles:
     1. Lifecycle Manager: Tracks Offline -> Connecting -> Online states.
-    2. Data Facade: acts as a gatekeeper, only forwarding data to the 
+    2. Data Facade: acts as a gatekeeper, only forwarding data to the
        Presenter when the system is in the 'Online' state.
     """
 
     # --- Signals for the Presenter ---
     # The Presenter listens to THIS, not the Service.
-    state_changed = pyqtSignal(str)          # Payloads: "Offline", "Connecting", "Online"
-    action_ready = pyqtSignal(LatestAction)  # Emitted only when valid data arrives in Online state
-    
-    def __init__(self, services: 'Services'):
+    state_changed = pyqtSignal(str)  # Payloads: "Offline", "Connecting", "Online"
+    action_ready = pyqtSignal(
+        LatestAction
+    )  # Emitted only when valid data arrives in Online state
+
+    def __init__(self, services: "Services"):
         """
         Args:
             service: Instance of VelideWebsocketsService
@@ -56,19 +59,20 @@ class WebSocketFSM(QObject):
         # Trigger: Connection lost while Online
         # Action: Transition Online -> Offline
         self.s_online.addTransition(self.service.disconnected, self.s_offline)
-        
-        # Trigger: Error while Online (optional, depending on if error implies disconnect)
+
+        # Trigger: Error while Online 
+        # (optional, depending on if error implies disconnect)
         self.s_online.addTransition(self.service.error_occurred, self.s_offline)
 
         # --- 3. Setup State Entry Signals (Feedback for UI) ---
-        
+
         # When entering a state, emit the string name to the Presenter
         self.s_offline.entered.connect(lambda: self.state_changed.emit("Offline"))
         self.s_connecting.entered.connect(lambda: self.state_changed.emit("Connecting"))
         self.s_online.entered.connect(lambda: self.state_changed.emit("Online"))
 
         # --- 4. Data Facade Logic (The Gatekeeper) ---
-        
+
         # Connect the service's raw data signal to our internal handler
         self.service.action_received.connect(self._handle_incoming_action)
 
@@ -76,7 +80,7 @@ class WebSocketFSM(QObject):
         self.machine.addState(self.s_offline)
         self.machine.addState(self.s_connecting)
         self.machine.addState(self.s_online)
-        
+
         self.machine.setInitialState(self.s_offline)
         self.machine.start()
 
@@ -93,7 +97,8 @@ class WebSocketFSM(QObject):
             self.action_ready.emit(action)
         else:
             # logic: Drop the packet.
-            # We are likely connecting or disconnecting, so this data 
+            # We are likely connecting or disconnecting, so this data
             # might be stale or irrelevant.
-            # You could add logging here: print(f"Dropped action {action.offset} - State not Online")
+            # You could add logging here: 
+            # print(f"Dropped action {action.offset} - State not Online")
             pass

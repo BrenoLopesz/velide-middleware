@@ -12,6 +12,7 @@ Dependencies:
 Install dependencies with:
 pip install PyQt5 httpx
 """
+
 import logging
 import sys
 import traceback
@@ -22,10 +23,12 @@ from PyQt5.QtCore import pyqtSignal, QRunnable, QObject
 
 from models.config import InstallerConfig
 
+
 class UpdateCheckerSignals(QObject):
     """
     Defines the signals available from the UpdateCheckWorker.
     """
+
     # Emitted when a new version with the required assets is found.
     # Provides: installer_url, manifest_url, signature_url, new_version_string
     update_found = pyqtSignal(str, str, str, str)
@@ -55,7 +58,7 @@ class UpdateCheckWorker(QRunnable):
         self._config = config
         self._current_version = current_version
         self.signals = UpdateCheckerSignals()
-        
+
     def run(self):
         """
         The main logic for the worker thread. Fetches release data from GitHub API.
@@ -71,23 +74,23 @@ class UpdateCheckWorker(QRunnable):
         )
 
         api_url = f"https://api.github.com/repos/{owner}/{repo}/releases"
-        
+
         try:
             # Using a context manager for the httpx client ensures cleanup
             with httpx.Client(timeout=15.0) as client:
                 headers = {"Accept": "application/vnd.github.v3+json"}
                 response = client.get(api_url, headers=headers)
                 response.raise_for_status()  # Raises HTTPStatusError for 4xx/5xx
-            
+
             releases = response.json()
 
             if not releases:
                 self.logger.info("Não há versões disponíveis no repositório.")
                 self.signals.no_update_found.emit()
                 return
-            
+
             # Filter out pre-releases
-            stable_releases = [r for r in releases if not r.get('prerelease', False)]
+            stable_releases = [r for r in releases if not r.get("prerelease", False)]
 
             if not stable_releases:
                 self.logger.info("Não há versões estáveis disponíveis no repositório.")
@@ -95,19 +98,22 @@ class UpdateCheckWorker(QRunnable):
                 return
 
             latest_release = stable_releases[0]
-            latest_tag = latest_release.get('tag_name', '')
-    
+            latest_tag = latest_release.get("tag_name", "")
+
             # Clean up tag name (remove 'v' prefix)
-            latest_version_str = latest_tag.lstrip('v')
-            
+            latest_version_str = latest_tag.lstrip("v")
+
             if not latest_version_str:
                 msg = "Última versão encontrada mas não possui 'tag_name'."
-                self.signals.error.emit(msg, "Resposta da API está faltando 'tag_name'.")
+                self.signals.error.emit(
+                    msg, "Resposta da API está faltando 'tag_name'."
+                )
                 return
 
-            self.logger.info(f"Última versão encontrada no GitHub: {latest_version_str}")
-            
-            
+            self.logger.info(
+                f"Última versão encontrada no GitHub: {latest_version_str}"
+            )
+
             latest_version = parse(latest_version_str)
 
             if latest_version > current_version:
@@ -115,31 +121,45 @@ class UpdateCheckWorker(QRunnable):
 
                 # Determine system architecture to find the correct installer
                 is_64bit = sys.maxsize > 2**32
-                installer_name = "velide_install_x64.exe" if is_64bit else "velide_install_x86.exe"
-                self.logger.info(f"Procurando por assets: '{installer_name}', 'manifest.json' e 'manifest.sig'")
+                installer_name = (
+                    "velide_install_x64.exe" if is_64bit else "velide_install_x86.exe"
+                )
+                self.logger.info(
+                    f"Procurando por assets: '{installer_name}', "
+                    "'manifest.json' e 'manifest.sig'"
+                )
 
                 installer_url = None
                 manifest_url = None
                 signature_url = None
 
-                assets = latest_release.get('assets', [])
+                assets = latest_release.get("assets", [])
                 for asset in assets:
-                    asset_name = asset.get('name')
+                    asset_name = asset.get("name")
                     if asset_name == installer_name:
-                        installer_url = asset.get('browser_download_url')
-                    elif asset_name == 'manifest.json':
-                        manifest_url = asset.get('browser_download_url')
-                    elif asset_name == 'manifest.sig':
-                        signature_url = asset.get('browser_download_url')
+                        installer_url = asset.get("browser_download_url")
+                    elif asset_name == "manifest.json":
+                        manifest_url = asset.get("browser_download_url")
+                    elif asset_name == "manifest.sig":
+                        signature_url = asset.get("browser_download_url")
 
                 if installer_url and manifest_url and signature_url:
-                    self.logger.info("Assets do instalador, manifesto e assinatura encontrados.")
-                    self.signals.update_found.emit(installer_url, manifest_url, signature_url, latest_version_str)
+                    self.logger.info(
+                        "Assets do instalador, manifesto e assinatura encontrados."
+                    )
+                    self.signals.update_found.emit(
+                        installer_url, manifest_url, signature_url, latest_version_str
+                    )
                 else:
-                    msg = f"Nova versão {latest_version_str} não possui os assets necessários."
-                    details = (f"Instalador encontrado: {bool(installer_url)}. "
-                               f"Manifesto encontrado: {bool(manifest_url)}. "
-                               f"Assinatura encontrada: {bool(signature_url)}.")
+                    msg = (
+                        f"Nova versão {latest_version_str} não "
+                        "possui os assets necessários."
+                    )
+                    details = (
+                        f"Instalador encontrado: {bool(installer_url)}. "
+                        f"Manifesto encontrado: {bool(manifest_url)}. "
+                        f"Assinatura encontrada: {bool(signature_url)}."
+                    )
                     self.logger.error(f"{msg} ({details})")
                     self.signals.error.emit(msg, details)
             else:

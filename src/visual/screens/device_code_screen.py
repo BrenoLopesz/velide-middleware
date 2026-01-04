@@ -6,6 +6,7 @@ from config import config
 from visual.screens.loading_screen import LoadingScreen
 from visual.screens.device_code_display import DeviceCodeDisplay
 
+
 class DeviceCodeScreen(QWidget):
     expired = pyqtSignal()
 
@@ -15,7 +16,11 @@ class DeviceCodeScreen(QWidget):
 
         self.main_layout = QVBoxLayout()
 
-        self.explainer_label = QLabel(f"Configure o seu servidor do <b>{config.target_system.value}</b><br/>para conectar-se com o <b>Velide</b>.")
+        self.explainer_label = QLabel(
+            "Configure o seu servidor do "
+            f"<b>{config.target_system.value}</b><br/>"
+            "para conectar-se com o <b>Velide</b>."
+        )
         self.explainer_label.setFont(self.fonts["regular"])
         self.explainer_label.setAlignment(Qt.AlignCenter)
 
@@ -26,7 +31,9 @@ class DeviceCodeScreen(QWidget):
         self.main_layout.addSpacing(24)
         self.main_layout.addWidget(self.stack, alignment=Qt.AlignHCenter)
 
-        self.device_code_loading = LoadingScreen("Solicitando código de autenticação,<br/>por favor aguarde...")
+        self.device_code_loading = LoadingScreen(
+            "Solicitando código de autenticação,<br/>por favor aguarde..."
+        )
 
         # self.main_layout.setSpacing(4)
         self.stack.addWidget(self.device_code_loading)

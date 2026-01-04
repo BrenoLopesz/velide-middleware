@@ -5,12 +5,13 @@ from typing import List, Set, Callable, Optional, Any
 from models.farmax_models import FarmaxDelivery, DeliveryLog, FarmaxAction
 from models.velide_delivery_models import Order
 
+
 class FarmaxMapper:
     """
     A pure utility class responsible for:
     1. Transforming Farmax domain models into System (Velide) models.
     2. Filtering logic to determine which logs constitute a 'New Delivery'.
-    
+
     This class is stateless and contains no infrastructure or threading logic.
     """
 
@@ -20,38 +21,37 @@ class FarmaxMapper:
     def to_order(delivery: FarmaxDelivery) -> Order:
         """
         Normalizes a FarmaxDelivery object into the generic Order model.
-        
+
         Args:
             delivery (FarmaxDelivery): The raw data from the SQL query.
-            
+
         Returns:
             Order: The normalized order ready for the API or UI.
         """
         # distinct conversion logic allows us to handle edge cases
         # (e.g., formatting phone numbers, cleaning strings) here centrally.
-        
+
         return Order(
             customerName=str(delivery.customer_name).strip(),
-            customerContact=FarmaxMapper._safe_str(getattr(delivery, "customer_contact", None)),
-            
+            customerContact=FarmaxMapper._safe_str(
+                getattr(delivery, "customer_contact", None)
+            ),
             # Address Block
             address=str(delivery.address).strip(),
-            neighbourhood=FarmaxMapper._safe_str(getattr(delivery, "neighborhood", None)),
+            neighbourhood=FarmaxMapper._safe_str(
+                getattr(delivery, "neighborhood", None)
+            ),
             reference=FarmaxMapper._safe_str(getattr(delivery, "reference", None)),
-            
             address2=None,
             ui_status_hint=None,
-            
             # Metadata
             createdAt=delivery.created_at,
             internal_id=str(delivery.sale_id),
-
         )
 
     @staticmethod
     def filter_new_insert_ids(
-        logs: List[DeliveryLog], 
-        is_tracked_check: Callable[[float], bool]
+        logs: List[DeliveryLog], is_tracked_check: Callable[[float], bool]
     ) -> Set[float]:
         """
         Analyzes a batch of logs to find Sales IDs that represent NEW orders
@@ -59,7 +59,7 @@ class FarmaxMapper:
 
         Args:
             logs (List[DeliveryLog]): The batch of logs from the database.
-            is_tracked_check (Callable[[float], bool]): A function (predicate) 
+            is_tracked_check (Callable[[float], bool]): A function (predicate)
                 that returns True if an ID is already known to the system.
 
         Returns:
@@ -69,15 +69,17 @@ class FarmaxMapper:
 
         for log in logs:
             # 1. Validate Action Type
-            # Using getattr defaults to empty string to prevent crashes on malformed objects
-            action = str(getattr(log, 'action', '')).upper()
-            
-            # We only care about INSERTs. Updates (e.g., status changes) are handled elsewhere.
+            # Using getattr defaults to empty string to prevent crashes 
+            # on malformed objects
+            action = str(getattr(log, "action", "")).upper()
+
+            # We only care about INSERTs. Updates (e.g., status changes) 
+            # are handled elsewhere.
             if action != FarmaxAction.INSERT.value:
                 continue
 
             # 2. Validate ID
-            sale_id = getattr(log, 'sale_id', None)
+            sale_id = getattr(log, "sale_id", None)
             if not sale_id:
                 continue
 

@@ -5,16 +5,18 @@ from models.velide_delivery_models import DeliverymanResponse, Order
 from models.velide_websockets_models import ActionType, LatestAction
 from repositories.deliveries_repository import DeliveryRepository
 
+
 class VelideActionHandler(QObject):
     """
-    Interprets raw events from the WebSocket and applies changes to the Application State.
+    Interprets raw events from the WebSocket and 
+    applies changes to the Application State.
     """
-    
+
     # Emits specific, high-level signals that the Presenter/UI cares about
     delivery_deleted = pyqtSignal(Order)
     delivery_in_route = pyqtSignal(Order, DeliverymanResponse)
     delivery_delivered = pyqtSignal(Order)
-    route_started = pyqtSignal(str)    # route_id
+    route_started = pyqtSignal(str)  # route_id
 
     def __init__(self, repository: DeliveryRepository):
         super().__init__()
@@ -36,12 +38,11 @@ class VelideActionHandler(QObject):
             self._handle_route_ended(action)
 
     def _handle_route_started(self, action: LatestAction):
-        if (
-            not action.route 
-            or not action.route.deliveries 
-            or not action.deliveryman
-        ):
-            self.logger.error("Não foi possível gerenciar uma rota iniciada. Dados necessários faltando.")
+        if not action.route or not action.route.deliveries or not action.deliveryman:
+            self.logger.error(
+                "Não foi possível gerenciar uma rota iniciada. " \
+                "Dados necessários faltando."
+            )
             return
 
         # 1. Get all orders
@@ -55,13 +56,13 @@ class VelideActionHandler(QObject):
                 self.delivery_in_route.emit(order, deliveryman)
 
     def _handle_route_ended(self, action: LatestAction):
-        if (
-            not action.route 
-            or not action.route.deliveries 
-        ):
-            self.logger.error("Não foi possível gerenciar uma rota finalizada. Dados necessários faltando.")
+        if not action.route or not action.route.deliveries:
+            self.logger.error(
+                "Não foi possível gerenciar uma rota finalizada. " \
+                "Dados necessários faltando."
+            )
             return
-        
+
         # 1. Get all orders
         order_ids = [delivery.id for delivery in action.route.deliveries]
         orders = [self._repository.get_by_external(order_id) for order_id in order_ids]
@@ -72,23 +73,28 @@ class VelideActionHandler(QObject):
                 self.delivery_delivered.emit(order)
 
     def _handle_deletion(self, action: LatestAction):
-        if (
-            not action.delivery
-            or not action.delivery.id
-        ):
-            self.logger.error("Não foi possível gerenciar uma entrega deletada. Dados necessários faltando.")
+        if not action.delivery or not action.delivery.id:
+            self.logger.error(
+                "Não foi possível gerenciar uma entrega deletada. " \
+                "Dados necessários faltando."
+            )
             return
         # 1. Translate External ID -> Internal ID
         # Assuming the event carries the External ID
         order = self._repository.get_by_external(action.delivery.id)
-        
-        if order:            
+
+        if order:
             # Commented out; Do not remove from repository, if we want
             # to display its status as "CANCELLED".
             # 2. Update State (Repository)
             # self._repository.remove(internal_id)
-            
+
             # 3. Notify UI (Presenter)
             self.delivery_deleted.emit(order)
         else:
-            self.logger.warning(f"Uma entrega foi deletada no Velide, mas não está registrada pela integração: {action.delivery.id}. Nenhuma ação será realizada.")
+            self.logger.warning(
+                "Uma entrega foi deletada no Velide, mas não está "
+                "registrada pela integração: %s. "
+                "Nenhuma ação será realizada.",
+                action.delivery.id
+            )

@@ -4,6 +4,7 @@ from textwrap import dedent
 from sqlalchemy import text, Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
+
 class FarmaxSetup:
     SEQUENCE_NAME = "DELIVERYLOG_ID_AUTOINCREMENT"
     LOG_TABLE_NAME = "DELIVERYLOG"
@@ -14,13 +15,17 @@ class FarmaxSetup:
         self.logger = logging.getLogger(__name__)
         self._engine = engine
 
-    def _check_if_object_exists(self, conn: Connection, object_name: str, rdb_table: str):
+    def _check_if_object_exists(
+        self, conn: Connection, object_name: str, rdb_table: str
+    ):
         """Helper to check Firebird system tables."""
-        field_name = "RDB$GENERATOR_NAME" if rdb_table == "RDB$GENERATORS" else "RDB$RELATION_NAME"
-        
-        query = text(
-            f"SELECT 1 FROM {rdb_table} WHERE {field_name} = :name"
+        field_name = (
+            "RDB$GENERATOR_NAME"
+            if rdb_table == "RDB$GENERATORS"
+            else "RDB$RELATION_NAME"
         )
+
+        query = text(f"SELECT 1 FROM {rdb_table} WHERE {field_name} = :name")
         result = conn.execute(query, {"name": object_name.upper()})
         return result.fetchone() is not None
 
@@ -71,7 +76,9 @@ class FarmaxSetup:
 
     def _setup_delivery_log_trigger(self, conn: Connection):
         """Creates or alters the trigger to log changes to the ENTREGAS table."""
-        self.logger.debug(f"Criando/Alterando trigger: {self.ADD_DELIVERY_TRIGGER_NAME}")
+        self.logger.debug(
+            f"Criando/Alterando trigger: {self.ADD_DELIVERY_TRIGGER_NAME}"
+        )
         query_str = dedent(f"""
             CREATE OR ALTER TRIGGER {self.ADD_DELIVERY_TRIGGER_NAME}
             FOR ENTREGAS
@@ -95,7 +102,7 @@ class FarmaxSetup:
         Add necessary tables, sequences, and triggers to track deliveries.
         This operation is idempotent and safe to run multiple times.
         """
-        
+
         # The 'with' block just gets a connection.
         # Transaction logic must be handled inside.
         try:
@@ -105,12 +112,14 @@ class FarmaxSetup:
                 self._setup_log_table(conn)
                 self._setup_increment_trigger(conn)
                 self._setup_delivery_log_trigger(conn)
-                
+
                 self.logger.info("Setup inicial do Farmax concluído.")
 
         # Use a more specific exception
         except SQLAlchemyError:
-            self.logger.exception("Falha ao realizar setup inicial do database do Farmax.")
+            self.logger.exception(
+                "Falha ao realizar setup inicial do database do Farmax."
+            )
             raise
         except Exception:
             self.logger.exception("Um erro inesperado ocorreu durante o setup.")

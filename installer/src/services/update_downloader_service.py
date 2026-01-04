@@ -3,12 +3,14 @@
 A service class to manage the file download process in a non-blocking way,
 following the MVPS (Model-View-Presenter-Service) pattern.
 """
+
 import logging
 from typing import List, Optional, Tuple
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QThreadPool
 
 from workers.update_downloader_worker import UpdateDownloaderWorker
+
 
 class UpdateDownloaderService(QObject):
     """
@@ -18,6 +20,7 @@ class UpdateDownloaderService(QObject):
     running the download worker in a background thread pool. It exposes
     clean signals for the Presenter layer to consume.
     """
+
     # --- Public signals for the Presenter ---
     # Emitted with (bytes_downloaded, total_bytes) for the installer download
     progress = pyqtSignal(int, int)
@@ -59,16 +62,14 @@ class UpdateDownloaderService(QObject):
             signatures_path (str): The local file path for the signatures file.
         """
         if self.worker is not None:
-            self.logger.warning("Um download já está em andamento. A nova solicitação foi ignorada.")
+            self.logger.warning(
+                "Um download já está em andamento. A nova solicitação foi ignorada."
+            )
             return
 
-        self.logger.info(
-            "Serviço de download inicializado."
-        )
+        self.logger.info("Serviço de download inicializado.")
 
-        self.worker = UpdateDownloaderWorker(
-            files_to_download
-        )
+        self.worker = UpdateDownloaderWorker(files_to_download)
 
         # Connect the worker's internal signals to this service's public signals
         self.worker.signals.progress.connect(self.progress)
@@ -93,10 +94,11 @@ class UpdateDownloaderService(QObject):
         else:
             self.logger.warning("Nenhum download em andamento para cancelar.")
 
-
     def _on_task_finished(self):
         """
         Internal slot to clean up the worker reference after it has finished.
         """
-        self.logger.info("Tarefa de download concluída. Limpando a referência do worker.")
+        self.logger.info(
+            "Tarefa de download concluída. Limpando a referência do worker."
+        )
         self.worker = None

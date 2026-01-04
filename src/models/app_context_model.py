@@ -23,6 +23,7 @@ class Presenters(BaseModel):
     deliverymen_mapping: DeliverymenMappingPresenter
     device_code: DeviceCodePresenter
 
+
 class Services(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     auth: AuthService

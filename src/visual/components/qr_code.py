@@ -4,25 +4,28 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 import qrcode
 
+
 class QRCode(QWidget):
     def __init__(self, url: str, size: int = 128):
         super().__init__()
         self.url = url
         self._size = size
-        
+
         layout = QVBoxLayout()
         # No margins so the QR code fills the widget
-        layout.setContentsMargins(0, 0, 0, 0) 
-        
+        layout.setContentsMargins(0, 0, 0, 0)
+
         # --- Create and configure the label ---
-        self.qr_image_label = QLabel() # Parent is no longer needed here
+        self.qr_image_label = QLabel()  # Parent is no longer needed here
         self.qr_image_label.setAlignment(Qt.AlignCenter)
-        self.qr_image_label.setFixedSize(self._size, self._size) 
-        self.qr_image_label.setStyleSheet("border: 2px solid grey; border-radius: 8px; background-color: #fff")
-        
+        self.qr_image_label.setFixedSize(self._size, self._size)
+        self.qr_image_label.setStyleSheet(
+            "border: 2px solid grey; border-radius: 8px; background-color: #fff"
+        )
+
         # --- Add the label to the layout ---
         layout.addWidget(self.qr_image_label)
-        
+
         # --- Set the layout on this QRCode widget ---
         self.setLayout(layout)
         self.build()
@@ -62,7 +65,7 @@ class QRCode(QWidget):
         # Save the image to an in-memory byte buffer
         buffer = io.BytesIO()
         img.save(buffer, "PNG")
-        
+
         # Create a QPixmap and load the image data from the buffer
         qt_pixmap = QPixmap()
         qt_pixmap.loadFromData(buffer.getvalue(), "PNG")
@@ -70,8 +73,6 @@ class QRCode(QWidget):
         # --- 3. Display the QPixmap in the QLabel ---
         # Scale the pixmap to fit the label while keeping aspect ratio
         scaled_pixmap = qt_pixmap.scaled(
-            self.qr_image_label.size(),
-            Qt.KeepAspectRatio, 
-            Qt.SmoothTransformation
+            self.qr_image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
         self.qr_image_label.setPixmap(scaled_pixmap)

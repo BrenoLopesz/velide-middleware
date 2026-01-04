@@ -4,19 +4,24 @@ from typing import Optional
 from PyQt5.QtCore import QObject, pyqtSignal
 from models.velide_delivery_models import Order
 
-# This new class inherits the "blueprints" from both QObject's metaclass and ABC's metaclass.
-class QABCMeta(type(QObject), ABCMeta): # type: ignore[misc]
+
+# This new class inherits the "blueprints" from 
+# both QObject's metaclass and ABC's metaclass.
+class QABCMeta(type(QObject), ABCMeta):  # type: ignore[misc]
     pass
 
-class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta): # type: ignore[misc]
+
+class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):  # type: ignore[misc]
     """
     The interface (contract) for any delivery source.
-    Its job is to listen for source-specific data and normalize it into a common Order model.
+    Its job is to listen for source-specific data and 
+    normalize it into a common Order model.
     """
+
     # This signal emits the FINAL, NORMALIZED order model
     order_normalized = pyqtSignal(Order)
-    order_restored = pyqtSignal(Order, object) # Order and external ID (optional)
-    order_cancelled = pyqtSignal(str, object) # Internal ID, (optional) external ID
+    order_restored = pyqtSignal(Order, object)  # Order and external ID (optional)
+    order_cancelled = pyqtSignal(str, object)  # Internal ID, (optional) external ID
     # normalization_failed = pyqtSignal(dict, str) # raw_data, error_message
 
     @abstractmethod
@@ -41,22 +46,29 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta): # type: ignore[mis
 
     @abstractmethod
     def on_delivery_added(self, internal_id: str, external_id: str):
-        """Optional callback function to receive deliveries added notifications."""
+        """Optional callback function to receive deliveries 
+        added notifications."""
         pass
 
     @abstractmethod
     def on_delivery_failed(self, internal_id: Optional[float]):
-        """Optional callback function to receive deliveries added notifications."""
+        """Optional callback function to receive deliveries 
+        added notifications."""
         pass
 
     def on_delivery_deleted_on_velide(self, order: Order):
-        """Optional callback function called when a deleted deliver is detected through Websockets."""
+        """Optional callback function called when a deleted 
+        deliver is detected through Websockets."""
         pass
 
-    def on_delivery_route_started_on_velide(self, order: Order, deliveryman_external_id: str):
-        """Optional callback function called when delivery route start is detected through Websockets."""
+    def on_delivery_route_started_on_velide(
+        self, order: Order, deliveryman_external_id: str
+    ):
+        """Optional callback function called when delivery 
+        route start is detected through Websockets."""
         pass
 
     def on_delivery_route_ended_on_velide(self, order: Order):
-        """Optional callback function called when a delivery route end is detected through Websockets."""
+        """Optional callback function called when a 
+        delivery route end is detected through Websockets."""
         pass

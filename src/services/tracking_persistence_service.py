@@ -8,18 +8,19 @@ from services.sqlite_service import SQLiteService
 
 RawID = Union[str, float, int]
 
+
 class TrackingPersistenceService(QObject):
     """
     Manages the state of tracked deliveries using a Cache-Aside pattern.
-    
-    It maintains an in-memory cache for instant lookups (required by the 
-    polling strategy) while asynchronously persisting changes to SQLite 
+
+    It maintains an in-memory cache for instant lookups (required by the
+    polling strategy) while asynchronously persisting changes to SQLite
     via the SQLiteService.
-    
+
     CRITICAL: This service normalizes all ERP IDs.
     Input: 12345.0 (Float) -> Stored/Cached: "12345" (String).
     """
-    
+
     # Emitted when the initial data load from SQLite is complete.
     hydrated = pyqtSignal()
 
@@ -27,12 +28,13 @@ class TrackingPersistenceService(QObject):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self._sqlite = sqlite_service
-        
+
         # --- In-Memory Cache ---
-        
-        # Maps Normalized Internal ID ("623604") -> External ID (Velide UUID) (ACTIVE ONLY)
+
+        # Maps Normalized Internal ID ("623604") -> 
+        # External ID (Velide UUID) (ACTIVE ONLY)
         self._status_cache: Dict[str, DeliveryStatus] = {}
-        
+
         # Set of Normalized Internal IDs that are finished/cancelled
         # Acts as a "Do Not Ingest" blocklist.
         self._archived_ids: Set[str] = set()
@@ -55,7 +57,7 @@ class TrackingPersistenceService(QObject):
         """
         Standardizes the ID format to avoid mismatched cache keys.
         Logic: Float(10.0) -> Int(10) -> Str("10").
-        
+
         Handles:
           - 623604.0 (float) -> "623604"
           - "623604.0" (str) -> "623604"
@@ -81,10 +83,10 @@ class TrackingPersistenceService(QObject):
             norm_id = self._normalize_id(internal_id)
 
             is_terminal = (
-                status == DeliveryStatus.CANCELLED or 
-                status == DeliveryStatus.DELIVERED or
-                status == DeliveryStatus.FAILED or 
-                status == DeliveryStatus.MISSING
+                status == DeliveryStatus.CANCELLED
+                or status == DeliveryStatus.DELIVERED
+                or status == DeliveryStatus.FAILED
+                or status == DeliveryStatus.MISSING
             )
 
             if not is_terminal:
@@ -99,8 +101,10 @@ class TrackingPersistenceService(QObject):
                 # (Optional, depending on if you need to delete archived items)
                 self._id_map[norm_id] = external_id
                 # count_archived += 1
-            
-        self.logger.info(f"Entregas recuperadas. {count_active} entregas carregadas na memória.")
+
+        self.logger.info(
+            f"Entregas recuperadas. {count_active} entregas carregadas na memória."
+        )
         self.hydrated.emit()
 
     # --- Public API for Strategy ---
@@ -110,7 +114,7 @@ class TrackingPersistenceService(QObject):
         Optimistically reserves an Internal ID in memory.
         """
         norm_id = self._normalize_id(internal_id)
-        
+
         if norm_id in self._status_cache:
             self.logger.debug(f"ID {norm_id} já está sendo processado ou rastreado.")
             return False
@@ -119,13 +123,13 @@ class TrackingPersistenceService(QObject):
         self._status_cache[norm_id] = DeliveryStatus.PENDING
         self.logger.debug(f"ID {norm_id} reservado em memória (In-Flight).")
         return True
-    
+
     def release_reservation(self, internal_id: RawID):
         """
-        Releases the reservation if the API call fails. 
+        Releases the reservation if the API call fails.
         """
         norm_id = self._normalize_id(internal_id)
-        
+
         # Only delete if it exists AND we haven't mapped it to an external ID yet
         # (meaning it failed before we could save it to DB)
         if norm_id in self._status_cache and norm_id not in self._id_map:
@@ -146,11 +150,11 @@ class TrackingPersistenceService(QObject):
         """
         norm_id = self._normalize_id(internal_id)
         return self._status_cache.get(norm_id)
-    
+
     def get_active_cache_snapshot(self) -> List[Tuple[str, str, DeliveryStatus]]:
         """
         Returns a snapshot of the current in-memory active cache.
-        
+
         Returns:
             List of (internal_id, external_id, status)
         """
@@ -167,62 +171,79 @@ class TrackingPersistenceService(QObject):
         """
         return [float(k) for k in self._status_cache.keys()]
 
-    def register_new_delivery(self, internal_id: RawID, external_id: str, status: DeliveryStatus):
+    def register_new_delivery(
+        self, internal_id: RawID, external_id: str, status: DeliveryStatus
+    ):
         """
         Promotes a 'Reserved' ID to a fully 'Persisted' ID.
         """
         norm_id = self._normalize_id(internal_id)
-        
+
         # RACE CONDITION FIX:
         # Check normalized ID in cache
         current_cached_status = self._status_cache.get(norm_id)
-        
-        # If cache has moved past PENDING (e.g., via a poll that happened fast), trust cache.
+
+        # If cache has moved past PENDING 
+        # (e.g., via a poll that happened fast), trust cache.
         final_status = status
         if current_cached_status and current_cached_status != DeliveryStatus.PENDING:
             final_status = current_cached_status
-            self.logger.debug(f"ID {norm_id}: Salvando com status atualizado '{final_status.name}' em vez do inicial.")
+            self.logger.debug(
+                f"ID {norm_id}: Salvando com status atualizado "
+                f"'{final_status.name}' em vez do inicial."
+            )
 
         # 1. Update Memory
         self._status_cache[norm_id] = final_status
         self._id_map[norm_id] = external_id
-        
+
         # TODO: Check if this was succesful. Rollback everything if not.
         # 2. Async Persist to SQLite (Sending the CLEAN STRING ID)
         self._sqlite.request_add_delivery_mapping(
-            external_id=external_id,
-            internal_id=norm_id,
-            status=final_status
+            external_id=external_id, internal_id=norm_id, status=final_status
         )
 
     # Update the method signature to accept deliveryman_id
-    def update_status(self, internal_id: RawID, new_status: DeliveryStatus, deliveryman_id: Optional[str] = None):
+    def update_status(
+        self,
+        internal_id: RawID,
+        new_status: DeliveryStatus,
+        deliveryman_id: Optional[str] = None,
+    ):
         """
         Updates an existing delivery status.
         """
         norm_id = self._normalize_id(internal_id)
-        
+
         if norm_id not in self._status_cache:
-            self.logger.warning(f"Tentativa de atualizar status de ID não rastreado: {norm_id}")
+            self.logger.warning(
+                f"Tentativa de atualizar status de ID não rastreado: {norm_id}"
+            )
             return
 
         # 1. Memory
         self._status_cache[norm_id] = new_status
-        
+
         # 2. Async Persist
         ext_id = self._id_map.get(norm_id)
         if ext_id:
             if deliveryman_id:
-                self.logger.info(f"Atualizando ID {norm_id}: Status={new_status.name}, EntregadorID={deliveryman_id}")
-                
+                self.logger.info(
+                    f"Atualizando ID {norm_id}: "
+                    f"Status={new_status.name}, "
+                    f"EntregadorID={deliveryman_id}"
+                )
+
             self._sqlite.request_update_delivery_status(
-                external_id=ext_id, 
-                new_status=new_status, 
-                deliveryman_id=deliveryman_id
+                external_id=ext_id, new_status=new_status, deliveryman_id=deliveryman_id
             )
-            
+
         else:
-            self.logger.error(f"Erro de integridade: ID Interno {norm_id} existe no cache mas sem ID Externo.")
+            self.logger.error(
+                "Erro de integridade: ID Interno %s "
+                "existe no cache mas sem ID Externo.",
+                norm_id
+            )
 
     def get_external_id(self, internal_id: RawID) -> Optional[str]:
         """
@@ -236,20 +257,20 @@ class TrackingPersistenceService(QObject):
         Moves an ID from Active Cache to Archive.
         """
         norm_id = self._normalize_id(internal_id)
-        
+
         if norm_id in self._status_cache:
             # Remove from Active
             del self._status_cache[norm_id]
             # Add to Archive (so Ingestor doesn't pick it up again)
             self._archived_ids.add(norm_id)
-            
+
             self.logger.debug(f"ID {norm_id} movido para arquivo (Stop Tracking).")
 
     # --- Extensions for FarmaxStatusTracker Compatibility ---
 
     def get_active_monitored_ids(self) -> List[float]:
         """
-        Returns IDs that need status checking. 
+        Returns IDs that need status checking.
         In this implementation, everything in the cache is considered 'active'.
         """
         return self.get_tracked_ids()

@@ -6,6 +6,7 @@ This module adapts the logic from the manifest verification CLI script to run
 asynchronously in a PyQt application, preventing the GUI from freezing during
 I/O-intensive operations and providing progress feedback.
 """
+
 import logging
 import os
 import json
@@ -21,10 +22,12 @@ from cryptography.exceptions import InvalidSignature
 
 from utils.cryptography import get_file_hash, load_public_key
 
+
 class SignatureVerifierSignals(QObject):
     """
     Defines the signals available for the signature verification worker.
     """
+
     # Signal emitted when verification starts
     started = pyqtSignal()
 
@@ -44,6 +47,7 @@ class SignatureVerifierWorker(QRunnable):
     Worker thread for verifying all files in a directory against a signed manifest
     without blocking the GUI.
     """
+
     PROGRESS_THROTTLE_INTERVAL = 0.1  # seconds
 
     def __init__(self, directory: str, manifest_path: str, public_key_path: str):
@@ -70,15 +74,21 @@ class SignatureVerifierWorker(QRunnable):
             self.logger.info(f"Carregando chave pública de {self.public_key_path}...")
             public_key = load_public_key(self.public_key_path)
             if not public_key:
-                raise FileNotFoundError(f"Não foi possível carregar a chave pública de {self.public_key_path}")
+                raise FileNotFoundError(
+                    f"Não foi possível carregar a chave "
+                    f"pública de {self.public_key_path}"
+                )
 
             # Step 2: Verify the manifest file itself (CRITICAL STEP)
-            signature_path = self.manifest_path.rsplit('.', 1)[0] + ".sig"
-            self.logger.info(f"Verificando a assinatura do manifesto '{os.path.basename(self.manifest_path)}'...")
+            signature_path = self.manifest_path.rsplit(".", 1)[0] + ".sig"
+            self.logger.info(
+                f"Verificando a assinatura do manifesto "
+                f"'{os.path.basename(self.manifest_path)}'..."
+            )
 
             with open(self.manifest_path, "rb") as f:
                 manifest_bytes = f.read()
-            with open(signature_path, 'r') as f:
+            with open(signature_path, "r") as f:
                 signature = base64.b64decode(f.read())
 
             manifest_hash = hashlib.sha256(manifest_bytes).digest()
@@ -88,28 +98,35 @@ class SignatureVerifierWorker(QRunnable):
                 manifest_hash,
                 padding.PSS(
                     mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
+                    salt_length=padding.PSS.MAX_LENGTH,
                 ),
-                hashes.SHA256()
+                hashes.SHA256(),
             )
-            self.logger.info("Assinatura do manifesto é válida. O manifesto é confiável.")
+            self.logger.info(
+                "Assinatura do manifesto é válida. O manifesto é confiável."
+            )
 
             # Step 3: Load trusted data from the verified manifest
             manifest_data = json.loads(manifest_bytes)
-            manifest_hashes = {item['hash'] for item in manifest_data.get('files', [])}
-            
+            manifest_hashes = {item["hash"] for item in manifest_data.get("files", [])}
+
             inconsistencies = []
 
             # Step 4: Scan local directory and verify files against manifest hashes
-            self.logger.info("Verificando arquivos locais com base no manifesto confiável...")
-            
+            self.logger.info(
+                "Verificando arquivos locais com base no manifesto confiável..."
+            )
+
             local_files_to_check = []
-            ignore_files = {os.path.basename(self.manifest_path), os.path.basename(signature_path)}
+            ignore_files = {
+                os.path.basename(self.manifest_path),
+                os.path.basename(signature_path),
+            }
             for root, _, files in os.walk(self.directory):
                 for name in files:
                     if name not in ignore_files:
                         local_files_to_check.append(os.path.join(root, name))
-            
+
             total_files = len(local_files_to_check)
             for i, file_path in enumerate(local_files_to_check):
                 if self.is_cancelled:
@@ -118,17 +135,24 @@ class SignatureVerifierWorker(QRunnable):
                 # Throttle progress signal
                 current_time = time.time()
                 if current_time - last_progress_time > self.PROGRESS_THROTTLE_INTERVAL:
-                    self.signals.progress.emit(os.path.basename(file_path), i + 1, total_files)
+                    self.signals.progress.emit(
+                        os.path.basename(file_path), i + 1, total_files
+                    )
                     last_progress_time = current_time
 
                 try:
                     current_hash = get_file_hash(file_path)
                     if current_hash not in manifest_hashes:
                         relative_path = os.path.relpath(file_path, self.directory)
-                        inconsistencies.append(f"'{relative_path}': NÃO CONFIÁVEL (Arquivo não listado no manifesto)")
+                        inconsistencies.append(
+                            f"'{relative_path}': NÃO CONFIÁVEL "
+                            "(Arquivo não listado no manifesto)"
+                        )
                 except Exception as e:
                     relative_path = os.path.relpath(file_path, self.directory)
-                    inconsistencies.append(f"'{relative_path}': FALHA (Erro ao processar: {e})")
+                    inconsistencies.append(
+                        f"'{relative_path}': FALHA (Erro ao processar: {e})"
+                    )
 
             self.logger.info("Processo de verificação concluído.")
             self.signals.finished.emit(inconsistencies)
@@ -142,7 +166,10 @@ class SignatureVerifierWorker(QRunnable):
             self.logger.error(msg, exc_info=True)
             self.signals.error.emit(msg, traceback.format_exc())
         except json.JSONDecodeError:
-            msg = f"Erro ao decodificar JSON do manifesto '{os.path.basename(self.manifest_path)}'."
+            msg = (
+                "Erro ao decodificar JSON do manifesto "
+                f"'{os.path.basename(self.manifest_path)}'."
+            )
             self.logger.error(msg, exc_info=True)
             self.signals.error.emit(msg, traceback.format_exc())
         except Exception:

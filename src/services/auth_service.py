@@ -5,6 +5,7 @@ from workers.authorization_flow_worker import AuthorizationFlowWorker
 from workers.stored_token_retriever_worker import StoredTokenRetrieverWorker
 from workers.refresh_token_worker import RefreshTokenWorker
 
+
 class AuthService(QObject):
     loading = pyqtSignal()
     device_code = pyqtSignal(dict)
@@ -36,7 +37,7 @@ class AuthService(QObject):
         worker.signals.expired.connect(self._refresh_token)
         worker.signals.token.connect(self.access_token)
         self._thread_pool.start(worker)
-    
+
     def _refresh_token(self, refresh_token):
         """Creates and connects the token retriever worker."""
         worker = RefreshTokenWorker(refresh_token, self._auth_config)

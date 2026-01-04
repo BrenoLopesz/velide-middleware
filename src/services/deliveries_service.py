@@ -10,24 +10,25 @@ from services.deliveries_dispatcher import DeliveryDispatcher
 from services.strategies.connectable_strategy import IConnectableStrategy
 from models.velide_delivery_models import Order
 
+
 class DeliveriesService(QObject):
     delivery_acknowledged = pyqtSignal(str, Order)
     delivery_update = pyqtSignal(str, DeliveryRowStatus)
-    delivery_failed = pyqtSignal(str, str) # Order ID, error message
+    delivery_failed = pyqtSignal(str, str)  # Order ID, error message
 
     def __init__(
-            self, 
-            api_config: ApiConfig, 
-            target_system: TargetSystem, 
-            delivery_repository: DeliveryRepository
-        ):
+        self,
+        api_config: ApiConfig,
+        target_system: TargetSystem,
+        delivery_repository: DeliveryRepository,
+    ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
-        
+
         # 1. DEPENDENCY INJECTION / COMPOSITION
         self._repository = delivery_repository
         self._dispatcher = DeliveryDispatcher(QThreadPool.globalInstance())
-        
+
         # 2. CONFIGURATION
         self._api_config = api_config
         self._target_system = target_system
@@ -56,10 +57,10 @@ class DeliveriesService(QObject):
     def set_strategy(self, strategy: IConnectableStrategy):
         """Sets the active delivery source strategy."""
         if self._active_strategy:
-            self._active_strategy.stop_listening() # Stop the old one
+            self._active_strategy.stop_listening()  # Stop the old one
 
         self._active_strategy = strategy
-        
+
         # Connect Strategy Signals
         self._active_strategy.order_normalized.connect(self._on_order_normalized)
         self._active_strategy.order_cancelled.connect(self._on_internal_order_cancelled)
@@ -67,8 +68,10 @@ class DeliveriesService(QObject):
 
     def start_listening(self):
         if self._active_strategy is None:
-            self.logger.critical("Nenhum sistema conectado! Entregas não serão processadas.")
-            return 
+            self.logger.critical(
+                "Nenhum sistema conectado! Entregas não serão processadas."
+            )
+            return
         self._active_strategy.start_listening()
 
     # =========================================================================
@@ -84,21 +87,23 @@ class DeliveriesService(QObject):
         self._sanitize_order_id(restored_order)
 
         internal_id = restored_order.internal_id
-        
+
         # 1. Update Repository
         self._repository.add(restored_order)
         # If the restored order has an external ID, ensure we link it immediately
         if external_id is not None:
             self._repository.link_ids(internal_id, external_id)
-        
+
         # 2. Acknowledge to UI
         self.delivery_acknowledged.emit(internal_id, restored_order)
-        
+
         # Use actual status
-        order_status = getattr(restored_order, "ui_status_hint", DeliveryRowStatus.ADDED)
+        order_status = getattr(
+            restored_order, "ui_status_hint", DeliveryRowStatus.ADDED
+        )
 
         self.delivery_update.emit(internal_id, order_status)
-        
+
         self.logger.debug(f"Pedido {internal_id} restaurado na interface visual.")
 
     def _on_order_normalized(self, normalized_order: Order):
@@ -110,7 +115,7 @@ class DeliveriesService(QObject):
         self._sanitize_order_id(normalized_order)
 
         internal_id = normalized_order.internal_id
-        
+
         # 1. Update Repository
         self._repository.add(normalized_order)
 
@@ -118,8 +123,13 @@ class DeliveriesService(QObject):
         self.delivery_acknowledged.emit(internal_id, normalized_order)
 
         if self._velide_api is None:
-            self.logger.error("Não é possível enviar entrega antes de efetuar autenticação! Aguardando...")
-            self.delivery_update.emit(internal_id, DeliveryRowStatus.ERROR) # May create a custom status later
+            self.logger.error(
+                "Não é possível enviar entrega antes de " \
+                "efetuar autenticação! Aguardando..."
+            )
+            self.delivery_update.emit(
+                internal_id, DeliveryRowStatus.ERROR
+            )  # May create a custom status later
             return
 
         # 3. Send to API (Replaces old _send_delivery_to_api)
@@ -127,22 +137,32 @@ class DeliveriesService(QObject):
             self._dispatcher.queue_add(internal_id, normalized_order)
             self.delivery_update.emit(internal_id, DeliveryRowStatus.SENDING)
         except Exception:
-            self.logger.exception(f"Falha inesperada ao adicionar pedido {internal_id} à fila.")
+            self.logger.exception(
+                f"Falha inesperada ao adicionar pedido {internal_id} à fila."
+            )
             self.delivery_update.emit(internal_id, DeliveryRowStatus.ERROR)
 
-    def _on_internal_order_cancelled(self, internal_id: str, external_id: Optional[str]):
+    def _on_internal_order_cancelled(
+        self, internal_id: str, external_id: Optional[str]
+    ):
         """
         Handles cancellation requests.
         Logic: Check Queue (Optimization) -> OR -> Send Delete Task.
         """
-        self.logger.debug(f"Solicitação de cancelamento recebida. Interno: {internal_id}, Externo: {external_id}")
+        self.logger.debug(
+            "Solicitação de cancelamento recebida. "
+            f"Interno: {internal_id}, Externo: {external_id}"
+        )
 
         # 1. OPTIMIZATION: Check if it's pending in the Dispatcher
         # We delegate the queue check to the Dispatcher.
         was_pending = self._dispatcher.cancel_pending_add(internal_id)
 
         if was_pending:
-            self.logger.info(f"Pedido {internal_id} removido da fila de envio antes do processamento.")
+            self.logger.info(
+                f"Pedido {internal_id} removido da fila "
+                "de envio antes do processamento."
+            )
             self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
             # We won't care about this order anymore. We can cleanup from memory.
             self._repository.remove(internal_id)
@@ -154,7 +174,10 @@ class DeliveriesService(QObject):
             self._dispatcher.queue_delete(internal_id, external_id)
             self.delivery_update.emit(internal_id, DeliveryRowStatus.DELETING)
         else:
-            self.logger.warning(f"Pedido {internal_id} cancelado localmente (nenhum ID externo encontrado).")
+            self.logger.warning(
+                f"Pedido {internal_id} cancelado localmente "
+                "(nenhum ID externo encontrado)."
+            )
             self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
             self._repository.remove(internal_id)
 
@@ -162,10 +185,15 @@ class DeliveriesService(QObject):
     # RECONCILIATION CALLBACKS
     # =========================================================================
 
-    def on_reconciliation_detects_route_start(self, internal_id: str, deliveryman_external_id: str):
+    def on_reconciliation_detects_route_start(
+        self, internal_id: str, deliveryman_external_id: str
+    ):
         order = self.get_order(internal_id)
         if not order:
-            self.logger.warning("Uma rota foi iniciada no Velide, mas não está sendo gerenciada pela integração.")
+            self.logger.warning(
+                "Uma rota foi iniciada no Velide, mas não " \
+                "está sendo gerenciada pela integração."
+            )
             return
 
         self.on_delivery_route_started_in_velide(order, deliveryman_external_id)
@@ -179,26 +207,24 @@ class DeliveriesService(QObject):
 
     def _on_add_delivery_request_success(self, internal_id: str, external_id: str):
         """Called when Dispatcher successfully POSTs to Velide."""
-        
+
         # 1. Link IDs in Repository (Crucial for Websockets!)
         self._repository.link_ids(internal_id, external_id)
-        
+
         # 2. Notify Strategy (Persistence handshake)
-        if self._active_strategy and hasattr(self._active_strategy, 'on_delivery_added'):
+        if self._active_strategy and hasattr(
+            self._active_strategy, "on_delivery_added"
+        ):
             self._active_strategy.on_delivery_added(internal_id, external_id)
-        
+
         # 3. Update UI
         self.delivery_update.emit(internal_id, DeliveryRowStatus.ADDED)
-        
-        # 4. Cleanup Memory? 
-        # CAREFUL: In your original code you popped it: self._active_deliveries.pop(order_id)
-        # But if you remove it, WebSocket updates won't work!
-        # Recommendation: Keep it in memory, or move it to a "Completed" list if needed.
-        # self._repository.remove(internal_id) <--- REMOVED this compared to original to allow WS updates
 
     def _on_deletion_request_success(self, internal_id: str, external_id: str):
         """Called when Dispatcher successfully DELETEs from Velide."""
-        self.logger.info(f"Entrega {internal_id} ({external_id}) cancelada no Velide com sucesso.")
+        self.logger.info(
+            f"Entrega {internal_id} ({external_id}) cancelada no Velide com sucesso."
+        )
         self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
         self._repository.remove(internal_id)
 
@@ -207,36 +233,49 @@ class DeliveriesService(QObject):
         # TODO: Retry adding delivery to Velide (?)
         self.delivery_failed.emit(internal_id, error_msg)
         self.delivery_update.emit(internal_id, DeliveryRowStatus.ERROR)
-        # Original code removed it on failure. Depending on retry logic, you might want to keep it.
+        # Original code removed it on failure. Depending on 
+        # retry logic, you might want to keep it.
         # self._repository.remove(internal_id)
 
     def on_delivery_deleted_in_velide(self, order: Order):
         self.logger.debug("Solicitando strategy para lidar com a entrega deletada.")
         if not self._active_strategy:
             # Likely impossible to happen, but handle it anyways
-            self.logger.critical("Não há nenhum software conectado! Impossível lidar com entrega deletada.")
+            self.logger.critical(
+                "Não há nenhum software conectado! " \
+                "Impossível lidar com entrega deletada."
+            )
             return
 
         self._active_strategy.on_delivery_deleted_on_velide(order)
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.CANCELLED)
 
-    def on_delivery_route_started_in_velide(self, order: Order, deliveryman_external_id: str):
+    def on_delivery_route_started_in_velide(
+        self, order: Order, deliveryman_external_id: str
+    ):
         self.logger.debug("Solicitando strategy para lidar com a entrega em rota.")
         if not self._active_strategy:
             # Likely impossible to happen, but handle it anyways
-            self.logger.critical("Não há nenhum software conectado! Impossível lidar com rota iniciada.")
+            self.logger.critical(
+                "Não há nenhum software conectado! Impossível lidar com rota iniciada."
+            )
             return
 
-        self._active_strategy.on_delivery_route_started_on_velide(order, deliveryman_external_id)
+        self._active_strategy.on_delivery_route_started_on_velide(
+            order, deliveryman_external_id
+        )
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.IN_PROGRESS)
-    
+
     def on_delivery_route_ended_in_velide(self, order: Order):
         self.logger.debug("Solicitando strategy para lidar com o pedido entregue.")
         if not self._active_strategy:
             # Likely impossible to happen, but handle it anyways
-            self.logger.critical("Não há nenhum software conectado! Impossível lidar com rota finalizada.")
+            self.logger.critical(
+                "Não há nenhum software conectado! " \
+                "Impossível lidar com rota finalizada."
+            )
             return
-        
+
         self._active_strategy.on_delivery_route_ended_on_velide(order)
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.DELIVERED)
 

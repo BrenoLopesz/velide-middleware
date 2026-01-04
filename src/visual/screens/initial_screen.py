@@ -3,6 +3,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from visual.fonts import get_fonts
 from config import config
 
+
 class InitialScreen(QWidget):
     on_request_device_flow_start = pyqtSignal()
 
@@ -11,15 +12,21 @@ class InitialScreen(QWidget):
         fonts = get_fonts()
         main_layout = QVBoxLayout()
 
-        self.button = QPushButton('Conectar com Velide')
+        self.button = QPushButton("Conectar com Velide")
         self.button.setFont(fonts["bold"])
         self.button.clicked.connect(self.on_button_press)
 
-        self.explainer_label = QLabel(f"Configure o seu servidor do <b>{config.target_system.value}</b><br/>para conectar-se com o <b>Velide</b>.")
+        self.explainer_label = QLabel(
+            "Configure o seu servidor do "
+            f"<b>{config.target_system.value}</b><br/>"
+            "para conectar-se com o <b>Velide</b>."
+        )
         self.explainer_label.setFont(fonts["regular"])
         self.explainer_label.setAlignment(Qt.AlignCenter)
 
-        self.cta_label = QLabel("<br>Primeiro, conecte esse dispositivo<br/>com sua conta Velide.<b/>")
+        self.cta_label = QLabel(
+            "<br>Primeiro, conecte esse dispositivo<br/>com sua conta Velide.<b/>"
+        )
         self.cta_label.setFont(fonts["bold"])
         self.cta_label.setAlignment(Qt.AlignCenter)
 

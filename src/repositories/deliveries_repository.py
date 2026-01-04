@@ -1,6 +1,7 @@
 from typing import Dict, Optional
 from models.velide_delivery_models import Order
 
+
 class DeliveryRepository:
     def __init__(self) -> None:
         # Primary storage: Internal ID -> Order
@@ -24,9 +25,12 @@ class DeliveryRepository:
         order = self._orders.pop(internal_id, None)
         # Clean up the reverse index if it exists
         if order:
-            # We need to find the key for this value or store external_id on the order object
+            # We need to find the key for this value 
+            # or store external_id on the order object
             # Assuming Order has an 'external_id' attribute or we search:
-            keys_to_remove = [k for k, v in self._external_to_internal.items() if v == internal_id]
+            keys_to_remove = [
+                k for k, v in self._external_to_internal.items() if v == internal_id
+            ]
             for k in keys_to_remove:
                 del self._external_to_internal[k]
 

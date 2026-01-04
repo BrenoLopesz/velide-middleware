@@ -5,6 +5,7 @@ import yaml
 
 from models.config import InstallerConfig
 
+
 class ConfigLoadService(QObject):
     config_found = pyqtSignal(InstallerConfig)
     error = pyqtSignal(str)
@@ -15,7 +16,7 @@ class ConfigLoadService(QObject):
         self._path = path
 
     def load_config(self):
-        try: 
+        try:
             config = InstallerConfig.from_yaml(self._path)
             self.config_found.emit(config)
         except (FileNotFoundError, TypeError) as e:
@@ -32,6 +33,9 @@ class ConfigLoadService(QObject):
             self.logger.exception(msg)
             self.emit.emit(msg)
         except Exception:
-            msg = "Ocorreu um erro inesperado durante a leitura do arquivo de configuração."
+            msg = (
+                "Ocorreu um erro inesperado durante a "
+                "leitura do arquivo de configuração."
+            )
             self.logger.exception(msg)
             self.emit.emit(msg)

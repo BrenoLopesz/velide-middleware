@@ -9,6 +9,7 @@ from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
 
 from workers.installer_runnable_worker import InstallerRunnableWorker
 
+
 class InstallerService(QObject):
     """
     Service to manage running the Inno Setup installer in the background.
@@ -17,6 +18,7 @@ class InstallerService(QObject):
     handles the creation of the runnable and its execution in the global
     QThreadPool.
     """
+
     # Define signals that the service will emit to the UI
     finished = pyqtSignal()
     error = pyqtSignal(str)

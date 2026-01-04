@@ -3,11 +3,13 @@ import logging
 from typing import Optional, List, Tuple
 from enum import Enum
 
+
 class DeliveryStatus(Enum):
     """
     Defines the possible statuses for a delivery.
     The string value is what is stored in the database.
     """
+
     PENDING = "PENDENTE"
     SENDING = "ENVIANDO"
     ADDED = "ADICIONADO"
@@ -16,6 +18,7 @@ class DeliveryStatus(Enum):
     DELIVERED = "ENTREGUE"
     FAILED = "FALHA"
     CANCELLED = "CANCELADA"
+
 
 class SQLiteManager:
     """
@@ -29,12 +32,14 @@ class SQLiteManager:
         velide_id TEXT PRIMARY KEY NOT NULL,
         local_id  TEXT UNIQUE NOT NULL
     )
-    
+
     Table 2 Schema:
     DeliveryMapping (
         external_delivery_id TEXT PRIMARY KEY NOT NULL,
         internal_delivery_id TEXT UNIQUE NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('PENDENTE', 'EM_ANDAMENTO', 'ENTREGUE', 'FALHA', 'CANCELADA'))
+        status TEXT NOT NULL CHECK(
+        status IN ('PENDENTE', 'EM_ANDAMENTO', 'ENTREGUE', 'FALHA', 'CANCELADA')
+        )
     )
     """
 
@@ -47,16 +52,18 @@ class SQLiteManager:
         """
         if db_path is None:
             # This check is good, although the type hint `str` implies non-None.
-            raise ValueError("É necessário informar o caminho para o banco de dados SQLite.")
+            raise ValueError(
+                "É necessário informar o caminho para o banco de dados SQLite."
+            )
 
         self.logger = logging.getLogger(__name__)
         self.db_path = db_path
         self.conn: Optional[sqlite3.Connection] = None
 
-    def __enter__(self) -> 'SQLiteManager':
+    def __enter__(self) -> "SQLiteManager":
         """
         Opens the database connection and creates the tables if they don't exist.
-        
+
         This method is called when entering a 'with' statement.
 
         Returns:
@@ -67,18 +74,20 @@ class SQLiteManager:
             # Enable WAL Mode
             # This allows concurrent readers and writers.
             self.conn.execute("PRAGMA journal_mode = WAL;")
-            
+
             # Optimize Synchronization
             # 'NORMAL' is safe for WAL and much faster than default 'FULL'.
             self.conn.execute("PRAGMA synchronous = NORMAL;")
-            
+
             # Foreign Keys
             self.conn.execute("PRAGMA foreign_keys = ON;")
-            
+
             self._create_tables()
             return self
         except sqlite3.Error:
-            self.logger.exception(f"Erro ao conectar ao banco de dados em {self.db_path}.")
+            self.logger.exception(
+                f"Erro ao conectar ao banco de dados em {self.db_path}."
+            )
             raise
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -87,7 +96,7 @@ class SQLiteManager:
 
         - If no exception occurred (exc_type is None), changes are committed.
         - If an exception occurred, changes are rolled back.
-        
+
         This method is called when exiting a 'with' statement.
         """
         if self.conn:
@@ -95,7 +104,9 @@ class SQLiteManager:
                 if exc_type is None:
                     self.conn.commit()
                 else:
-                    self.logger.warning(f"Desfazendo mudanças devido ao erro: {exc_val}")
+                    self.logger.warning(
+                        f"Desfazendo mudanças devido ao erro: {exc_val}"
+                    )
                     self.conn.rollback()
             except sqlite3.Error:
                 self.logger.exception("Erro durante saída.")
@@ -106,10 +117,10 @@ class SQLiteManager:
     def _get_conn(self) -> sqlite3.Connection:
         """
         Internal helper to retrieve the active connection.
-        
+
         Raises:
             ConnectionError: If the connection is None (context manager not used).
-            
+
         Returns:
             sqlite3.Connection: A valid, non-None database connection.
         """
@@ -120,9 +131,9 @@ class SQLiteManager:
     def _create_tables(self):
         """
         Internal method to create all required tables.
-        
+
         Uses 'CREATE TABLE IF NOT EXISTS' to be idempotent (safe to run multiple times).
-        """ 
+        """
         conn = self._get_conn()
 
         create_deliverymen_table_query = """
@@ -131,10 +142,10 @@ class SQLiteManager:
             local_id  TEXT UNIQUE NOT NULL
         );
         """
-        
+
         # Get all valid enum status strings for the CHECK constraint
         status_values = ", ".join([f"'{s.value}'" for s in DeliveryStatus])
-        
+
         create_delivery_table_query = f"""
         CREATE TABLE IF NOT EXISTS DeliveryMapping (
             external_delivery_id TEXT PRIMARY KEY NOT NULL,
@@ -157,7 +168,7 @@ class SQLiteManager:
             WHERE external_delivery_id = OLD.external_delivery_id;
         END;
         """
-        
+
         try:
             conn.execute(create_deliverymen_table_query)
             conn.execute(create_delivery_table_query)
@@ -183,7 +194,9 @@ class SQLiteManager:
                   constraint (PRIMARY KEY or UNIQUE) was violated.
         """
         conn = self._get_conn()
-        insert_query = "INSERT INTO DeliverymenMapping (velide_id, local_id) VALUES (?, ?)"
+        insert_query = (
+            "INSERT INTO DeliverymenMapping (velide_id, local_id) VALUES (?, ?)"
+        )
         try:
             conn.execute(insert_query, (velide_id, local_id))
             self.logger.debug(f"Adicionado mapeamento: {velide_id} -> {local_id}")
@@ -191,12 +204,16 @@ class SQLiteManager:
         except sqlite3.IntegrityError as e:
             # This catches violations of PRIMARY KEY (velide_id) or
             # UNIQUE (local_id) constraints.
-            self.logger.warning(f"Falha ao mapear ({velide_id}, {local_id}). Motivo: {e}")
+            self.logger.warning(
+                f"Falha ao mapear ({velide_id}, {local_id}). Motivo: {e}"
+            )
             return False
         except sqlite3.Error:
-            self.logger.exception("Ocorreu um erro inesperado ao adicionar um mapeamento.")
+            self.logger.exception(
+                "Ocorreu um erro inesperado ao adicionar um mapeamento."
+            )
             return False
-        
+
     def add_many_mappings(self, mappings: List[Tuple[str, str]]) -> int:
         """
         Adds multiple mappings in a single transaction, ignoring duplicates.
@@ -213,21 +230,31 @@ class SQLiteManager:
         conn = self._get_conn()
 
         if not mappings:
-            self.logger.warning("Nenhuma mapeamento fornecido para 'add_many_mappings'.")
+            self.logger.warning(
+                "Nenhuma mapeamento fornecido para 'add_many_mappings'."
+            )
             return 0
 
         # Use INSERT OR IGNORE to skip duplicates without raising an error
-        insert_query = "INSERT OR IGNORE INTO DeliverymenMapping (velide_id, local_id) VALUES (?, ?)"
-        
+        insert_query = (
+            "INSERT OR IGNORE INTO DeliverymenMapping "
+            "(velide_id, local_id) VALUES (?, ?)"
+        )
+
         try:
             cursor = conn.executemany(insert_query, mappings)
             inserted_count = cursor.rowcount
-            self.logger.debug(f"Processados {len(mappings)} mapeamentos. {inserted_count} novos inseridos.")
+            self.logger.debug(
+                f"Processados {len(mappings)} mapeamentos. "
+                f"{inserted_count} novos inseridos."
+            )
             return inserted_count
         except sqlite3.Error:
-            self.logger.exception("Ocorreu um erro inesperado durante o 'add_many_mappings'.")
+            self.logger.exception(
+                "Ocorreu um erro inesperado durante o 'add_many_mappings'."
+            )
             # The __exit__ method will handle the rollback.
-            raise # Re-raise to trigger rollback in __exit__
+            raise  # Re-raise to trigger rollback in __exit__
 
     def get_local_id(self, velide_id: str) -> Optional[str]:
         """
@@ -238,7 +265,7 @@ class SQLiteManager:
 
         Returns:
             Optional[str]: The corresponding local_id if found, else None.
-        """ 
+        """
         conn = self._get_conn()
         query = "SELECT local_id FROM DeliverymenMapping WHERE velide_id = ?"
         try:
@@ -287,7 +314,10 @@ class SQLiteManager:
                 self.logger.info(f"Mapeamento deletado para o `velide_id`: {velide_id}")
                 return True
             else:
-                self.logger.warning(f"Nenhum mapeamento encontrado para deletar o velide_id: {velide_id}")
+                self.logger.warning(
+                    f"Nenhum mapeamento encontrado para "
+                    f"deletar o velide_id: {velide_id}"
+                )
                 return False
         except sqlite3.Error:
             self.logger.exception(f"Erro ao deletar mapeamento de {velide_id}.")
@@ -313,7 +343,9 @@ class SQLiteManager:
     # DeliveryMapping Methods
     # -----------------------------------------------------------------
 
-    def add_delivery_mapping(self, external_id: str, internal_id: str, status: DeliveryStatus) -> bool:
+    def add_delivery_mapping(
+        self, external_id: str, internal_id: str, status: DeliveryStatus
+    ) -> bool:
         """
         Adds a new delivery mapping.
 
@@ -326,24 +358,37 @@ class SQLiteManager:
             bool: True if added successfully, False on a constraint violation.
         """
         conn = self._get_conn()
-        query = "INSERT INTO DeliveryMapping (external_delivery_id, internal_delivery_id, status) VALUES (?, ?, ?)"
+        query = (
+            "INSERT INTO DeliveryMapping "
+            "(external_delivery_id, internal_delivery_id, status) VALUES (?, ?, ?)"
+        )
         try:
             conn.execute(query, (external_id, internal_id, status.value))
-            self.logger.debug(f"Adicionado mapeamento de entrega: {external_id} -> {internal_id} (Status: {status.name})")
+            self.logger.debug(
+                f"Adicionado mapeamento de entrega: {external_id} -> {internal_id} "
+                f"(Status: {status.name})"
+            )
             return True
         except sqlite3.IntegrityError as e:
-            self.logger.warning(f"Falha ao mapear entrega ({external_id}, {internal_id}). Motivo: {e}")
+            self.logger.warning(
+                f"Falha ao mapear entrega ({external_id}, {internal_id}). Motivo: {e}"
+            )
             return False
         except sqlite3.Error:
-            self.logger.exception("Ocorreu um erro inesperado ao adicionar um mapeamento de entrega.")
+            self.logger.exception(
+                "Ocorreu um erro inesperado ao adicionar um mapeamento de entrega."
+            )
             return False
 
-    def add_many_delivery_mappings(self, mappings: List[Tuple[str, str, DeliveryStatus]]) -> int:
+    def add_many_delivery_mappings(
+        self, mappings: List[Tuple[str, str, DeliveryStatus]]
+    ) -> int:
         """
         Adds multiple delivery mappings, ignoring duplicates.
 
         Uses "INSERT OR IGNORE" to skip rows that would violate
-        PRIMARY KEY (external_delivery_id) or UNIQUE (internal_delivery_id) constraints.
+        PRIMARY KEY (external_delivery_id) 
+        or UNIQUE (internal_delivery_id) constraints.
 
         Args:
             mappings: A list of (external_id, internal_id, status) tuples.
@@ -354,24 +399,39 @@ class SQLiteManager:
         conn = self._get_conn()
 
         if not mappings:
-            self.logger.warning("Nenhuma mapeamento de entrega fornecido para 'add_many_delivery_mappings'.")
+            self.logger.warning(
+                "Nenhuma mapeamento de entrega fornecido para "
+                "'add_many_delivery_mappings'."
+            )
             return 0
-        
+
         # Convert Enum objects to their string values for the database
         data_to_insert = [(ext, int_id, stat.value) for ext, int_id, stat in mappings]
-        
-        query = "INSERT OR IGNORE INTO DeliveryMapping (external_delivery_id, internal_delivery_id, status) VALUES (?, ?, ?)"
-        
+
+        query = (
+            "INSERT OR IGNORE INTO DeliveryMapping "
+            "(external_delivery_id, internal_delivery_id, status) VALUES (?, ?, ?)"
+        )
         try:
             cursor = conn.executemany(query, data_to_insert)
             inserted_count = cursor.rowcount
-            self.logger.debug(f"Processados {len(mappings)} mapeamentos de entrega. {inserted_count} novos inseridos.")
+            self.logger.debug(
+                f"Processados {len(mappings)} mapeamentos de entrega. "
+                f"{inserted_count} novos inseridos."
+            )
             return inserted_count
         except sqlite3.Error:
-            self.logger.exception("Ocorreu um erro inesperado durante o 'add_many_delivery_mappings'.")
-            raise # Re-raise to trigger rollback in __exit__
+            self.logger.exception(
+                "Ocorreu um erro inesperado durante o 'add_many_delivery_mappings'."
+            )
+            raise  # Re-raise to trigger rollback in __exit__
 
-    def update_delivery_status(self, external_id: str, new_status: DeliveryStatus, deliveryman_id: Optional[str] = None) -> bool:
+    def update_delivery_status(
+        self,
+        external_id: str,
+        new_status: DeliveryStatus,
+        deliveryman_id: Optional[str] = None,
+    ) -> bool:
         """
         Updates the status of an existing delivery mapping.
 
@@ -384,29 +444,45 @@ class SQLiteManager:
             bool: True if a row was updated, False if no matching row was found.
         """
         conn = self._get_conn()
-        
+
         # We update both Status and Deliveryman ID
-        query = "UPDATE DeliveryMapping SET status = ?, deliveryman_id = ? WHERE external_delivery_id = ?"
-        
+        query = (
+            "UPDATE DeliveryMapping SET status = ?, deliveryman_id = ? "
+            "WHERE external_delivery_id = ?"
+        )
+
         try:
             # Note: If deliveryman_id is None, it saves NULL in the DB, which is correct
             # (e.g. if status changes back to PENDING, deliveryman should be cleared).
-            cursor = conn.execute(query, (new_status.value, deliveryman_id, external_id))
-            
+            cursor = conn.execute(
+                query, (new_status.value, deliveryman_id, external_id)
+            )
+
             if cursor.rowcount > 0:
                 if not deliveryman_id:
-                    self.logger.debug(f"Entrega {external_id} atualizada: {new_status.name}")
+                    self.logger.debug(
+                        f"Entrega {external_id} atualizada: {new_status.name}"
+                    )
                 else:
-                    self.logger.debug(f"Entrega {external_id} atualizada: {new_status.name} (Entregador: {deliveryman_id})")
+                    self.logger.debug(
+                        f"Entrega {external_id} atualizada: {new_status.name} "
+                        f"(Entregador: {deliveryman_id})"
+                    )
                 return True
             else:
-                self.logger.warning(f"Nenhuma entrega encontrada para atualizar (ID: {external_id})")
+                self.logger.warning(
+                    f"Nenhuma entrega encontrada para atualizar (ID: {external_id})"
+                )
                 return False
         except sqlite3.Error:
-            self.logger.exception(f"Erro ao atualizar status da entrega {external_id}.")
+            self.logger.exception(
+                f"Erro ao atualizar status da entrega {external_id}."
+            )
             return False
 
-    def get_delivery_by_external_id(self, external_id: str) -> Optional[Tuple[str, DeliveryStatus]]:
+    def get_delivery_by_external_id(
+        self, external_id: str
+    ) -> Optional[Tuple[str, DeliveryStatus]]:
         """
         Retrieves a delivery's internal ID and status using its external ID.
 
@@ -416,9 +492,12 @@ class SQLiteManager:
         Returns:
             Optional[Tuple[str, DeliveryStatus]]: A tuple of
             (internal_delivery_id, status) if found, else None.
-        """ 
+        """
         conn = self._get_conn()
-        query = "SELECT internal_delivery_id, status FROM DeliveryMapping WHERE external_delivery_id = ?"
+        query = (
+            "SELECT internal_delivery_id, status "
+            "FROM DeliveryMapping WHERE external_delivery_id = ?"
+        )
         try:
             cursor = conn.execute(query, (external_id,))
             result = cursor.fetchone()
@@ -427,13 +506,17 @@ class SQLiteManager:
                 return (result[0], DeliveryStatus(result[1]))
             return None
         except sqlite3.Error:
-            self.logger.exception(f"Erro ao buscar entrega com external_id {external_id}.")
+            self.logger.exception(
+                f"Erro ao buscar entrega com external_id {external_id}."
+            )
             return None
-        except ValueError as e: # Catch errors if status in DB is not in Enum
+        except ValueError as e:  # Catch errors if status in DB is not in Enum
             self.logger.error(f"Status inválido no DB para entrega {external_id}: {e}")
             return None
 
-    def get_delivery_by_internal_id(self, internal_id: str) -> Optional[Tuple[str, DeliveryStatus]]:
+    def get_delivery_by_internal_id(
+        self, internal_id: str
+    ) -> Optional[Tuple[str, DeliveryStatus]]:
         """
         Retrieves a delivery's external ID and status using its internal ID.
 
@@ -443,9 +526,12 @@ class SQLiteManager:
         Returns:
             Optional[Tuple[str, DeliveryStatus]]: A tuple of
             (external_delivery_id, status) if found, else None.
-        """ 
+        """
         conn = self._get_conn()
-        query = "SELECT external_delivery_id, status FROM DeliveryMapping WHERE internal_delivery_id = ?"
+        query = (
+            "SELECT external_delivery_id, status "
+            "FROM DeliveryMapping WHERE internal_delivery_id = ?"
+        )
         try:
             cursor = conn.execute(query, (internal_id,))
             result = cursor.fetchone()
@@ -454,9 +540,11 @@ class SQLiteManager:
                 return (result[0], DeliveryStatus(result[1]))
             return None
         except sqlite3.Error:
-            self.logger.exception(f"Erro ao buscar entrega com internal_id {internal_id}.")
+            self.logger.exception(
+                f"Erro ao buscar entrega com internal_id {internal_id}."
+            )
             return None
-        except ValueError as e: # Catch errors if status in DB is not in Enum
+        except ValueError as e:  # Catch errors if status in DB is not in Enum
             self.logger.error(f"Status inválido no DB para entrega {internal_id}: {e}")
             return None
 
@@ -469,7 +557,10 @@ class SQLiteManager:
             (external_delivery_id, internal_delivery_id, status) tuples.
         """
         conn = self._get_conn()
-        query = "SELECT external_delivery_id, internal_delivery_id, status FROM DeliveryMapping"
+        query = (
+            "SELECT external_delivery_id, internal_delivery_id, "
+            "status FROM DeliveryMapping"
+        )
         try:
             cursor = conn.execute(query)
             rows = cursor.fetchall()
@@ -481,7 +572,7 @@ class SQLiteManager:
         except ValueError as e:
             self.logger.error(f"Erro ao converter status do DB para Enum: {e}")
             return []
-        
+
     def get_active_deliveries(self) -> List[Tuple[str, str, DeliveryStatus]]:
         """
         Retrieves ONLY active deliveries (Pending, Sending, Added, In Progress).
@@ -494,18 +585,18 @@ class SQLiteManager:
             DeliveryStatus.DELIVERED.value,
             DeliveryStatus.FAILED.value,
             DeliveryStatus.CANCELLED.value,
-            DeliveryStatus.MISSING.value
+            DeliveryStatus.MISSING.value,
         )
-        
+
         # Create placeholders for the query (?, ?, ?)
-        placeholders = ', '.join('?' for _ in terminal_states)
-        
+        placeholders = ", ".join("?" for _ in terminal_states)
+
         query = f"""
             SELECT external_delivery_id, internal_delivery_id, status 
             FROM DeliveryMapping 
             WHERE status NOT IN ({placeholders})
         """
-        
+
         try:
             cursor = conn.execute(query, terminal_states)
             rows = cursor.fetchall()

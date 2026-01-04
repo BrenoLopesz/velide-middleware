@@ -3924,6 +3924,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pyqt5-stubs"
+version = "5.15.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e7/5b/f96312e01661dff7320366fc948f7597d3e3e28ff7116e9e77dbf41ab937/PyQt5-stubs-5.15.6.0.tar.gz", hash = "sha256:91270ac23ebf38a1dc04cd97aa852cd08af82dc839100e5395af1447e3e99707", size = 395647 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/33/d5/9b8482ed572be40d51c3fcbb87451e446e56b5e19487cd60340b8ef51eb4/PyQt5_stubs-5.15.6.0-py3-none-any.whl", hash = "sha256:7fb8177c72489a8911f021b7bd7c33f12c87f6dba92dcef3fdcdb5d9400f0f3f", size = 433328 },
+]
+
+[[package]]
 name = "pytest"
 version = "8.3.5"
 source = { registry = "https://pypi.org/simple" }
@@ -4632,6 +4641,140 @@ wheels = [
 ]
 
 [[package]]
+name = "types-pyyaml"
+version = "6.0.12.20241230"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version >= '3.8.1' and python_full_version < '3.9' and sys_platform != 'linux')",
+    "(python_full_version < '3.8.1' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version < '3.8.1' and sys_platform != 'linux')",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9a/f9/4d566925bcf9396136c0a2e5dc7e230ff08d86fa011a69888dd184469d80/types_pyyaml-6.0.12.20241230.tar.gz", hash = "sha256:7f07622dbd34bb9c8b264fe860a17e0efcad00d50b5f27e93984909d9363498c", size = 17078 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e8/c1/48474fbead512b70ccdb4f81ba5eb4a58f69d100ba19f17c92c0c4f50ae6/types_PyYAML-6.0.12.20241230-py3-none-any.whl", hash = "sha256:fa4d32565219b68e6dee5f67534c722e53c00d1cfc09c435ef04d7353e1e96e6", size = 20029 },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20250915"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and python_full_version < '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.10.*' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and python_full_version < '3.13' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.10.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "(python_full_version >= '3.11' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.11' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "(python_full_version == '3.10.*' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version == '3.10.*' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "python_full_version == '3.9.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "(python_full_version == '3.9.*' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version == '3.9.*' and sys_platform != 'linux')",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7e/69/3c51b36d04da19b92f9e815be12753125bd8bc247ba0470a982e6979e71c/types_pyyaml-6.0.12.20250915.tar.gz", hash = "sha256:0f8b54a528c303f0e6f7165687dd33fafa81c807fcac23f632b63aa624ced1d3", size = 17522 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bd/e0/1eed384f02555dde685fff1a1ac805c1c7dcb6dd019c916fe659b1c1f9ec/types_pyyaml-6.0.12.20250915-py3-none-any.whl", hash = "sha256:e7d4d9e064e89a3b3cae120b4990cd370874d2bf12fa5f46c97018dd5d3c9ab6", size = 20338 },
+]
+
+[[package]]
+name = "types-requests"
+version = "2.32.0.20241016"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version >= '3.8.1' and python_full_version < '3.9' and sys_platform != 'linux')",
+    "(python_full_version < '3.8.1' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version < '3.8.1' and sys_platform != 'linux')",
+]
+dependencies = [
+    { name = "urllib3", version = "2.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fa/3c/4f2a430c01a22abd49a583b6b944173e39e7d01b688190a5618bd59a2e22/types-requests-2.32.0.20241016.tar.gz", hash = "sha256:0d9cad2f27515d0e3e3da7134a1b6f28fb97129d86b867f24d9c726452634d95", size = 18065 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/01/485b3026ff90e5190b5e24f1711522e06c79f4a56c8f4b95848ac072e20f/types_requests-2.32.0.20241016-py3-none-any.whl", hash = "sha256:4195d62d6d3e043a4eaaf08ff8a62184584d2e8684e9d2aa178c7915a7da3747", size = 15836 },
+]
+
+[[package]]
+name = "types-requests"
+version = "2.32.4.20250913"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and python_full_version < '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.10.*' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and python_full_version < '3.13' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.10.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "(python_full_version >= '3.11' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.11' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "(python_full_version == '3.10.*' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version == '3.10.*' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "python_full_version == '3.9.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "(python_full_version == '3.9.*' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version == '3.9.*' and sys_platform != 'linux')",
+]
+dependencies = [
+    { name = "urllib3", version = "2.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/36/27/489922f4505975b11de2b5ad07b4fe1dca0bca9be81a703f26c5f3acfce5/types_requests-2.32.4.20250913.tar.gz", hash = "sha256:abd6d4f9ce3a9383f269775a9835a4c24e5cd6b9f647d64f88aa4613c33def5d", size = 23113 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/20/9a227ea57c1285986c4cf78400d0a91615d25b24e257fd9e2969606bdfae/types_requests-2.32.4.20250913-py3-none-any.whl", hash = "sha256:78c9c1fffebbe0fa487a418e0fa5252017e9c60d1a2da394077f1780f655d7e1", size = 20658 },
+]
+
+[[package]]
 name = "typing-extensions"
 version = "4.13.2"
 source = { registry = "https://pypi.org/simple" }
@@ -4851,6 +4994,18 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "mypy", version = "1.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "mypy", version = "1.19.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "pyqt5-stubs" },
+    { name = "ruff" },
+    { name = "types-pyyaml", version = "6.0.12.20241230", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "types-pyyaml", version = "6.0.12.20250915", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "types-requests", version = "2.32.0.20241016", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "types-requests", version = "2.32.4.20250913", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "annotated-types", specifier = ">=0.7.0" },
@@ -4899,6 +5054,15 @@ requires-dist = [
     { name = "watchdog", specifier = ">=4.0.2" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.14.1" },
+    { name = "pyqt5-stubs", specifier = ">=5.15.6.0" },
+    { name = "ruff", specifier = ">=0.14.10" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20241230" },
+    { name = "types-requests", specifier = ">=2.32.0.20241016" },
+]
 
 [[package]]
 name = "watchdog"

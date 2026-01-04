@@ -3,6 +3,7 @@ import os
 from PyQt5.QtCore import QObject, pyqtSignal
 from packaging.version import parse, InvalidVersion
 
+
 class VersionRetrieveService(QObject):
     """
     A service class that finds and validates a version file in a given directory.
@@ -12,10 +13,13 @@ class VersionRetrieveService(QObject):
 
     Signals:
          version_found (pyqtSignal): Emitted when a valid version is found.
-                                   Payload is a comparable packaging.version.Version object.
+                                   Payload is a comparable 
+                                   packaging.version.Version object.
         error_occurred (pyqtSignal): Emitted when any error occurs.
-                                    Payload is a user-friendly error string in Portuguese.
+                                    Payload is a user-friendly error 
+                                    string in Portuguese.
     """
+
     # Signal to emit a generic Python object, which will be our Version object.
     version_found = pyqtSignal(object)
 
@@ -31,7 +35,8 @@ class VersionRetrieveService(QObject):
 
     def get_current_version(self):
         """
-        Searches for, reads, and validates the version from a file in the specified folder.
+        Searches for, reads, and validates the version from a 
+        file in the specified folder.
 
         This is the main public method of the service. It will emit either
         the `version_found` or `error_occurred` signal based on the outcome.
@@ -43,12 +48,14 @@ class VersionRetrieveService(QObject):
         try:
             # Check if the provided path is actually a directory.
             if not os.path.isdir(self.folder_path):
-                raise NotADirectoryError(f"O caminho fornecido não é um diretório válido: {self.folder_path}")
+                raise NotADirectoryError(
+                    f"O caminho fornecido não é um diretório válido: {self.folder_path}"
+                )
 
             version_file_path = os.path.join(self.folder_path, self.version_filename)
 
             # Read the content of the version file.
-            with open(version_file_path, 'r', encoding='utf-8') as f:
+            with open(version_file_path, "r", encoding="utf-8") as f:
                 content = f.read().strip()
 
             # Validate the content by trying to parse it as a valid version.
@@ -56,21 +63,31 @@ class VersionRetrieveService(QObject):
                 # Parse the content and store the resulting object.
                 version_obj = parse(content)
             except InvalidVersion:
-                raise ValueError(f"O conteúdo '{content}' não corresponde a um formato de versão válido (SemVer).")
+                raise ValueError(
+                    f"O conteúdo '{content}' não corresponde a "
+                    "um formato de versão válido (SemVer)."
+                )
 
             # If successful, emit the parsed Version object, not the string.
             logging.info(f"Versão encontrada e validada: {version_obj}")
             self.version_found.emit(version_obj)
-        
+
         except FileNotFoundError:
             # Handle the case where the version.txt file does not exist.
-            error_msg = f"Erro: O arquivo de versão '{self.version_filename}' não foi encontrado no diretório '{self.folder_path}'."
+            error_msg = (
+                f"Erro: O arquivo de versão '{self.version_filename}' "
+                f"não foi encontrado no diretório '{self.folder_path}'."
+            )
             logging.exception(error_msg)
             self.error_occurred.emit(error_msg)
 
         except PermissionError:
-            # Handle the case where the script doesn't have permissions to read the file.
-            error_msg = f"Erro: Sem permissão para ler o arquivo de versão em '{self.folder_path}'."
+            # Handle the case where the script doesn't 
+            # have permissions to read the file.
+            error_msg = (
+                "Erro: Sem permissão para ler o arquivo "
+                f"de versão em '{self.folder_path}'."
+            )
             logging.exception(error_msg)
             self.error_occurred.emit(error_msg)
 
@@ -79,7 +96,7 @@ class VersionRetrieveService(QObject):
             error_msg = str(e)
             logging.exception(error_msg)
             self.error_occurred.emit(error_msg)
-            
+
         except ValueError as e:
             # Handle our custom validation error for invalid SemVer format.
             error_msg = f"Erro de formato: {e}"
@@ -90,5 +107,5 @@ class VersionRetrieveService(QObject):
             # A catch-all for any other unexpected errors.
             # logging.exception provides more detail, including a stack trace.
             error_msg = f"Ocorreu um erro inesperado ao processar a versão: {e}"
-            logging.exception(error_msg) # Use .exception to include traceback in logs
+            logging.exception(error_msg)  # Use .exception to include traceback in logs
             self.error_occurred.emit(error_msg)

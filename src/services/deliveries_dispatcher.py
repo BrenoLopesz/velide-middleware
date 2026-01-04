@@ -9,18 +9,20 @@ from typing import Deque, Optional
 TASK_ADD = "ADD"
 TASK_DELETE = "DELETE"
 
+
 class DeliveryDispatcher(QObject):
     """
-    Manages the queue of API tasks to ensure they are processed 
+    Manages the queue of API tasks to ensure they are processed
     sequentially or safely, decoupling concurrency from business logic.
     """
+
     # (internal_id, external_id)
-    delivery_success = pyqtSignal(str, str) 
+    delivery_success = pyqtSignal(str, str)
     # (internal_id, deleted_external_id)
     deletion_success = pyqtSignal(str, str)
     # (internal_id, error_message)
     task_failed = pyqtSignal(str, str)
-    
+
     def __init__(self, thread_pool: QThreadPool):
         super().__init__()
         self._thread_pool = thread_pool
@@ -32,17 +34,19 @@ class DeliveryDispatcher(QObject):
         self._velide_api = api
 
     def queue_add(self, internal_id: str, order: Order):
-        self._queue.append({'type': TASK_ADD, 'id': internal_id, 'payload': order})
+        self._queue.append({"type": TASK_ADD, "id": internal_id, "payload": order})
         self._try_process_next()
 
     def queue_delete(self, internal_id: str, external_id: str):
-        self._queue.append({'type': TASK_DELETE, 'id': internal_id, 'ext_id': external_id})
+        self._queue.append(
+            {"type": TASK_DELETE, "id": internal_id, "ext_id": external_id}
+        )
         self._try_process_next()
 
     def cancel_pending_add(self, internal_id: str) -> bool:
         """Removes an ADD task from queue if it hasn't run yet."""
         for i, task in enumerate(list(self._queue)):
-            if task['type'] == TASK_ADD and task['id'] == internal_id:
+            if task["type"] == TASK_ADD and task["id"] == internal_id:
                 del self._queue[i]
                 return True
         return False
@@ -55,20 +59,21 @@ class DeliveryDispatcher(QObject):
         task = self._queue.popleft()
         worker = self._create_worker(task)
         if not worker:
-            self._on_worker_finished() # Skip invalid task
+            self._on_worker_finished()  # Skip invalid task
             return
 
-        # We use lambdas to pass the 'internal_id' which the worker might not know about,
+        # We use lambdas to pass the 'internal_id' 
+        # which the worker might not know about,
         # or we just rely on the worker returning the ID if it knows it.
-        
-        internal_id = task['id']
 
-        if task['type'] == TASK_ADD:
+        internal_id = task["id"]
+
+        if task["type"] == TASK_ADD:
             # Worker emits (api_response_dict)
             worker.signals.delivery_added.connect(
                 lambda resp: self._handle_add_success(internal_id, resp)
             )
-        elif task['type'] == TASK_DELETE:
+        elif task["type"] == TASK_DELETE:
             # Worker emits (deleted_id)
             worker.signals.delivery_deleted.connect(
                 lambda ext_id: self.deletion_success.emit(internal_id, ext_id)
@@ -85,14 +90,14 @@ class DeliveryDispatcher(QObject):
         self._thread_pool.start(worker)
 
     def _create_worker(self, task):
-        task_type = task['type']
+        task_type = task["type"]
 
         if task_type == TASK_ADD:
-            return VelideWorker.for_add_delivery(self._velide_api, task['payload'])
+            return VelideWorker.for_add_delivery(self._velide_api, task["payload"])
 
         elif task_type == TASK_DELETE:
-            return VelideWorker.for_delete_delivery(self._velide_api, task['ext_id'])
-        
+            return VelideWorker.for_delete_delivery(self._velide_api, task["ext_id"])
+
         return None
 
     def _handle_add_success(self, internal_id, api_response):
