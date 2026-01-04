@@ -42,12 +42,12 @@ class UpdateScreen(QWidget):
 
         self.setLayout(main_layout)
 
-    @pyqtProperty(int)  # type: ignore[attr-defined]
+    @pyqtProperty(int) # type: ignore[type-var]
     def rotation(self):
         return self._rotation
 
-    @rotation.setter
-    def rotation(self, rotation):
+    @rotation.setter # type: ignore[type-var]
+    def set_rotation(self, rotation):
         self._rotation = rotation
         self.valueChanged.emit(rotation)
 

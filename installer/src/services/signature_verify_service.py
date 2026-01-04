@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Optional
 
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
 
@@ -17,7 +18,7 @@ class SignatureVerifyService(QObject):
     verification_finished = pyqtSignal(list)
     verification_error = pyqtSignal(str, object)
 
-    def __init__(self, parent: QObject = None):
+    def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
         self.thread_pool = QThreadPool.globalInstance()
         self.logger = logging.getLogger(__name__)

@@ -32,7 +32,7 @@ class ApiConfig(BaseModel):
     )
     timeout: Optional[float] = Field(default=15.0, description="API requests timeout.")
 
-    velide_websockets_server: Optional[str] = Field(
+    velide_websockets_server: str = Field(
         description="Websockets server to receive updates from."
     )
 

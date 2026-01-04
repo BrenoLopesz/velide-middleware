@@ -52,7 +52,7 @@ class AppPresenter(QObject):
         self._current_version: Optional[object] = None
 
         self._new_version: Optional[str] = None
-        self._current_progress = 0
+        self._current_progress = 0.0
 
         self._destination_folder = os.path.join(BUNDLE_DIR, "..", "output")
         self._installer_path = os.path.join(

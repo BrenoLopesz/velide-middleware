@@ -54,12 +54,12 @@ class FinishedScreen(QWidget):
         self, new_version: str, new_version_date: str, old_version: Optional[str]
     ):
         old_version_text = old_version or "Nenhuma"
-        self.error_description.setText(
+        self.info_label.setText(
             f"Nova versão adquirida:<br/><b>{new_version}</b>"
             f"<br/>{new_version_date}<br/>"
             f"<br/>Versão anterior:<br/><b>{old_version_text}</b>"
         )
-        self.error_description.adjustSize()
+        self.info_label.adjustSize()
         self.adjustSize()
 
     def wait_to_quit(self):

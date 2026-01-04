@@ -99,7 +99,7 @@ select = ["E", "F"]
 
 [dependency-groups]
 dev = [
-    "mypy>=1.14.1",
+    "mypy<1.15",
     "pyqt5-stubs>=5.15.6.0",
     "ruff>=0.14.10",
     "types-pyyaml>=6.0.12.20241230",

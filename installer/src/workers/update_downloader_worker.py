@@ -68,7 +68,7 @@ class UpdateDownloaderWorker(QRunnable):
             report_progress (bool): If True, emit progress signals for this download.
         """
         self.logger.info(f"Baixando '{url}' para '{destination_path}'...")
-        last_progress_time = 0
+        last_progress_time = 0.0
 
         with httpx.stream("GET", url, timeout=30.0, follow_redirects=True) as response:
             response.raise_for_status()
