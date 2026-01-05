@@ -100,6 +100,9 @@ class FarmaxStatusTracker(QObject):
             self._is_processing = True
 
             # 1. Get IDs that the system thinks are "Active" (Not Delivered/Cancelled)
+            # TODO: There's a bug. "Active" now means everything. 
+            #       So, for example, it could be trying to cancel
+            #       a delivery indefinitely. 
             active_ids = self._persistence.get_active_monitored_ids()
 
             if not active_ids:
@@ -182,6 +185,13 @@ class FarmaxStatusTracker(QObject):
                     # will handle it (remove from queue only).
                     self.order_cancelled.emit(internal_id_str, external_id)
 
+                    # TODO: We SHOULD NOT mark as cancelled here. It should 
+                    #       have an intermediary status called "CANCELLING", 
+                    #       so if the application crashed during this 
+                    #       operation, or if the cancellation failed, the
+                    #       user would be able to retry it. However, since it 
+                    #       isn't possible to delete deliveries in route yet,
+                    #       this is inevitable, so we won't handle it yet.
                     # Update local persistence
                     self._persistence.mark_as_cancelled(sale_id)
 
