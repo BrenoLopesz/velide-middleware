@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 
 from config import Settings, TargetSystem, config
 from connectors.farmax.farmax_repository import FarmaxRepository
+from connectors.farmax.farmax_setup import FarmaxSetup
 from models.app_context_model import Services
 from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_service import DeliveriesService
@@ -157,7 +158,8 @@ def create_strategy(
             max_overflow=5,
             pool_pre_ping=True,
         )
-        # farmax_setup = FarmaxSetup(engine)
+        farmax_setup = FarmaxSetup(engine)
+        farmax_setup.initial_setup()
         farmax_repository = FarmaxRepository(engine)
         return FarmaxStrategy(
             farmax_config=app_config.farmax,
