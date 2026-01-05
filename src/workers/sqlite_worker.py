@@ -181,6 +181,20 @@ class SQLiteWorker(QRunnable):
     ) -> "SQLiteWorker":
         """Factory method to create a worker for 'get_active_deliveries'."""
         return cls(signals, db_path, "get_active_deliveries")
+    
+    @classmethod
+    def for_prune_old_data(
+        cls, signals: SQLiteWorkerSignals, db_path: str, days_retention: int
+    ) -> "SQLiteWorker":
+        """
+        Factory method to create a worker for 'prune_old_deliveries'.
+        """
+        return cls(
+            signals, 
+            db_path, 
+            "prune_old_deliveries", # Must match method name in SQLiteManager
+            days_retention
+        )
 
     # -----------------------------------------------------------------
     # QRunnable Execution

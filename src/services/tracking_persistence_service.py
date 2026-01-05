@@ -4,6 +4,7 @@ from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
 # Import your models/enums
 from api.sqlite_manager import DeliveryStatus
+from services.daily_cleanup_service import DailyCleanupService
 from services.sqlite_service import SQLiteService
 
 RawID = Union[str, float, int]
@@ -28,6 +29,13 @@ class TrackingPersistenceService(QObject):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self._sqlite = sqlite_service
+        self._cleanup_service = DailyCleanupService(
+            sqlite_service=self._sqlite, 
+            days_retention=90
+        )
+        # Start it once (e.g., when the main window shows)
+        # This will run a prune immediately, and then again every 24h.
+        self._cleanup_service.start_routine()
 
         # --- In-Memory Cache ---
 

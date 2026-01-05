@@ -60,6 +60,8 @@ class SQLiteService(QObject):
     # Emits a list of tuples [(ext_id, int_id, status), ...]
     all_deliveries_found = pyqtSignal(list)
 
+    prune_result = pyqtSignal(int)
+
     def __init__(self, db_path: str, parent: Optional[QObject] = None):
         """
         Initializes the database service.
@@ -251,4 +253,16 @@ class SQLiteService(QObject):
         self._create_and_run_worker(
             SQLiteWorker.for_get_active_deliveries,
             result_signal=self.all_deliveries_found,
+        )
+
+    @pyqtSlot(int)
+    def request_prune_old_data(self, days_retention: int = 90):
+        """
+        Asynchronously requests the database to delete old data.
+        """
+        self.logger.info(f"Solicitando limpeza de dados anteriores a {days_retention} dias.")
+        self._create_and_run_worker(
+            SQLiteWorker.for_prune_old_data,
+            days_retention,
+            result_signal=self.prune_result,
         )

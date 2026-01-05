@@ -71,6 +71,9 @@ class SQLiteManager:
         """
         try:
             self.conn = sqlite3.connect(self.db_path)
+            # This tells SQLite: "When I delete rows, shrink the file immediately."
+            self.conn.execute("PRAGMA auto_vacuum = 1;")
+
             # Enable WAL Mode
             # This allows concurrent readers and writers.
             self.conn.execute("PRAGMA journal_mode = WAL;")
@@ -609,3 +612,74 @@ class SQLiteManager:
         except ValueError as e:
             self.logger.exception("Erro de conversão de Enum.")
             return []
+        
+    # -----------------------------------------------------------------
+    # Maintenance Methods
+    # -----------------------------------------------------------------
+
+    def prune_old_deliveries(self, days_retention: int = 90) -> int:
+        """
+        Deletes finished deliveries older than 'days_retention'.
+
+        This method is safe: it only removes deliveries in terminal states
+        (DELIVERED, FAILED, CANCELLED). Active deliveries are preserved
+        regardless of age.
+
+        Args:
+            days_retention (int): The number of days to keep data.
+
+        Returns:
+            int: The number of rows deleted.
+        """
+        conn = self._get_conn()
+
+        # 1. Define states that are safe to delete
+        # We generally do not want to delete 'PENDING' or 'IN_PROGRESS'
+        # even if they are old, as they might require manual review.
+        safe_to_delete_states = (
+            DeliveryStatus.DELIVERED.value,
+            DeliveryStatus.FAILED.value,
+            DeliveryStatus.CANCELLED.value,
+            DeliveryStatus.MISSING.value,
+        )
+
+        # 2. Prepare the query
+        # We construct the placeholders (?, ?, ?, ?) dynamically
+        placeholders = ", ".join("?" for _ in safe_to_delete_states)
+        
+        # SQLite 'date' function calculates the cutoff: date('now', '-90 days')
+        query = f"""
+            DELETE FROM DeliveryMapping 
+            WHERE status IN ({placeholders})
+            AND updated_at < date('now', ?)
+        """
+
+        time_modifier = f"-{days_retention} days"
+        
+        # Combine the states list with the time modifier for the parameters
+        params = list(safe_to_delete_states)
+        params.append(time_modifier)
+
+        try:
+            self.logger.info(
+                "Iniciando limpeza de entregas finalizadas "
+                f"anteriores a {days_retention} dias..."
+            )
+            
+            cursor = conn.execute(query, params)
+            deleted_count = cursor.rowcount
+            
+            if deleted_count > 0:
+                self.logger.info(
+                    f"Limpeza concluída. {deleted_count} entregas antigas removidas."
+                )
+            else:
+                self.logger.debug("Nenhuma entrega antiga encontrada para remoção.")
+
+            return deleted_count
+
+        except sqlite3.Error:
+            self.logger.exception(
+                "Erro durante a limpeza periódica do banco de dados."
+            )
+            return 0
