@@ -67,7 +67,7 @@ class FarmaxStatusTracker(QObject):
             return
 
         self._is_running = True
-        self._logger.info("Iniciando o Rastreador de Status Farmax...")
+        self._logger.debug("Iniciando o Rastreador de Status Farmax...")
 
         # Run immediately, then schedule
         self._execute_poll_cycle()
@@ -121,7 +121,7 @@ class FarmaxStatusTracker(QObject):
                 self._spawn_worker_for_batch(batch)
 
         except Exception as e:
-            self._logger.error(f"Erro ao iniciar ciclo de rastreamento: {e}")
+            self._logger.exception("Erro inesperado ao iniciar ciclo de rastreamento.")
             self._is_processing = False
 
     def _spawn_worker_for_batch(self, batch_ids: List[float]) -> None:
@@ -204,7 +204,9 @@ class FarmaxStatusTracker(QObject):
                     # self._persistence.mark_as_finished(sale_id)
 
         except Exception as e:
-            self._logger.error(f"Erro ao processar atualizações de status: {e}")
+            self._logger.exception(
+                "Erro inesperado ao processar atualizações de status."
+            )
             self.error_occurred.emit(str(e))
 
     def _on_worker_error(self, error_msg: str) -> None:

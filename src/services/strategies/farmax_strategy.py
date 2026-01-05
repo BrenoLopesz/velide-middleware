@@ -143,7 +143,7 @@ class FarmaxStrategy(IConnectableStrategy):
 
     def start_listening(self):
         """Starts the polling services."""
-        self._logger.info("Iniciando o rastreamento Farmax...")
+        self._logger.debug("Iniciando o rastreamento Farmax...")
 
         # Ensure persistence is ready before starting workers
         self._persistence.initialize()

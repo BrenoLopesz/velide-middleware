@@ -92,7 +92,7 @@ class VelideWebsocketsWorker(QRunnable):
 
     def run(self) -> None:
         try:
-            self.logger.info("Iniciando thread do WebSocket Velide...")
+            self.logger.debug("Iniciando thread do WebSocket Velide...")
             asyncio.run(self._run_async())
         except Exception as e:
             self.logger.exception("Falha fatal no Worker.")
@@ -154,7 +154,7 @@ class VelideWebsocketsWorker(QRunnable):
                 async with Client(
                     transport=self._transport, fetch_schema_from_transport=False
                 ) as session:
-                    self.logger.info("Conectado ao WebSocket Velide.")
+                    self.logger.info("Conectado ao Velide.")
 
                     # Signal: Connected (Green Light)
                     self.signals.status_changed.emit(True)

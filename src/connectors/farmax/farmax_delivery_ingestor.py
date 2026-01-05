@@ -265,7 +265,7 @@ class FarmaxDeliveryIngestor(QObject):
             self._retry_count = 0
 
         except Exception as e:
-            self._logger.error(f"Erro crítico ao processar detalhes da entrega: {e}")
+            self._logger.exception(f"Erro crítico ao processar detalhes da entrega.")
             self.error_occurred.emit(str(e))
             # Do NOT commit cursor. Next poll cycle will pick this up again.
         finally:

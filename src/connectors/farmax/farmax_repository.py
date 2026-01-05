@@ -49,7 +49,7 @@ class FarmaxRepository:
             with self._engine.begin() as conn:
                 conn.execute(query, params)
         except SQLAlchemyError:
-            self.logger.exception(f"Falha ao atualizar entrega {sale_id} para Em Rota.")
+            self.logger.exception(f"Falha ao atualizar entrega {sale_id} para 'Em Rota'.")
             raise
         except Exception:
             self.logger.exception(

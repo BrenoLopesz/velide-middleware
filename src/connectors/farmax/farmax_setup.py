@@ -38,11 +38,11 @@ class FarmaxSetup:
     def _setup_sequence(self, conn: Connection):
         """Creates the delivery log sequence if it doesn't exist."""
         if not self.check_if_sequence_exists(conn, self.SEQUENCE_NAME):
-            self.logger.info(f"Creating sequence: {self.SEQUENCE_NAME}")
+            self.logger.debug(f"Criando sequência: {self.SEQUENCE_NAME}")
             query = text(f"CREATE SEQUENCE {self.SEQUENCE_NAME}")
             conn.execute(query)
         else:
-            self.logger.debug(f"Sequence already exists: {self.SEQUENCE_NAME}")
+            self.logger.debug(f"Sequência já existe: {self.SEQUENCE_NAME}")
 
     def _setup_log_table(self, conn: Connection):
         """Creates the delivery log table if it doesn't exist."""
@@ -59,7 +59,7 @@ class FarmaxSetup:
                 )""")
             conn.execute(text(query_str))
         else:
-            self.logger.debug(f"Table already exists: {self.LOG_TABLE_NAME}")
+            self.logger.debug(f"Tabela já existe: {self.LOG_TABLE_NAME}")
 
     def _setup_increment_trigger(self, conn: Connection):
         """Creates or alters the trigger to auto-increment the log table ID."""

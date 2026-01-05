@@ -20,7 +20,7 @@ class ConfigLoadService(QObject):
             config = InstallerConfig.from_yaml(self._path)
             self.config_found.emit(config)
         except (FileNotFoundError, TypeError) as e:
-            self.logger.exception(e)
+            self.logger.exception()
             self.error.emit(e)
         except yaml.YAMLError:
             # Handle errors during YAML parsing

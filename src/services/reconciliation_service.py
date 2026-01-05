@@ -94,7 +94,7 @@ class ReconciliationService(QObject):
         Step 1: Spawns the Worker to fetch the Global Snapshot.
         """
         self.sync_started.emit()
-        self.logger.info("Iniciando ciclo de reconciliação...")
+        self.logger.debug("Iniciando ciclo de reconciliação...")
 
         # Create the worker
         # Note: We don't need to pass IDs anymore, we get the Global Snapshot
