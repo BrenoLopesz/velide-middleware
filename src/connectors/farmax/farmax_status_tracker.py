@@ -100,9 +100,6 @@ class FarmaxStatusTracker(QObject):
             self._is_processing = True
 
             # 1. Get IDs that the system thinks are "Active" (Not Delivered/Cancelled)
-            # TODO: There's a bug. "Active" now means everything. 
-            #       So, for example, it could be trying to cancel
-            #       a delivery indefinitely. 
             active_ids = self._persistence.get_active_monitored_ids()
 
             if not active_ids:
@@ -110,7 +107,7 @@ class FarmaxStatusTracker(QObject):
                 self._is_processing = False
                 return
 
-            self._logger.info(
+            self._logger.debug(
                 f"Monitorando status de {len(active_ids)} pedidos ativos..."
             )
 

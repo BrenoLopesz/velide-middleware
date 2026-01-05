@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from api.velide import Velide
 from config import ApiConfig, TargetSystem
 from models.base_models import BaseLocalDeliveryman
@@ -33,6 +33,8 @@ class DeliverymenRetrieverService(QObject):
         self._local_deliverymen: Optional[List[BaseLocalDeliveryman]] = None
         self.thread_pool = QThreadPool.globalInstance()
 
+        self._mapping_ids: Dict[str, str] = {}
+
     def set_access_token(self, access_token: str) -> None:
         self._velide_api = Velide(access_token, self._api_config, self._target_system)
         if self._waiting_for_token:
@@ -50,11 +52,25 @@ class DeliverymenRetrieverService(QObject):
     ) -> Optional[BaseLocalDeliveryman]:
         if not self._local_deliverymen:
             return None
+        
+        internal_id = next(
+            (
+                mapping[1]
+                for mapping in self._mapping_ids
+                if mapping[0] == external_id
+            ),
+            None,
+        )
+        local_deliverymen = self._local_deliverymen
+
+        if internal_id is None or local_deliverymen is None:
+            return None
+        
         return next(
             (
-                deliveryman
-                for deliveryman in self._local_deliverymen
-                if deliveryman.id == external_id
+                local_deliveryman
+                for local_deliveryman in local_deliverymen
+                if local_deliveryman.id == internal_id
             ),
             None,
         )
@@ -107,6 +123,7 @@ class DeliverymenRetrieverService(QObject):
                 return
 
         # All Velide users have a *valid* and *current* mapping
+        self._mapping_ids = mappings
         self.mapping_is_complete.emit()
 
     def _on_receive_velide_deliverymen(self, deliverymen: list) -> None:

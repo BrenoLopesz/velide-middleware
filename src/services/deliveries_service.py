@@ -8,7 +8,7 @@ from models.delivery_table_model import DeliveryRowStatus
 from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_dispatcher import DeliveryDispatcher
 from services.strategies.connectable_strategy import IConnectableStrategy
-from models.velide_delivery_models import Order
+from models.velide_delivery_models import DeliverymanResponse, Order
 
 
 class DeliveriesService(QObject):
@@ -251,7 +251,7 @@ class DeliveriesService(QObject):
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.CANCELLED)
 
     def on_delivery_route_started_in_velide(
-        self, order: Order, deliveryman_external_id: str
+        self, order: Order, deliveryman: DeliverymanResponse
     ):
         self.logger.debug("Solicitando strategy para lidar com a entrega em rota.")
         if not self._active_strategy:
@@ -262,7 +262,7 @@ class DeliveriesService(QObject):
             return
 
         self._active_strategy.on_delivery_route_started_on_velide(
-            order, deliveryman_external_id
+            order, deliveryman.id
         )
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.IN_PROGRESS)
 

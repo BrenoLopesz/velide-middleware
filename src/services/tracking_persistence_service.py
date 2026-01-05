@@ -271,9 +271,15 @@ class TrackingPersistenceService(QObject):
     def get_active_monitored_ids(self) -> List[float]:
         """
         Returns IDs that need status checking.
-        In this implementation, everything in the cache is considered 'active'.
         """
-        return self.get_tracked_ids()
+        terminal_states = (
+            DeliveryStatus.DELIVERED.value,
+            DeliveryStatus.FAILED.value,
+            DeliveryStatus.CANCELLED.value,
+            DeliveryStatus.MISSING.value,
+        )
+
+        return [float(k[0]) for k in self._status_cache.items() if k[1] not in terminal_states]
 
     def mark_as_cancelled(self, internal_id: RawID):
         """
