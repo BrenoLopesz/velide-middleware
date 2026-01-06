@@ -14,7 +14,7 @@ class VelideActionHandler(QObject):
 
     # Emits specific, high-level signals that the Presenter/UI cares about
     delivery_deleted = pyqtSignal(Order)
-    delivery_in_route = pyqtSignal(Order, DeliverymanResponse)
+    delivery_in_route = pyqtSignal(Order, str) # Order, deliverymanId
     delivery_delivered = pyqtSignal(Order)
     route_started = pyqtSignal(str)  # route_id
 
@@ -53,7 +53,7 @@ class VelideActionHandler(QObject):
         for order in orders:
             if order is not None:
                 # 2. Notify UI (Presenter)
-                self.delivery_in_route.emit(order, deliveryman)
+                self.delivery_in_route.emit(order, deliveryman.id)
 
     def _handle_route_ended(self, action: LatestAction):
         if not action.route or not action.route.deliveries:

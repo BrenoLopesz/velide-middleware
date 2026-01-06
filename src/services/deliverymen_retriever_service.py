@@ -93,37 +93,36 @@ class DeliverymenRetrieverService(QObject):
 
     def check_if_mapping_is_complete(
         self,
-        mappings: list,
+        mappings: List[Tuple[str, str]],
         velide_deliverymen: List[DeliverymanResponse],
         local_deliverymen: List[BaseLocalDeliveryman],
     ) -> None:
-        # Create a set of valid local IDs for fast lookup
+        # 1. Create a set of valid local IDs for fast lookup
         valid_local_ids = {d.id for d in local_deliverymen}
 
+        # 2. Optimization: Convert the list of tuples to a Dict immediately.
+        #    This solves the original bug and makes lookups instant (O(1)).
+        mapped_dict = dict(mappings)
+
         for velide_deliveryman in velide_deliverymen:
-            # Find the full mapping tuple (velide_id, local_id)
-            mapping_tuple = next(
-                (
-                    mapping
-                    for mapping in mappings
-                    if mapping[0] == velide_deliveryman.id
-                ),
-                None,
-            )
+            # Check 1: Does a mapping exist for this Velide ID?
+            # Using .get() is faster and cleaner than looping through a list
+            mapped_local_id = mapped_dict.get(velide_deliveryman.id)
 
-            if mapping_tuple is None:
-                # Case 1: No mapping exists at all for this Velide user
+            if mapped_local_id is None:
+                # Case 1: No mapping exists for this user
                 self.mapping_is_incomplete.emit()
                 return
 
-            mapped_local_id = mapping_tuple[1]  # Get the local_id from the mapping
+            # Check 2: Is the mapped local ID actually valid?
             if mapped_local_id not in valid_local_ids:
-                # Case 2: Mapping exists, but the local_id is stale/invalid
+                # Case 2: Mapping exists, but the local_id is invalid/stale
                 self.mapping_is_incomplete.emit()
                 return
 
-        # All Velide users have a *valid* and *current* mapping
-        self._mapping_ids = mappings
+        # 3. Success: All checks passed.
+        #    We assign the dict we created at the start to self._mapping_ids
+        self._mapping_ids = mapped_dict
         self.mapping_is_complete.emit()
 
     def _on_receive_velide_deliverymen(self, deliverymen: list) -> None:
