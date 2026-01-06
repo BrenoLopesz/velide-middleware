@@ -9,6 +9,7 @@ from models.delivery_table_model import (
     DeliveryTableModel,
 )
 from models.velide_delivery_models import Order
+from utils.connection_state import ConnectionState
 from visual.main_view import MainView
 from typing import TYPE_CHECKING
 
@@ -42,6 +43,33 @@ class DashboardPresenter(QObject):
         self._services.deliveries.set_access_token(access_token)
 
     def _connect_signals(self):
+        ws_fsm = self._machine.websockets_state
+        
+        # --- State Transitions (Presenter Logic) ---
+        # Map FSM States -> View Updates
+        # We use lambdas to pass the specific Enum required by the View
+        
+        ws_fsm.s_connecting.entered.connect(
+            lambda: self._dashboard_view.footer.update_connection_state(ConnectionState.CONNECTING)
+        )
+        
+        ws_fsm.s_connected.entered.connect(
+            lambda: self._dashboard_view.footer.update_connection_state(ConnectionState.CONNECTED)
+        )
+        
+        ws_fsm.s_disconnected.entered.connect(
+            lambda: self._dashboard_view.footer.update_connection_state(ConnectionState.DISCONNECTED)
+        )
+        
+        ws_fsm.s_error.entered.connect(
+            lambda: self._dashboard_view.footer.update_connection_state(ConnectionState.ERROR)
+        )
+        # --- Data Handling ---
+        # Use the FSM's sanitized signal (Gatekeeper)
+        ws_fsm.action_ready.connect(
+             self._services.velide_action_handler.handle_action
+        )
+
         # TODO: Create states for this.
         self._services.deliveries.delivery_acknowledged.connect(
             self._on_delivery_acknowledged

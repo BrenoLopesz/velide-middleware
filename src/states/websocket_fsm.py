@@ -1,29 +1,22 @@
+# states/websocket_fsm.py
 from __future__ import annotations
-import logging
 from PyQt5.QtCore import QObject, QStateMachine, QState, pyqtSignal
 from models.velide_websockets_models import LatestAction
 from typing import TYPE_CHECKING
+import logging
 
 if TYPE_CHECKING:
     from models.app_context_model import Services
 
-
 class WebSocketFSM(QObject):
     """
-    Finite State Machine for the Velide WebSocket.
-
-    Roles:
-    1. Lifecycle Manager: Tracks Offline -> Connecting -> Online states.
-    2. Data Facade: acts as a gatekeeper, only forwarding data to the
-       Presenter when the system is in the 'Online' state.
+    Manages the States of the WebSocket connection.
+    Exposes QState objects (s_connecting, s_connected, etc.) 
+    that the Presenter can observe.
     """
-
-    # --- Signals for the Presenter ---
-    # The Presenter listens to THIS, not the Service.
-    state_changed = pyqtSignal(str)  # Payloads: "Offline", "Connecting", "Online"
-    action_ready = pyqtSignal(
-        LatestAction
-    )  # Emitted only when valid data arrives in Online state
+    
+    # Gatekeeper signal: only emitted when in s_connected
+    action_ready = pyqtSignal(LatestAction)
 
     def __init__(self, services: "Services"):
         """
@@ -32,73 +25,38 @@ class WebSocketFSM(QObject):
         """
         super().__init__()
         self.service = services.websockets
-        self.machine = QStateMachine()
         self.logger = logging.getLogger(__name__)
+        self.machine = QStateMachine()
 
-        # --- 1. Define States ---
-        self.s_offline = QState()
-        self.s_connecting = QState()
-        self.s_online = QState()
+        # 1. Define States (Publicly Accessible)
+        self.s_root = QState()
+        self.s_disconnected = QState(self.s_root)
+        self.s_connecting = QState(self.s_root)
+        self.s_connected = QState(self.s_root)
+        self.s_error = QState(self.s_root)
 
-        # --- 2. Configure Transitions ( The Wiring ) ---
+        # 2. Define Transitions (Signal Driven)
+        # The transition logic is now direct: "When Service emits X, go to State Y"
+        
+        # From any state (via Root), we can go to these states:
+        self.s_root.addTransition(self.service.sig_connecting, self.s_connecting)
+        self.s_root.addTransition(self.service.sig_connected, self.s_connected)
+        self.s_root.addTransition(self.service.sig_disconnected, self.s_disconnected)
+        self.s_root.addTransition(self.service.sig_error, self.s_error)
+        
+        # Specific flow (optional, if you want to restrict jumps):
+        # self.s_disconnected.addTransition(self.service.started, self.s_connecting)
 
-        # Trigger: Service starts
-        # Action: Transition Offline -> Connecting
-        self.s_offline.addTransition(self.service.started, self.s_connecting)
-
-        # Trigger: Service successfully connects (Handshake complete)
-        # Action: Transition Connecting -> Online
-        self.s_connecting.addTransition(self.service.connected, self.s_online)
-
-        # Trigger: Service fails to connect (Error during handshake)
-        # Action: Transition Connecting -> Offline (could also go to an Error state)
-        self.s_connecting.addTransition(self.service.error_occurred, self.s_offline)
-        # Also handle explicit disconnects during connection phase
-        self.s_connecting.addTransition(self.service.disconnected, self.s_offline)
-
-        # Trigger: Connection lost while Online
-        # Action: Transition Online -> Offline
-        self.s_online.addTransition(self.service.disconnected, self.s_offline)
-
-        # Trigger: Error while Online 
-        # (optional, depending on if error implies disconnect)
-        self.s_online.addTransition(self.service.error_occurred, self.s_offline)
-
-        # --- 3. Setup State Entry Signals (Feedback for UI) ---
-
-        # When entering a state, emit the string name to the Presenter
-        self.s_offline.entered.connect(lambda: self.state_changed.emit("Offline"))
-        self.s_connecting.entered.connect(lambda: self.state_changed.emit("Connecting"))
-        self.s_online.entered.connect(lambda: self.state_changed.emit("Online"))
-
-        # --- 4. Data Facade Logic (The Gatekeeper) ---
-
-        # Connect the service's raw data signal to our internal handler
+        # 3. Data Gatekeeper
         self.service.action_received.connect(self._handle_incoming_action)
 
-        # --- 5. Start the Machine ---
-        self.machine.addState(self.s_offline)
-        self.machine.addState(self.s_connecting)
-        self.machine.addState(self.s_online)
-
-        self.machine.setInitialState(self.s_offline)
+        # 4. Init
+        self.machine.addState(self.s_root)
+        self.machine.setInitialState(self.s_root)
+        self.s_root.setInitialState(self.s_disconnected)
         self.machine.start()
 
     def _handle_incoming_action(self, action: LatestAction):
-        """
-        Internal slot to handle incoming data.
-        It checks the current state of the machine before forwarding.
-        """
-        self.logger.debug(f"Package recebido: {action}")
-        # We query the machine: "Is the s_online state currently active?"
-        # self.machine.configuration() returns the set of currently active states.
-        if self.s_online in self.machine.configuration():
-            # logic: Pass the data through to the Presenter
+        # We check the active configuration to ensure we are "Online"
+        if self.s_connected in self.machine.configuration():
             self.action_ready.emit(action)
-        else:
-            # logic: Drop the packet.
-            # We are likely connecting or disconnecting, so this data
-            # might be stale or irrelevant.
-            # You could add logging here: 
-            # print(f"Dropped action {action.offset} - State not Online")
-            pass

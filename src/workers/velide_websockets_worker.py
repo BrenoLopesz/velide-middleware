@@ -10,6 +10,7 @@ from websockets.exceptions import ConnectionClosedError
 
 from config import ApiConfig
 from models.velide_websockets_models import LatestAction
+from utils.connection_state import ConnectionState
 
 
 class VelideWebsocketsSignals(QObject):
@@ -32,11 +33,10 @@ class VelideWebsocketsSignals(QObject):
     error_occurred = pyqtSignal(str)
     connection_closed = pyqtSignal(str)
 
+    connection_state_changed = pyqtSignal(ConnectionState)
+
     # 1. ADDED: This signal was missing
     finished = pyqtSignal()
-
-    # 2. ADDED: Essential for the Service Adapter
-    status_changed = pyqtSignal(bool)
 
 
 class VelideWebsocketsWorker(QRunnable):
@@ -99,8 +99,6 @@ class VelideWebsocketsWorker(QRunnable):
             self.signals.error_occurred.emit(str(e))
         finally:
             self.signals.connection_closed.emit("Worker finished.")
-            # Ensure we tell the service we are offline effectively
-            self.signals.status_changed.emit(False)
 
             # 3. ADDED: Emit 'finished' so the Service knows the thread is dead
             self.signals.finished.emit()
@@ -139,8 +137,13 @@ class VelideWebsocketsWorker(QRunnable):
 
         retry_delay = 2
 
+        self.signals.connection_state_changed.emit(ConnectionState.CONNECTING)
+
         while self._is_running:
             try:
+                # STATE: We are about to attempt a handshake
+                self.signals.connection_state_changed.emit(ConnectionState.CONNECTING)
+
                 # Protocol: graphql-transport-ws
                 # We use init_payload={} because the server 
                 # expects the standard handshake
@@ -156,8 +159,8 @@ class VelideWebsocketsWorker(QRunnable):
                 ) as session:
                     self.logger.info("Conectado ao Velide.")
 
-                    # Signal: Connected (Green Light)
-                    self.signals.status_changed.emit(True)
+                    # STATE: Success! Green light.
+                    self.signals.connection_state_changed.emit(ConnectionState.CONNECTED)
 
                     retry_delay = 2  # Reset delay
 
@@ -189,19 +192,20 @@ class VelideWebsocketsWorker(QRunnable):
                 asyncio.TimeoutError,
                 OSError,
             ) as e:
-                # Signal: Disconnected (Red Light)
-                self.signals.status_changed.emit(False)
-
                 self.logger.warning(
                     f"Conexão perdida ({e}). Tentando reconectar em {retry_delay}s..."
                 )
+
+                # STATE: Connection dropped. Red light.
+                self.signals.connection_state_changed.emit(ConnectionState.DISCONNECTED)
                 # Note: We do NOT emit error_occurred here to avoid spamming the UI
                 # with popups. The status_changed(False) 
                 # is enough for the UI to turn red.
 
             except Exception as e:
                 self.logger.exception("Erro inesperado no loop Websocket.")
-                self.signals.status_changed.emit(False)
+                # STATE: Unexpected error. Gray/Red light.
+                self.signals.connection_state_changed.emit(ConnectionState.ERROR)
                 self.signals.error_occurred.emit(str(e))
 
             finally:
@@ -210,3 +214,6 @@ class VelideWebsocketsWorker(QRunnable):
             if self._is_running:
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 60)
+
+        # FINAL STATE: When the loop breaks (stop called)
+        self.signals.connection_state_changed.emit(ConnectionState.DISCONNECTED)
