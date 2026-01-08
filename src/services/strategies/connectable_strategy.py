@@ -1,9 +1,14 @@
 # in src/services/delivery_strategy.py
 from abc import ABC, ABCMeta, abstractmethod
-from typing import Optional
+from enum import Enum, auto
+from typing import Optional, Set
 from PyQt5.QtCore import QObject, pyqtSignal
 from models.velide_delivery_models import Order
 
+
+class ERPFeature(Enum):
+    DASHBOARD_FOOTER = auto()
+    REQUIRES_INITIAL_CONFIG = auto()
 
 # This new class inherits the "blueprints" from 
 # both QObject's metaclass and ABC's metaclass.
@@ -24,6 +29,14 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):  # type: ignore[mi
     order_cancelled = pyqtSignal(str, object)  # Internal ID, (optional) external ID
     # normalization_failed = pyqtSignal(dict, str) # raw_data, error_message
 
+    @property
+    def capabilities(self) -> Set[ERPFeature]:
+        """
+        Returns the set of features this strategy supports.
+        Default: Empty set (All features disabled)
+        """
+        return set()
+
     @abstractmethod
     def start_listening(self):
         """Starts the process of listening for new deliveries from the source."""
@@ -32,11 +45,6 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):  # type: ignore[mi
     @abstractmethod
     def stop_listening(self):
         """Stops the listening process."""
-        pass
-
-    @abstractmethod
-    def requires_initial_configuration(self) -> bool:
-        """Returns True if the config screen must be shown first."""
         pass
 
     @abstractmethod

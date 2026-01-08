@@ -18,6 +18,7 @@ from typing import Optional
 from PyQt5.QtCore import QObject
 from presenters.deliverymen_mapping_presenter import DeliverymenMappingPresenter
 from presenters.device_code_presenter import DeviceCodePresenter
+from services.strategies.connectable_strategy import IConnectableStrategy
 from states.main_state_machine import MainStateMachine
 from visual.main_view import MainView
 from typing import TYPE_CHECKING
@@ -45,7 +46,12 @@ class AppPresenter(QObject):
     # Initialization
     # ------------------------------------------------------------------------
 
-    def __init__(self, view: MainView, services: "Services"):
+    def __init__(
+            self, 
+            view: MainView, 
+            services: "Services", 
+            strategy: IConnectableStrategy
+        ):
         """
         Initializes the AppPresenter.
 
@@ -57,6 +63,7 @@ class AppPresenter(QObject):
         # --- Dependency Injection ---
         self._view = view
         self._services = services
+        self._strategy = strategy
 
         self._last_error_title: Optional[str] = None
         self._last_error_message: Optional[str] = None
@@ -66,7 +73,7 @@ class AppPresenter(QObject):
 
         self._device_code_presenter = DeviceCodePresenter(self._view, self._machine)
         self._dashboard_presenter = DashboardPresenter(
-            self._view, self._services, self._machine
+            self._view, self._services, self._machine, self._strategy
         )
         self._deliverymen_mapping_presenter = DeliverymenMappingPresenter(
             self._view, self._services, self._machine

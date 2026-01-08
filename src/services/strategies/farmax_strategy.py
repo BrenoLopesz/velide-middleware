@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Set
 
 from PyQt5.QtCore import pyqtSlot, QThreadPool
 
@@ -15,7 +15,7 @@ from models.farmax_models import FarmaxDelivery
 from models.velide_delivery_models import Order
 from services.deliverymen_retriever_service import DeliverymenRetrieverService
 from services.reconciliation_service import ReconciliationService
-from services.strategies.connectable_strategy import IConnectableStrategy
+from services.strategies.connectable_strategy import ERPFeature, IConnectableStrategy
 from services.tracking_persistence_service import TrackingPersistenceService
 from api.sqlite_manager import DeliveryStatus
 from services.velide_websockets_service import VelideWebsocketsService
@@ -69,6 +69,14 @@ class FarmaxStrategy(IConnectableStrategy):
 
         # --- Wire Signals ---
         self._connect_signals()
+
+    @property
+    def capabilities(self) -> Set[ERPFeature]:
+        # Only list the enabled features here
+        return {
+            ERPFeature.REQUIRES_INITIAL_CONFIG,
+            ERPFeature.DASHBOARD_FOOTER
+        }
 
     def _connect_signals(self):
         """Connects internal service signals to the public Strategy signals."""
@@ -163,9 +171,6 @@ class FarmaxStrategy(IConnectableStrategy):
         self._ingestor.stop()
         self._status_tracker.stop()
         # TODO: Stop reconciliation job
-
-    def requires_initial_configuration(self) -> bool:
-        return True
 
     def fetch_deliverymen(self, success: Callable, error: Callable) -> None:
         """

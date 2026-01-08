@@ -19,6 +19,7 @@ from services.sqlite_service import SQLiteService
 from services.strategies.cds_strategy import CdsStrategy
 from services.auth_service import AuthService
 from presenters.app_presenter import AppPresenter
+from services.strategies.connectable_strategy import IConnectableStrategy
 from services.strategies.farmax_strategy import FarmaxStrategy
 from services.tracking_persistence_service import TrackingPersistenceService
 from services.velide_action_handler import VelideActionHandler
@@ -133,7 +134,7 @@ def create_strategy(
     websockets_service: VelideWebsocketsService,
     reconciliation_service: ReconciliationService,
     deliverymen_retriever: DeliverymenRetrieverService,
-):
+) -> IConnectableStrategy:
     """Factory function to create the correct delivery strategy."""
     if app_config.target_system == TargetSystem.CDS:
         # GUARD CLAUSE: Ensure the specific config for this strategy exists
@@ -197,21 +198,11 @@ def build_services(app_config: Settings) -> Services:
         app_config.api, app_config.target_system
     )
 
-    strategy = create_strategy(
-        app_config,
-        tracking_persistance_service,
-        websockets_service,
-        reconciliation_service,
-        deliverymen_retriever_service,
-    )
-
-    deliveries_service.set_strategy(strategy)
-    deliverymen_retriever_service.set_strategy(strategy)
-
     return Services(
         auth=auth_service,
         deliveries=deliveries_service,
         sqlite=sqlite_service,
+        tracking_persistence=tracking_persistance_service,
         deliverymen_retriever=deliverymen_retriever_service,
         websockets=websockets_service,
         delivery_repository=delivery_repository,
@@ -219,6 +210,22 @@ def build_services(app_config: Settings) -> Services:
         reconciliation=reconciliation_service,
     )
 
+def setup_strategy(
+        app_config: Settings, 
+        services: Services
+    ) -> IConnectableStrategy:
+    strategy = create_strategy(
+        app_config,
+        services.tracking_persistence,
+        services.websockets,
+        services.reconciliation,
+        services.deliverymen_retriever,
+    )
+
+    services.deliveries.set_strategy(strategy)
+    services.deliverymen_retriever.set_strategy(strategy)
+
+    return strategy
 
 # --- Main Execution ---
 
@@ -244,8 +251,11 @@ def main():
     # Build services (Dependency Injection)
     services = build_services(config)
 
+    # Setup strategy
+    strategy = setup_strategy(config, services)
+
     # Initialize the presenter to connect view and services
-    presenter = AppPresenter(view, services)
+    presenter = AppPresenter(view, services, strategy)
 
     # Start the application logic
     presenter.run()

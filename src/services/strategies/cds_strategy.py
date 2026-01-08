@@ -33,9 +33,6 @@ class CdsStrategy(IConnectableStrategy):
             return
         self._file_listener_worker.stop()
 
-    def requires_initial_configuration(self):
-        return False
-
     def fetch_deliverymen(self, success, error):
         raise NotImplementedError
 

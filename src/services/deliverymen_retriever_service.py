@@ -4,7 +4,7 @@ from api.velide import Velide
 from config import ApiConfig, TargetSystem
 from models.base_models import BaseLocalDeliveryman
 from models.velide_delivery_models import DeliverymanResponse
-from services.strategies.connectable_strategy import IConnectableStrategy
+from services.strategies.connectable_strategy import ERPFeature, IConnectableStrategy
 from PyQt5.QtCore import pyqtSignal, QThreadPool, QObject
 
 from workers.velide_worker import VelideWorker
@@ -83,7 +83,7 @@ class DeliverymenRetrieverService(QObject):
             )
             return
 
-        if self._strategy.requires_initial_configuration():
+        if ERPFeature.REQUIRES_INITIAL_CONFIG in self._strategy.capabilities:
             self.mapping_is_required.emit()
         else:
             self.mapping_not_required.emit()

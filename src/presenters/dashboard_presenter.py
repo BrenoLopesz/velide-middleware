@@ -1,4 +1,5 @@
 from __future__ import annotations
+from services.strategies.connectable_strategy import ERPFeature, IConnectableStrategy
 from states.main_state_machine import MainStateMachine
 import logging
 from PyQt5.QtCore import QObject
@@ -19,13 +20,17 @@ if TYPE_CHECKING:
 
 class DashboardPresenter(QObject):
     def __init__(
-        self, view: MainView, services: "Services", state_machine: MainStateMachine
+        self, view: MainView, 
+        services: "Services", 
+        state_machine: MainStateMachine,
+        strategy: IConnectableStrategy
     ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self._dashboard_view = view.dashboard_screen
         self._services = services
         self._machine = state_machine
+        self._strategy = strategy
 
         self._machine.logged_in_state.entered.connect(self.on_authenticate)
         self._machine.logged_in_state.dashboard_state.entered.connect(self.start)
@@ -35,6 +40,9 @@ class DashboardPresenter(QObject):
     def start(self):
         """Called when the dashboard becomes active."""
         self._services.deliveries.start_listening()
+
+        if ERPFeature.DASHBOARD_FOOTER in self._strategy.capabilities:
+            self._dashboard_view.footer_enabled = True
 
     def on_authenticate(self):
         access_token = self._machine.logged_in_state.property("access_token")
@@ -49,21 +57,26 @@ class DashboardPresenter(QObject):
         # Map FSM States -> View Updates
         # We use lambdas to pass the specific Enum required by the View
         
-        ws_fsm.s_connecting.entered.connect(
-            lambda: self._dashboard_view.footer.update_connection_state(ConnectionState.CONNECTING)
-        )
+        # --- UI Updates (Conditional) ---
+        # Only connect footer signals if the strategy supports the footer.
+        # This prevents "AttributeError: 'NoneType' object has no attribute..."
+        if ERPFeature.DASHBOARD_FOOTER in self._strategy.capabilities:
+            ws_fsm.s_connecting.entered.connect(
+                lambda: self._update_footer(ConnectionState.CONNECTING)
+            )
+            
+            ws_fsm.s_connected.entered.connect(
+                lambda: self._update_footer(ConnectionState.CONNECTED)
+            )
+            
+            ws_fsm.s_disconnected.entered.connect(
+                lambda: self._update_footer(ConnectionState.DISCONNECTED)
+            )
+            
+            ws_fsm.s_error.entered.connect(
+                lambda: self._update_footer(ConnectionState.ERROR)
+            )
         
-        ws_fsm.s_connected.entered.connect(
-            lambda: self._dashboard_view.footer.update_connection_state(ConnectionState.CONNECTED)
-        )
-        
-        ws_fsm.s_disconnected.entered.connect(
-            lambda: self._dashboard_view.footer.update_connection_state(ConnectionState.DISCONNECTED)
-        )
-        
-        ws_fsm.s_error.entered.connect(
-            lambda: self._dashboard_view.footer.update_connection_state(ConnectionState.ERROR)
-        )
         # --- Data Handling ---
         # Use the FSM's sanitized signal (Gatekeeper)
         ws_fsm.action_ready.connect(
@@ -126,6 +139,13 @@ class DashboardPresenter(QObject):
             return
 
         self._dashboard_view.deliveries_table.update_delivery(order_id, order, status)
+
+    def _update_footer(self, state: ConnectionState):
+        """Helper to safely update the footer if it exists."""
+        # Even with the capability check, the view might not have initialized 
+        # the footer widget yet (e.g., if called before 'start()').
+        if self._dashboard_view.footer:
+            self._dashboard_view.footer.update_connection_state(state)
 
     def _transform(
         self, order_id: str, status: DeliveryRowStatus, order: Order
