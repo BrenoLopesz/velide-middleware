@@ -5,6 +5,7 @@ from typing import Dict, Optional
 from PyQt5.QtCore import QRunnable, QObject, pyqtSignal
 from gql import gql, Client
 from gql.transport.websockets import WebsocketsTransport
+from gql.transport.exceptions import TransportError
 from pydantic import ValidationError
 from websockets.exceptions import ConnectionClosedError
 
@@ -134,6 +135,7 @@ class VelideWebsocketsWorker(QRunnable):
         """)
 
         variables: Dict[str, str] = {"authorization": self.access_token}
+        # TODO: Check if token is valid. Revalidate if not.
 
         retry_delay = 2
 
@@ -186,14 +188,18 @@ class VelideWebsocketsWorker(QRunnable):
                         except KeyError:
                             self.logger.error("Dados incompletos recebidos.")
 
+            # 2. IMPROVED: Expanded Exception Handling for Connectivity
             except (
                 ConnectionClosedError,
                 ConnectionRefusedError,
                 asyncio.TimeoutError,
                 OSError,
+                # Catch GQL specific transport errors here
+                TransportError
             ) as e:
                 self.logger.warning(
-                    f"Conexão perdida ({e}). Tentando reconectar em {retry_delay}s..."
+                    f"Conexão perdida ou falha ao conectar ({type(e).__name__}: {e}). "
+                    f"Tentando reconectar em {retry_delay}s..."
                 )
 
                 # STATE: Connection dropped. Red light.
@@ -203,10 +209,14 @@ class VelideWebsocketsWorker(QRunnable):
                 # is enough for the UI to turn red.
 
             except Exception as e:
+                # Fatal/Unexpected errors 
+                # (e.g., Query Syntax Error, Application Logic Bugs)
                 self.logger.exception("Erro inesperado no loop Websocket.")
                 # STATE: Unexpected error. Gray/Red light.
                 self.signals.connection_state_changed.emit(ConnectionState.ERROR)
                 self.signals.error_occurred.emit(str(e))
+                # Optional: You might want to break here or retry depending on severity
+                # For now, we fall through to the finally block and retry.
 
             finally:
                 self._transport = None
