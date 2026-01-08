@@ -120,7 +120,7 @@ class FarmaxStatusTracker(QObject):
             for batch in batches:
                 self._spawn_worker_for_batch(batch)
 
-        except Exception as e:
+        except Exception:
             self._logger.exception("Erro inesperado ao iniciar ciclo de rastreamento.")
             self._is_processing = False
 

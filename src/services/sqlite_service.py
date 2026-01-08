@@ -260,7 +260,9 @@ class SQLiteService(QObject):
         """
         Asynchronously requests the database to delete old data.
         """
-        self.logger.info(f"Solicitando limpeza de dados anteriores a {days_retention} dias.")
+        self.logger.info(
+            f"Solicitando limpeza de dados anteriores a {days_retention} dias."
+        )
         self._create_and_run_worker(
             SQLiteWorker.for_prune_old_data,
             days_retention,

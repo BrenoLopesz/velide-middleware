@@ -1,5 +1,4 @@
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel
-from PyQt5.QtCore import Qt
 
 from utils.connection_state import ConnectionColors, ConnectionState
 from visual.fonts import get_fonts

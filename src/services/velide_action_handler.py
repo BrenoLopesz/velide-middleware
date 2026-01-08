@@ -1,7 +1,7 @@
 import logging
 from PyQt5.QtCore import QObject, pyqtSignal
 
-from models.velide_delivery_models import DeliverymanResponse, Order
+from models.velide_delivery_models import Order
 from models.velide_websockets_models import ActionType, LatestAction
 from repositories.deliveries_repository import DeliveryRepository
 

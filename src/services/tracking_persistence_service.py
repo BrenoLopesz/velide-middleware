@@ -287,7 +287,10 @@ class TrackingPersistenceService(QObject):
             DeliveryStatus.MISSING.value,
         )
 
-        return [float(k[0]) for k in self._status_cache.items() if k[1] not in terminal_states]
+        return [
+            float(k[0]) for k in self._status_cache.items() 
+            if k[1] not in terminal_states
+        ]
 
     def mark_as_cancelled(self, internal_id: RawID):
         """

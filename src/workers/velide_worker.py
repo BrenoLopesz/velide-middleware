@@ -96,7 +96,7 @@ class VelideWorker(QRunnable):
 
         # --- Unified Exception Handling ---
 
-        except ValidationError as e:
+        except ValidationError:
             error_message = "Dados da operação inválidos ou incompletos."
             self.logger.exception(
                 "Erro durante a operação devido à dados inválidos."
@@ -112,7 +112,7 @@ class VelideWorker(QRunnable):
             self.logger.exception("Erro ao solicitar a Velide API.")
             self.signals.error.emit(error_message)
 
-        except GraphQLParseError as e:
+        except GraphQLParseError:
             error_message = (
                 "A API Velide retornou uma resposta inesperada " \
                 "e ilegível. O problema pode ser temporário no servidor."
@@ -122,7 +122,7 @@ class VelideWorker(QRunnable):
             )
             self.signals.error.emit(error_message)
 
-        except GraphQLResponseError as e:
+        except GraphQLResponseError:
             error_message = (
                 "A API Velide recusou a operação. Tente novamente ou "
                 "entre em contato com o suporte."

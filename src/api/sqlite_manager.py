@@ -254,7 +254,8 @@ class SQLiteManager:
             return inserted_count
         except sqlite3.Error:
             self.logger.exception(
-                "Ocorreu um erro inesperado durante a adição de mapeamento de entregadores."
+                "Ocorreu um erro inesperado durante "
+                "a adição de mapeamento de entregadores."
             )
             # The __exit__ method will handle the rollback.
             raise  # Re-raise to trigger rollback in __exit__
@@ -338,7 +339,7 @@ class SQLiteManager:
         try:
             cursor = conn.execute(query)
             return cursor.fetchall()
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             self.logger.exception("Erro ao buscar todos os mapeamentos.")
             return []
 
@@ -372,9 +373,9 @@ class SQLiteManager:
                 f"(Status: {status.name})"
             )
             return True
-        except sqlite3.IntegrityError as e:
-            self.logger.warning(
-                f"Falha ao mapear entrega ({external_id}, {internal_id}). Motivo: {e}"
+        except sqlite3.IntegrityError:
+            self.logger.exception(
+                f"Falha ao mapear entrega ({external_id}, {internal_id})."
             )
             return False
         except sqlite3.Error:
@@ -425,7 +426,8 @@ class SQLiteManager:
             return inserted_count
         except sqlite3.Error:
             self.logger.exception(
-                "Ocorreu um erro inesperado durante o armazenamento do mapeamento de entregas."
+                "Ocorreu um erro inesperado durante o " \
+                "armazenamento do mapeamento de entregas."
             )
             raise  # Re-raise to trigger rollback in __exit__
 
@@ -513,7 +515,7 @@ class SQLiteManager:
                 f"Erro ao buscar entrega com o ID externo {external_id}."
             )
             return None
-        except ValueError as e:  # Catch errors if status in DB is not in Enum
+        except ValueError:  # Catch errors if status in DB is not in Enum
             self.logger.exception(
                 f"Status inválido no banco de dados para a entrega {external_id}."
             )
@@ -549,7 +551,7 @@ class SQLiteManager:
                 f"Erro ao buscar entrega com o ID interno {internal_id}."
             )
             return None
-        except ValueError as e:  # Catch errors if status in DB is not in Enum
+        except ValueError:  # Catch errors if status in DB is not in Enum
             self.logger.exception(f"Status inválido no DB para entrega {internal_id}.")
             return None
 
@@ -571,11 +573,11 @@ class SQLiteManager:
             rows = cursor.fetchall()
             # Convert all status strings to Enum objects
             return [(row[0], row[1], DeliveryStatus(row[2])) for row in rows]
-        except sqlite3.Error as e:
-            self.logger.exception(f"Erro ao buscar todos os mapeamentos de entrega.")
+        except sqlite3.Error:
+            self.logger.exception("Erro ao buscar todos os mapeamentos de entrega.")
             return []
-        except ValueError as e:
-            self.logger.exception(f"Erro ao converter status do DB para Enum.")
+        except ValueError:
+            self.logger.exception("Erro ao converter status do DB para Enum.")
             return []
 
     def get_active_deliveries(self) -> List[Tuple[str, str, DeliveryStatus]]:
@@ -606,10 +608,10 @@ class SQLiteManager:
             cursor = conn.execute(query, terminal_states)
             rows = cursor.fetchall()
             return [(row[0], row[1], DeliveryStatus(row[2])) for row in rows]
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             self.logger.exception("Erro ao buscar entregas ativas.")
             return []
-        except ValueError as e:
+        except ValueError:
             self.logger.exception("Erro de conversão de Enum.")
             return []
         

@@ -8,7 +8,7 @@ from models.delivery_table_model import DeliveryRowStatus
 from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_dispatcher import DeliveryDispatcher
 from services.strategies.connectable_strategy import IConnectableStrategy
-from models.velide_delivery_models import DeliverymanResponse, Order
+from models.velide_delivery_models import Order
 
 
 class DeliveriesService(QObject):
