@@ -32,13 +32,20 @@ class DashboardPresenter(QObject):
         self._machine = state_machine
         self._strategy = strategy
 
+        # Flag to define if `start()` was already called or not
+        self._is_started = False
+
         self._machine.logged_in_state.entered.connect(self.on_authenticate)
         self._machine.logged_in_state.dashboard_state.entered.connect(self.start)
 
         self._connect_signals()
 
-    def start(self):
+    def start(self) -> None:
         """Called when the dashboard becomes active."""
+        if self._is_started:
+            return
+
+        self._is_started = True
         self._services.deliveries.start_listening()
 
         if ERPFeature.DASHBOARD_FOOTER in self._strategy.capabilities:

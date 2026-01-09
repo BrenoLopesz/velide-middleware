@@ -46,8 +46,14 @@ class DeliverymenMappingPresenter(QObject):
         deliverymen_mapping_workflow.deliverymen_mapping_state.entered.connect(
             self.on_deliverymen_received
         )
+
         # On clicking to save
         self._view.deliverymen_mapping_screen.save_config.connect(self.validate_mapping)
+
+        self._view.deliverymen_mapping_screen.cancel_config.connect(
+            self._services.deliverymen_retriever.request_deliverymen_mapping_exit
+        )
+
         # After saving mappings
         deliverymen_mapping_workflow.mapping_stored_state.entered.connect(
             self.on_mapping_success

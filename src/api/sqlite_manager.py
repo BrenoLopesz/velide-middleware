@@ -219,39 +219,65 @@ class SQLiteManager:
 
     def add_many_mappings(self, mappings: List[Tuple[str, str]]) -> int:
         """
-        Adds multiple mappings in a single transaction, ignoring duplicates.
-
-        Uses "INSERT OR IGNORE" to skip rows that would violate
-        PRIMARY KEY (velide_id) or UNIQUE (local_id) constraints.
-
-        Args:
-            mappings: A list of (velide_id, local_id) tuples.
-
-        Returns:
-            int: The number of rows actually inserted.
+        Updates mappings only if they have actually changed.
+        
+        1. Fetches current state of these IDs.
+        2. Compares input vs. current state.
+        3. Uses INSERT OR REPLACE only on the specific rows that differ.
         """
         conn = self._get_conn()
-
         if not mappings:
             self.logger.warning(
                 "Nenhuma mapeamento fornecido para os entregadores."
             )
             return 0
 
-        # Use INSERT OR IGNORE to skip duplicates without raising an error
-        insert_query = (
-            "INSERT OR IGNORE INTO DeliverymenMapping "
-            "(velide_id, local_id) VALUES (?, ?)"
-        )
-
         try:
-            cursor = conn.executemany(insert_query, mappings)
-            inserted_count = cursor.rowcount
-            self.logger.debug(
-                f"Processados {len(mappings)} mapeamentos. "
-                f"{inserted_count} novos inseridos."
+            cursor = conn.cursor()
+            
+            # 1. Get the list of IDs we are trying to update
+            incoming_ids = [m[0] for m in mappings]
+            
+            # 2. Fetch the CURRENT state of these IDs from the DB
+            # Note: If list is massive (>900 items), consider chunking this part.
+            placeholders = ','.join('?' * len(incoming_ids))
+            query = f"SELECT velide_id, local_id FROM DeliverymenMapping WHERE velide_id IN ({placeholders})"
+            
+            cursor.execute(query, incoming_ids)
+            existing_rows = dict(cursor.fetchall())  # { 'id1': '115.0', 'id2': '117.0' }
+
+            # 3. Filter: Keep only New rows OR rows where values differ
+            to_insert = []
+            for v_id, new_local_id in mappings:
+                current_local_id = existing_rows.get(v_id)
+                
+                # Condition: If it's new (None) OR the value is different
+                if current_local_id != new_local_id:
+                    to_insert.append((v_id, new_local_id))
+
+            # 4. If nothing changed, return 0 immediately (Save DB write)
+            if not to_insert:
+                self.logger.debug(f"Processados {len(mappings)} mapeamentos. Nenhum dado novo detectado.")
+                return 0
+
+            # 5. Execute INSERT OR REPLACE only on the real changes
+            # We use REPLACE to handle the 'Unique' constraint on local_id automatically.
+            # (It will 'steal' the local_id from another user if necessary).
+            insert_query = (
+                "INSERT OR REPLACE INTO DeliverymenMapping (velide_id, local_id) "
+                "VALUES (?, ?)"
             )
-            return inserted_count
+            
+            cursor.executemany(insert_query, to_insert)
+            
+            # The count is exactly the length of our filtered list
+            real_changes = len(to_insert)
+
+            self.logger.debug(
+                f"Processados {len(mappings)} mapeamentos. {real_changes} atualizações aplicadas."
+            )
+            return real_changes
+
         except sqlite3.Error:
             self.logger.exception(
                 "Ocorreu um erro inesperado durante "

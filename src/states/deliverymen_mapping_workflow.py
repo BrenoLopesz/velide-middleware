@@ -111,6 +111,11 @@ class DeliverymenMappingWorkflow(QState):
         self.deliverymen_mapping_state.addTransition(
             self._on_mapping_stored, self.mapping_stored_state
         )
+        # UI → Cancelled → Finish
+        self.deliverymen_mapping_state.addTransition(
+            self.services.deliverymen_retriever.cancel_mappings, 
+            self.final_state
+        )
         # Stored → Finished
         self.mapping_stored_state.addTransition(
             self.services.deliverymen_retriever.mapping_finished, self.final_state
