@@ -5,7 +5,7 @@ from typing import Dict, Optional
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer, QThreadPool
 
 from api.velide import Velide
-from config import ApiConfig, TargetSystem
+from config import ApiConfig, ReconciliationConfig, TargetSystem
 from utils.velide_status_to_local import map_velide_status_to_local
 from workers.velide_worker import VelideWorker
 
@@ -26,15 +26,12 @@ class ReconciliationService(QObject):
     delivery_in_route = pyqtSignal(str, str)  # Delivery ID, Deliveryman ID
     delivery_missing = pyqtSignal(str)
 
-    # TODO: Use config
-    COOLDOWN_SECONDS = 60.0
-    SYNC_INTERVAL_MS = 600_000  # 10 Minutes
-
     def __init__(
         self,
         tracking_service: TrackingPersistenceService,
         api_config: ApiConfig,
         target_system: TargetSystem,
+        reconciliation_config: Optional[ReconciliationConfig] = ReconciliationConfig()
     ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
@@ -55,6 +52,7 @@ class ReconciliationService(QObject):
         # Don't start timer yet; let the main app start it.
 
         self._is_missing_api = False
+        self._recon_config = reconciliation_config
 
     def set_access_token(self, access_token: str):
         self._velide_api = Velide(access_token, self._api_config, self._target_system)
@@ -64,6 +62,12 @@ class ReconciliationService(QObject):
 
     def start_service(self):
         """Starts the automatic background timer."""
+        if not self._recon_config.enabled:
+            self.logger.warning(
+                "Serviço de reconciliação está desativado nas configurações!"
+            )
+            return
+
         if self._velide_api is None:
             self.logger.error(
                 "É preciso estar autenticado para iniciar a reconciliação automática!"
@@ -130,7 +134,10 @@ class ReconciliationService(QObject):
         for internal_id, velide_id, local_status in local_active_items:
             # --- CHECK 1: COOLDOWN ---
             last_ws = self._websocket_cooldowns.get(velide_id)
-            if last_ws and (current_time - last_ws < self.COOLDOWN_SECONDS):
+            if (
+                last_ws 
+                and (current_time - last_ws < self._recon_config.cooldown_seconds)
+                ):
                 continue
 
             # --- CHECK 2: ZOMBIE ---
@@ -184,9 +191,9 @@ class ReconciliationService(QObject):
     def _cleanup_cooldowns(self, current_time):
         """Remove expired entries to save memory."""
         keys_to_remove = [
-            k
-            for k, v in self._websocket_cooldowns.items()
-            if (current_time - v) > self.COOLDOWN_SECONDS
+            k for k, v in self._websocket_cooldowns.items()
+            # Use config value
+            if (current_time - v) > self._recon_config.cooldown_seconds
         ]
         for k in keys_to_remove:
             del self._websocket_cooldowns[k]

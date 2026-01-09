@@ -2,7 +2,7 @@ from enum import Enum
 import os
 from pathlib import Path
 from typing import Optional, Type, TypeVar
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 import yaml
 
 from utils.bundle_dir import BUNDLE_DIR
@@ -13,6 +13,42 @@ T = TypeVar("T", bound="Settings")
 class TargetSystem(str, Enum):
     CDS = "CDS"
     FARMAX = "Farmax"
+
+class ReconciliationConfig(BaseModel):
+    """
+    Configuration settings for the ReconciliationService.
+    Controls synchronization intervals and cache coherency rules.
+    """
+    enabled: bool = Field(
+        default=True,
+        description="Master switch to enable/disable the automatic background reconciliation loop."
+    )
+
+    sync_interval_ms: int = Field(
+        default=60_000,  # 10 Minutes
+        description="Time in milliseconds between automatic reconciliation cycles."
+    )
+
+    cooldown_seconds: float = Field(
+        default=45.0,
+        description=(
+            "Grace period (in seconds) to ignore an Order ID after receiving a "
+            "WebSocket event for it. Prevents race conditions between real-time "
+            "pushes and the polling reconciler."
+        )
+    )
+
+    @field_validator('sync_interval_ms')
+    def interval_must_be_reasonable(cls, v):
+        if v < 1000:
+            raise ValueError('Sync interval must be at least 1000ms (1 second)')
+        return v
+
+    @field_validator('cooldown_seconds')
+    def cooldown_must_be_positive(cls, v):
+        if v < 0:
+            raise ValueError('Cooldown seconds must be non-negative')
+        return v
 
 
 class FarmaxConfig(BaseModel):
