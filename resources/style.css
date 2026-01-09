@@ -9,8 +9,9 @@ QPushButton {
     font-weight: bold;
 }
 QPushButton#neutral {
-    background-color: #cbd5e1;
-    color: #1e293b;
+    background-color: transparent;      /* No solid background */
+    border: 1px solid #cbd5e1;          /* Thin gray outline */
+    color: #475569;                     /* Slate-600 text */
     padding: 16px;
     border-radius: 6px;
     font-weight: bold;
@@ -24,6 +25,16 @@ QPushButton#black {
 }
 QPushButton:hover {
     background-color: #2563eb;
+}
+QPushButton#neutral:hover {
+    background-color: #f8fafc;          /* Extremely light (almost white) Slate-50 */
+    border: 2px solid #64748b;          /* Thicker, darker border (Slate-500) */
+    color: #334155;                     /* Darker text (Slate-700) */
+    /* Note: We decrease padding slightly if we increase border width 
+       to prevent the button from growing, OR just keep border width 1px 
+       and change color. Let's stick to 1px for smoothness. */
+    border-width: 1px;                  
+    border-color: #475569;              /* Darker border color instead of thickness */
 }
 QPushButton::pressed {
     background-color: #1d4ed8;
