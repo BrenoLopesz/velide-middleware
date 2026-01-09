@@ -25,13 +25,18 @@ class TrackingPersistenceService(QObject):
     # Emitted when the initial data load from SQLite is complete.
     hydrated = pyqtSignal()
 
-    def __init__(self, sqlite_service: SQLiteService, parent=None):
+    def __init__(
+            self, 
+            sqlite_service: SQLiteService, 
+            sqlite_days_retention: Optional[int] =30,
+            parent=None
+        ):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self._sqlite = sqlite_service
         self._cleanup_service = DailyCleanupService(
             sqlite_service=self._sqlite, 
-            days_retention=90
+            days_retention=sqlite_days_retention
         )
         # Start it once (e.g., when the main window shows)
         # This will run a prune immediately, and then again every 24h.

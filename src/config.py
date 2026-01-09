@@ -25,7 +25,7 @@ class ReconciliationConfig(BaseModel):
     )
 
     sync_interval_ms: int = Field(
-        default=60_000,  # 10 Minutes
+        default=60_000,  # 1 Minute
         description="Time in milliseconds between automatic reconciliation cycles."
     )
 
@@ -112,9 +112,20 @@ class Settings(BaseModel):
     auth: AuthenticationConfig
     api: ApiConfig
     farmax: Optional[FarmaxConfig] = None
+    reconciliation: ReconciliationConfig = Field(
+        default_factory=ReconciliationConfig,
+        description="Settings for the reconciliation service."
+    )
     sqlite_path: str = Field(
         default="resources/velide.db",
         description="Relative path to SQLite database file.",
+    )
+    sqlite_days_retention: int = Field(
+        default=30,
+        description=(
+            "How many days will deliveries data last "
+            "until it is cleaned by the Daily Cleanup Service."
+        )
     )
     folder_to_watch: Optional[str] = Field(
         default=None, description="Used to listen for new files when using CDS."

@@ -187,11 +187,15 @@ def build_services(app_config: Settings) -> Services:
         delivery_repository=delivery_repository,
     )
     sqlite_service = SQLiteService(os.path.join(BUNDLE_DIR, app_config.sqlite_path))
-    tracking_persistance_service = TrackingPersistenceService(sqlite_service)
+    tracking_persistance_service = TrackingPersistenceService(
+        sqlite_service,
+        app_config.sqlite_days_retention
+    )
     reconciliation_service = ReconciliationService(
         tracking_service=tracking_persistance_service,
         api_config=app_config.api,
         target_system=app_config.target_system,
+        reconciliation_config=app_config.reconciliation
     )
     websockets_service = VelideWebsocketsService(app_config.api)
     deliverymen_retriever_service = DeliverymenRetrieverService(
