@@ -241,10 +241,13 @@ class SQLiteManager:
             # 2. Fetch the CURRENT state of these IDs from the DB
             # Note: If list is massive (>900 items), consider chunking this part.
             placeholders = ','.join('?' * len(incoming_ids))
-            query = f"SELECT velide_id, local_id FROM DeliverymenMapping WHERE velide_id IN ({placeholders})"
+            query = (
+                "SELECT velide_id, local_id "
+                f"FROM DeliverymenMapping WHERE velide_id IN ({placeholders})"
+            )
             
             cursor.execute(query, incoming_ids)
-            existing_rows = dict(cursor.fetchall())  # { 'id1': '115.0', 'id2': '117.0' }
+            existing_rows = dict(cursor.fetchall())  
 
             # 3. Filter: Keep only New rows OR rows where values differ
             to_insert = []
@@ -257,11 +260,15 @@ class SQLiteManager:
 
             # 4. If nothing changed, return 0 immediately (Save DB write)
             if not to_insert:
-                self.logger.debug(f"Processados {len(mappings)} mapeamentos. Nenhum dado novo detectado.")
+                self.logger.debug(
+                    f"Processados {len(mappings)} mapeamentos. "
+                    "Nenhum dado novo detectado."
+                )
                 return 0
 
             # 5. Execute INSERT OR REPLACE only on the real changes
-            # We use REPLACE to handle the 'Unique' constraint on local_id automatically.
+            # We use REPLACE to handle the 'Unique' constraint 
+            # on local_id automatically.
             # (It will 'steal' the local_id from another user if necessary).
             insert_query = (
                 "INSERT OR REPLACE INTO DeliverymenMapping (velide_id, local_id) "
@@ -274,7 +281,8 @@ class SQLiteManager:
             real_changes = len(to_insert)
 
             self.logger.debug(
-                f"Processados {len(mappings)} mapeamentos. {real_changes} atualizações aplicadas."
+                f"Processados {len(mappings)} mapeamentos. "
+                f"{real_changes} atualizações aplicadas."
             )
             return real_changes
 
