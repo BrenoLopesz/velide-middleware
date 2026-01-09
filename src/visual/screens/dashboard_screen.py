@@ -1,15 +1,19 @@
 from typing import Optional
+from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QWidget, QVBoxLayout
+from visual.components.dashboard_footer import DashboardFooter
 from visual.components.deliveries_table import DeliveriesTable
 from visual.components.log_table import LogTable
 
 class DashboardScreen(QWidget):
+    deliverymen_settings_clicked = pyqtSignal()
+
     def __init__(self) -> None:
         super().__init__()
         
         # 1. Internal state storage
         self._is_footer_enabled: bool = False
-        self.footer: Optional[QWidget] = None
+        self.footer: Optional[DashboardFooter] = None
 
         self.main_layout = QVBoxLayout(self)
 
@@ -45,8 +49,11 @@ class DashboardScreen(QWidget):
             # 2. Lazy Import and Instantiation
             # The import happens only the first time this is set to True.
             if self.footer is None:
-                from visual.components.dashboard_footer import DashboardFooter
                 self.footer = DashboardFooter()
+                # Redirect connection
+                self.footer.deliverymen_settings_clicked.connect(
+                    self.deliverymen_settings_clicked.emit
+                )
 
             # Add to layout and show
             self.main_layout.addWidget(self.footer)

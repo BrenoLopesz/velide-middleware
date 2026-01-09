@@ -17,6 +17,7 @@ class DeliverymenRetrieverService(QObject):
     mapping_is_complete = pyqtSignal()
     mapping_is_incomplete = pyqtSignal()
     mapping_finished = pyqtSignal()
+    mapping_requested = pyqtSignal()
     error = pyqtSignal(str)
 
     def __init__(self, api_config: ApiConfig, target_system: TargetSystem):
@@ -87,6 +88,10 @@ class DeliverymenRetrieverService(QObject):
             self.mapping_is_required.emit()
         else:
             self.mapping_not_required.emit()
+
+    def request_deliverymen_mapping_screen(self) -> None:
+        """Called by the Presenter when user clicks the config button."""
+        self.mapping_requested.emit()
 
     def mark_mapping_as_finished(self) -> None:
         self.mapping_finished.emit()

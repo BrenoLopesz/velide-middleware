@@ -44,6 +44,10 @@ class DashboardPresenter(QObject):
         if ERPFeature.DASHBOARD_FOOTER in self._strategy.capabilities:
             self._dashboard_view.footer_enabled = True
 
+            self._dashboard_view.deliverymen_settings_clicked.connect(
+                self._services.deliverymen_retriever.request_deliverymen_mapping_screen
+            )
+
     def on_authenticate(self):
         access_token = self._machine.logged_in_state.property("access_token")
         self._services.websockets.set_access_token(access_token)
