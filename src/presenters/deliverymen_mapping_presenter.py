@@ -82,25 +82,60 @@ class DeliverymenMappingPresenter(QObject):
         )
 
     def on_deliverymen_received(self):
-        # TODO: BUG - Currently ignoring retrieved 'deliverymen_mappings'.
-        # Merge DB results with 'generate_levenshtein_mappings' so saved
-        # user choices aren't overwritten by auto-guesses.
-
-        # 1. Populate table
         headers = ["Entregadores Velide", "Entregadores Locais"]
+
+
+        # 1. Retrieve the saved mappings from the state machine
+        mapping_workflow = self._machine.logged_in_state.deliverymen_mapping_workflow
+        saved_mappings_list = mapping_workflow.property(
+             "deliverymen_mappings"
+        )
+        # Result: {velide_id: local_id}
+        saved_map_dict = {
+            m[0]: m[1] for m in saved_mappings_list
+        } if saved_mappings_list else {}
+
+        # 2. Get the deliverymen lists
         velide_deliverymen, local_deliverymen = (
             self._services.deliverymen_retriever.get_deliverymen()
         )
-        default_mappings = generate_levenshtein_mappings(
+
+        # 3. Generate the auto-guesses
+        # Returns Dict[velide_id, local_name]
+        auto_mappings = generate_levenshtein_mappings(
             velide_deliverymen, local_deliverymen
         )
+
+        # 4. MERGE: Overwrite auto-guesses with saved data
+        final_mappings = auto_mappings.copy()
+        
+        for v_man in velide_deliverymen:
+            # Check if we have a saved decision for this Velide ID
+            if v_man.id in saved_map_dict:
+                saved_local_id = saved_map_dict[v_man.id]
+                
+                # Find the local deliveryman object by the SAVED ID
+                found_local = next(
+                    (local_deliveryman for local_deliveryman 
+                     in local_deliverymen 
+                     if local_deliveryman.id == saved_local_id), 
+                    None
+                )
+                
+                if found_local:
+                    # FIX: Use 'v_man.id' (key) and 'found_local.name' (value)
+                    # to match the format returned by generate_levenshtein_mappings
+                    final_mappings[v_man.id] = found_local.name
+
+        # 5. Populate table with the MERGED dictionary
         self._view.deliverymen_mapping_screen.populate_table(
             source_items=velide_deliverymen,
             destination_options=local_deliverymen,
-            default_mappings=default_mappings,
+            default_mappings=final_mappings, 
             headers=headers,
         )
-        # 2. Change view
+        
+        # 6. Change view
         self._view.deliverymen_mapping_screen.set_screen(1)
 
     def validate_mapping(self):
