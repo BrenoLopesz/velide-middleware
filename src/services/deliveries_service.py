@@ -230,7 +230,6 @@ class DeliveriesService(QObject):
 
     def _on_delivery_request_failure(self, internal_id: str, error_msg: str):
         """Called when Dispatcher encounters an error."""
-        # TODO: Retry adding delivery to Velide (?)
         self.delivery_failed.emit(internal_id, error_msg)
         self.delivery_update.emit(internal_id, DeliveryRowStatus.ERROR)
         # Original code removed it on failure. Depending on 

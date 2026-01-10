@@ -46,13 +46,6 @@ class DeliverymenMappingWorkflow(QState):
 
         self.setInitialState(self.check_mapping_state)
 
-         # TODO: CRITICAL - Add transitions for 'services.sqlite.error_occurred' 
-        #   in 'retrieving_mappings_state' and 'mapping_stored_state' 
-        #   to prevent soft-locks.
-        # TODO: Add a transition from 'deliverymen_mapping_state' to 
-        #   'final_state' for user cancellation 
-        #   (e.g., closing the window - If allowed).
-
         # --- Transitions ---
 
         # 1. Initial Check → Gather (is required)
