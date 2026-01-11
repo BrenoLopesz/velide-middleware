@@ -52,7 +52,7 @@ class ReconciliationService(QObject):
         # Don't start timer yet; let the main app start it.
 
         self._is_missing_api = False
-        self._recon_config = reconciliation_config
+        self._reconciliation_config = reconciliation_config
 
     def set_access_token(self, access_token: str):
         self._velide_api = Velide(access_token, self._api_config, self._target_system)
@@ -62,7 +62,7 @@ class ReconciliationService(QObject):
 
     def start_service(self):
         """Starts the automatic background timer."""
-        if not self._recon_config.enabled:
+        if not self._reconciliation_config.enabled:
             self.logger.warning(
                 "Serviço de reconciliação está desativado nas configurações!"
             )
@@ -83,7 +83,7 @@ class ReconciliationService(QObject):
         #     self.logger.warning("Cache vazio. Aguardando hidratação...")
 
         self.trigger_reconciliation()
-        self.timer.start(self.SYNC_INTERVAL_MS)
+        self.timer.start(self._reconciliation_config.sync_interval_ms)
 
     def register_websocket_event(self, velide_id: str):
         """
@@ -134,10 +134,9 @@ class ReconciliationService(QObject):
         for internal_id, velide_id, local_status in local_active_items:
             # --- CHECK 1: COOLDOWN ---
             last_ws = self._websocket_cooldowns.get(velide_id)
-            if (
-                last_ws 
-                and (current_time - last_ws < self._recon_config.cooldown_seconds)
-                ):
+            cooldown = self._reconciliation_config.cooldown_seconds
+
+            if last_ws and (current_time - last_ws < cooldown):
                 continue
 
             # --- CHECK 2: ZOMBIE ---
@@ -193,7 +192,7 @@ class ReconciliationService(QObject):
         keys_to_remove = [
             k for k, v in self._websocket_cooldowns.items()
             # Use config value
-            if (current_time - v) > self._recon_config.cooldown_seconds
+            if (current_time - v) > self._reconciliation_config.cooldown_seconds
         ]
         for k in keys_to_remove:
             del self._websocket_cooldowns[k]

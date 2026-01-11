@@ -21,7 +21,8 @@ class ReconciliationConfig(BaseModel):
     """
     enabled: bool = Field(
         default=True,
-        description="Master switch to enable/disable the automatic background reconciliation loop."
+        description=("Master switch to enable/disable the "
+                    "automatic background reconciliation loop.")
     )
 
     sync_interval_ms: int = Field(
