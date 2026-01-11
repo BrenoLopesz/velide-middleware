@@ -26,6 +26,12 @@ class RefreshTokenSignals(QObject):
     finished = pyqtSignal()
     """Signal emitted when the task is complete, regardless of outcome."""
 
+    error = pyqtSignal(str)
+    """Signal emitted when there was an error while retrieving the token.
+    
+    Sends the error_message (str).
+    """
+
     # Note: A signal for failure is not strictly needed here because
     # the 'finished' signal implies the end, and 'token' not being
     # emitted implies failure. The calling code can connect 'finished'
@@ -99,6 +105,8 @@ class RefreshTokenWorker(QRunnable):
             # Store the new token bundle
             store_token_at_file(jsonResponse)
 
+            # TODO: Should handle "Invalid Grant". 
+            #       It should request the user to log in again.
         except requests.HTTPError:
             # Catches non-2xx responses from raise_for_status()
             self.logger.exception(

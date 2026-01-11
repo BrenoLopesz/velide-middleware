@@ -1,4 +1,4 @@
-from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
+from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool, pyqtSlot
 from config import AuthenticationConfig
 
 from workers.authorization_flow_worker import AuthorizationFlowWorker
@@ -31,15 +31,24 @@ class AuthService(QObject):
         worker.signals.error.connect(self.error)
         self._thread_pool.start(worker)
 
+    @pyqtSlot()
     def load_stored_token(self):
         """Creates and connects the token retriever worker."""
         worker = StoredTokenRetrieverWorker()
         worker.signals.expired.connect(self._refresh_token)
         worker.signals.token.connect(self.access_token)
+        # The AsyncTokenProvider is listening to this!
+        worker.signals.error.connect(
+            lambda msg: self.error.emit("Erro ao buscar token armazenado", msg)
+        )
         self._thread_pool.start(worker)
 
     def _refresh_token(self, refresh_token):
         """Creates and connects the token retriever worker."""
         worker = RefreshTokenWorker(refresh_token, self._auth_config)
         worker.signals.token.connect(self.access_token)
+        # The AsyncTokenProvider is listening to this!
+        worker.signals.error.connect(
+            lambda msg: self.error.emit("Erro ao atualizar o token", msg)
+        )
         self._thread_pool.start(worker)

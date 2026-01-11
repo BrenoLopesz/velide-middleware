@@ -27,6 +27,11 @@ class StoredTokenRetrieverSignals(QObject):
     Sends the access_token (str).
     """
 
+    error = pyqtSignal(str)
+    """Signal emitted when there was an error while retrieving the token.
+    
+    Sends the error_message (str).
+    """
 
 class StoredTokenRetrieverWorker(QRunnable):
     """
@@ -79,6 +84,7 @@ class StoredTokenRetrieverWorker(QRunnable):
             token = read_token_from_file()
 
             if token is None:
+                self.signals.error.emit("Nenhum token encontrado.")
                 # No token found, just finish
                 return
 
@@ -93,10 +99,15 @@ class StoredTokenRetrieverWorker(QRunnable):
             # Token is valid, emit signal with access token
             self.signals.token.emit(token["access_token"])
 
-        except TokenStorageError:
+        except TokenStorageError as e:
+            self.signals.error.emit(f"Falha ao atualizar token: {str(e)}")
             self.logger.exception("Falha ao obter token armazenado.")
-        except Exception:
-            self.logger.exception("Ocorreu um erro inesperado.")
+        except Exception as e:
+            self.signals.error.emit(f"Falha ao atualizar token: {str(e)}")
+            self.logger.exception(
+                "Ocorreu um erro inesperado ao buscar o token armazenado."
+            )
+            self.signals.error.emit(str(e))
         finally:
             # Always emit finished signal when done
             self.signals.finished.emit()

@@ -197,7 +197,7 @@ def build_services(app_config: Settings) -> Services:
         target_system=app_config.target_system,
         reconciliation_config=app_config.reconciliation
     )
-    websockets_service = VelideWebsocketsService(app_config.api)
+    websockets_service = VelideWebsocketsService(app_config.api, auth_service)
     deliverymen_retriever_service = DeliverymenRetrieverService(
         app_config.api, app_config.target_system
     )
