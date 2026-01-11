@@ -31,7 +31,7 @@ class ReconciliationService(QObject):
         tracking_service: TrackingPersistenceService,
         api_config: ApiConfig,
         target_system: TargetSystem,
-        reconciliation_config: Optional[ReconciliationConfig] = ReconciliationConfig()
+        reconciliation_config: ReconciliationConfig = ReconciliationConfig()
     ):
         super().__init__()
         self.logger = logging.getLogger(__name__)

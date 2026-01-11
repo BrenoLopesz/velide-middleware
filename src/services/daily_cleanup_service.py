@@ -16,7 +16,7 @@ class DailyCleanupService(QObject):
     def __init__(
         self, 
         sqlite_service: SQLiteService, 
-        days_retention: int = 30, 
+        days_retention: Optional[int] = 30, 
         parent: Optional[QObject] = None
     ):
         """
