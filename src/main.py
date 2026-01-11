@@ -132,7 +132,7 @@ def configure_logging(view: MainView):
 
 def setup_tray_icon(
         app: QApplication,
-        main_view: QWidget,
+        main_view: MainView,
         services: Services
 ):
     def show_window_func():
@@ -148,12 +148,13 @@ def setup_tray_icon(
         os._exit(0)
 
     tray = AppTrayIcon(
-        icon_path=os.path.join(BUNDLE_DIR, "resources", "velide.png"), 
+        icon_path=os.path.join(BUNDLE_DIR, "resources", "velide_white.png"), 
         parent=main_view,
         callback_open_ui=show_window_func,
         callback_close_app=quit_app_func,
         tooltip="Middleware para conectar um ERP ao Velide."
     )
+    main_view.set_tray_icon(tray)
 
     TrayGuard.register(tray)
     app.aboutToQuit.connect(tray.cleanup)

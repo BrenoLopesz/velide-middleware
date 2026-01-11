@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -10,6 +11,7 @@ from screeninfo import get_monitors
 
 from utils.bundle_dir import BUNDLE_DIR
 from utils.device_code import DeviceCodeDict
+from utils.tray_manager import AppTrayIcon
 from visual.screens.dashboard_screen import DashboardScreen
 from visual.screens.deliverymen_mapping_screen import DeliverymenMappingScreen
 from visual.screens.device_code_screen import DeviceCodeScreen
@@ -24,6 +26,7 @@ class MainView(QWidget):
 
     def __init__(self):
         super().__init__()
+        self.tray_icon: Optional[AppTrayIcon] = None
 
         self._initialize_window()
         self._create_screens()
@@ -44,6 +47,10 @@ class MainView(QWidget):
             WINDOW_SIZE[1],
         )
         self.setFixedSize(WINDOW_SIZE[0], WINDOW_SIZE[1])
+
+    def set_tray_icon(self, tray_icon: AppTrayIcon):
+        """Receives the tray icon instance so we can use it for notifications."""
+        self.tray_icon = tray_icon
 
     def _create_screens(self):
         self.stack = QStackedWidget()

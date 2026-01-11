@@ -12,6 +12,7 @@ from models.delivery_table_model import (
 )
 from models.velide_delivery_models import Order
 from utils.connection_state import ConnectionState
+from utils.window_filter import MinimizeToTrayFilter
 from visual.main_view import MainView
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,7 @@ class DashboardPresenter(QObject):
     ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
+        self._main_view = view
         self._dashboard_view = view.dashboard_screen
         self._services = services
         self._machine = state_machine
@@ -61,9 +63,25 @@ class DashboardPresenter(QObject):
         self._services.reconciliation.set_access_token(access_token)
         self._services.deliveries.set_access_token(access_token)
 
-        app = QApplication.instance()
-        # Prevents the app from exiting after closing the UI now.
-        app.setQuitOnLastWindowClosed(False)
+
+        if self._main_view.tray_icon is not None:
+            app = QApplication.instance()
+            # Prevents the app from exiting after closing the UI now.
+            app.setQuitOnLastWindowClosed(False)
+            # We create the filter and attach it to the main_view
+            # Note: We pass 'main_view' as parent so the filter dies when the view dies
+            close_filter = MinimizeToTrayFilter(
+                tray_icon=self._main_view.tray_icon, 
+                parent=self._main_view
+            )
+        
+            # This line activates the "Interceptor"
+            self._main_view.installEventFilter(close_filter)
+        else:
+            self.logger.warning(
+                "Não foi possível configurar o aplicativo para rodar em segundo plano! "
+                "Caso feche essa janela, a integração irá desligar"
+            )
 
     def _connect_signals(self):
         ws_fsm = self._machine.websockets_state
