@@ -2,6 +2,7 @@ from __future__ import annotations
 from services.strategies.connectable_strategy import ERPFeature, IConnectableStrategy
 from states.main_state_machine import MainStateMachine
 import logging
+from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QObject
 from pydantic import ValidationError
 from models.delivery_table_model import (
@@ -59,6 +60,10 @@ class DashboardPresenter(QObject):
         access_token = self._machine.logged_in_state.property("access_token")
         self._services.reconciliation.set_access_token(access_token)
         self._services.deliveries.set_access_token(access_token)
+
+        app = QApplication.instance()
+        # Prevents the app from exiting after closing the UI now.
+        app.setQuitOnLastWindowClosed(False)
 
     def _connect_signals(self):
         ws_fsm = self._machine.websockets_state

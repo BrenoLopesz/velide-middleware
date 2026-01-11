@@ -4,7 +4,8 @@ import subprocess
 import sys
 import traceback
 
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QWidget
+from PyQt5.QtCore import QThreadPool
 from sqlalchemy import create_engine
 
 from config import Settings, TargetSystem, config
@@ -25,6 +26,8 @@ from services.tracking_persistence_service import TrackingPersistenceService
 from services.velide_action_handler import VelideActionHandler
 from services.velide_websockets_service import VelideWebsocketsService
 from utils.sql_utils import get_farmax_engine_string
+from utils.tray_guard import TrayGuard
+from utils.tray_manager import AppTrayIcon
 from visual.main_view import MainView
 from utils.log_handler import PackageFilter, QLogHandler
 from utils.logger import setup_logging
@@ -127,6 +130,33 @@ def configure_logging(view: MainView):
     log_handler.new_log.connect(view.dashboard_screen.log_table.add_row)
     setup_logging(log_handler)  # Assuming this configures the root logger
 
+def setup_tray_icon(
+        app: QApplication,
+        main_view: QWidget,
+        services: Services
+):
+    def show_window_func():
+        main_view.showNormal()
+        main_view.activateWindow()
+
+    def quit_app_func():
+        # Ensure cleanup happens before quitting
+        tray.cleanup()
+        services.websockets.stop_service()
+        app.quit()
+        QThreadPool.globalInstance().waitForDone(1000)
+        os._exit(0)
+
+    tray = AppTrayIcon(
+        icon_path=os.path.join(BUNDLE_DIR, "resources", "velide.png"), 
+        parent=main_view,
+        callback_open_ui=show_window_func,
+        callback_close_app=quit_app_func,
+        tooltip="Middleware para conectar um ERP ao Velide."
+    )
+
+    TrayGuard.register(tray)
+    app.aboutToQuit.connect(tray.cleanup)
 
 def create_strategy(
     app_config: Settings,
@@ -233,7 +263,7 @@ def setup_strategy(
 
 # --- Main Execution ---
 
-
+@TrayGuard.cleanup_on_error
 def main():
     """Main application entry point."""
 
@@ -244,16 +274,20 @@ def main():
     if handle_updates():
         sys.exit(0)
 
+
     # Create the Qt Application and main view
 
     app = create_application()
     view = MainView()
+
 
     # Set up logging
     configure_logging(view)
 
     # Build services (Dependency Injection)
     services = build_services(config)
+
+    setup_tray_icon(app, view, services)
 
     # Setup strategy
     strategy = setup_strategy(config, services)
@@ -273,4 +307,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        handle_startup_error(e)
+        # handle_startup_error(e)
+        pass
