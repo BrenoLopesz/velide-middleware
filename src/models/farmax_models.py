@@ -45,6 +45,24 @@ class FarmaxDelivery(BaseModel):
         return datetime.combine(self.delivery_date, self.delivery_time)
 
 
+def parse_flexible_timestamp(v: Any) -> Any:
+    """
+    Tries to parse Firebird format first. 
+    If it fails, returns raw value for Pydantic standard validation.
+    """
+    if isinstance(v, str):
+        try:
+            # Try Firebird format: DD.MM.YYYY HH:MM:SS.ffffff
+            return datetime.strptime(v, "%d.%m.%Y %H:%M:%S.%f")
+        except ValueError:
+            # If format doesn't match, ignore error and return original string.
+            # Pydantic's internal validator will take over from here.
+            pass
+    return v
+
+# Define a reusable type that applies this logic before validation
+FirebirdOrIsoDatetime = Annotated[datetime, BeforeValidator(parse_flexible_timestamp)]
+
 class DeliveryLog(BaseModel):
     # These aliases map to the columns in your LOG_TABLE_NAME
     id: int = Field(alias="id")
@@ -53,4 +71,4 @@ class DeliveryLog(BaseModel):
     # This is a huge improvement: we validate the action is only one
     # of these three values, preventing bugs from bad data.
     action: Literal["INSERT", "UPDATE", "DELETE"] = Field(alias="action")
-    log_date: datetime = Field(alias="logdate")
+    log_date: FirebirdOrIsoDatetime = Field(alias="logdate")
