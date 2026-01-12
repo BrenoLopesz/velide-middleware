@@ -69,8 +69,8 @@ class MainStateMachine(QStateMachine):
         indent = "  " * level
         state_name = state.objectName() or state.__class__.__name__
 
-        state.entered.connect(lambda: print(f"{indent}→ ENTERED: {state_name}"))
-        state.exited.connect(lambda: print(f"{indent}← EXITED: {state_name}"))
+        state.entered.connect(lambda: print(f"{indent}-> ENTERED: {state_name}"))
+        state.exited.connect(lambda: print(f"{indent}<- EXITED: {state_name}"))
 
         for child in state.children():
             if isinstance(child, QState):
