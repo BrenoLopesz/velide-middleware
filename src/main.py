@@ -4,7 +4,7 @@ import subprocess
 import sys
 import traceback
 
-from PyQt5.QtWidgets import QApplication, QWidget
+from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QThreadPool
 from sqlalchemy import create_engine
 
@@ -307,6 +307,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
+    except Exception:
         # handle_startup_error(e)
         pass

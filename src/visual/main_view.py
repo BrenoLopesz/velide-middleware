@@ -24,7 +24,7 @@ WINDOW_SIZE = [600, 600]
 class MainView(QWidget):
     device_code_expired = pyqtSignal()
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.tray_icon: Optional[AppTrayIcon] = None
 

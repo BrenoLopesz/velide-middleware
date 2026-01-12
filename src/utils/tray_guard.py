@@ -27,7 +27,7 @@ class TrayGuard:
         if cls._tray_instance:
             try:
                 cls._tray_instance.cleanup()
-            except:
+            except Exception:
                 pass
 
         try:
@@ -39,7 +39,7 @@ class TrayGuard:
                 )
             )
             print(error_msg) # Ensure it's in the logs
-        except:
+        except Exception:
             pass
 
         # 3. Quit the app properly

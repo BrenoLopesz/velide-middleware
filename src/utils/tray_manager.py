@@ -56,13 +56,15 @@ class AppTrayIcon(QSystemTrayIcon):
                 "Usando padrão do sistema."
             )
             # Fallback to a standard generic system icon
-            icon = self.parent().style().standardIcon(QStyle.SP_ComputerIcon)
             
+            icon = self.parent().style().standardIcon( # type: ignore[attr-defined]
+                QStyle.SP_ComputerIcon
+            )
         self.setIcon(icon)
 
     def _setup_menu(self) -> None:
         """Creates the context menu with injected callbacks."""
-        menu = QMenu(self.parent())
+        menu = QMenu(parent=self.parent()) # type: ignore[call-overload]
 
         # Option 1: Open UI
         action_open = QAction("Abrir", self.parent())
