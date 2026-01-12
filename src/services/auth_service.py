@@ -11,6 +11,7 @@ class AuthService(QObject):
     device_code = pyqtSignal(dict)
     access_token = pyqtSignal(str)
     error = pyqtSignal(str, str)
+    device_code_requested = pyqtSignal() 
 
     def __init__(self, auth_config: AuthenticationConfig, parent=None):
         super().__init__(parent)
@@ -20,6 +21,10 @@ class AuthService(QObject):
         self._authorization_flow_worker = None
         self._stored_token_retriever_worker = None
         self._refresh_token_worker = None
+
+    def request_device_code_screen(self):
+        """ Emits a signal to start the auth flow. """
+        self.device_code_requested.emit()
 
     def load_device_flow(self):
         """Creates and connects the authorization worker."""

@@ -9,14 +9,13 @@ if TYPE_CHECKING:
 
 
 class LoggedOutState(QState):
-    on_request_device_flow = pyqtSignal()
-
     def __init__(self, services: Services, parent=None):
         super().__init__(parent)
+        self.services = services
 
         self.initial_state = QState(self)
         self.device_flow_state = DeviceFlowState(services, self)
         self.initial_state.addTransition(
-            self.on_request_device_flow, self.device_flow_state
+            self.services.auth.device_code_requested, self.device_flow_state
         )
         self.setInitialState(self.initial_state)

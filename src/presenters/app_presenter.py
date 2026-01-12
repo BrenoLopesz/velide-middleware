@@ -95,6 +95,13 @@ class AppPresenter(QObject):
 
         This defines *what happens* when a state is entered or a signal is emitted.
         """
+        self._view.initial_screen.on_request_device_flow_start.connect(
+            self._services.auth.request_device_code_screen
+        )
+        self._machine.logged_out_state.device_flow_state.idle_state.entered.connect(
+            self._services.auth.load_device_flow
+        )
+
         # --- UI Screen Switching ---
         # When a state is entered, show the corresponding screen in the MainView.
         self._machine.logged_out_state.entered.connect(
