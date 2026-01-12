@@ -40,7 +40,7 @@ setup(
                 "dotenv",
                 "watchdog",
                 "jwt",
-                # "fdb",
+                "fdb",
                 "httpx",
                 # "pillow",
                 "tqdm",
