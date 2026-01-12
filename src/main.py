@@ -126,7 +126,16 @@ def configure_logging(view: MainView):
         "pydantic",
         "watchdog",
         "PyYAML",
+        "gql",
+        "websockets",
     ]
+    # Explicitly silence noisy libraries. 
+    # This prevents them from bubbling up INFO logs to your handlers.
+    logging.getLogger("gql").setLevel(logging.WARNING)
+    logging.getLogger("websockets").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
     src_filter = PackageFilter(filters)
     log_handler.addFilter(src_filter)
     log_handler.new_log.connect(view.dashboard_screen.log_table.add_row)
