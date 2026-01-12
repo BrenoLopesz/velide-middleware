@@ -1,7 +1,8 @@
 from datetime import date, time, datetime
 from enum import Enum
-from typing import Literal, Optional
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Literal, Optional, Any
+from typing_extensions import Annotated
+from pydantic import BaseModel, BeforeValidator, Field, ConfigDict
 
 from models.base_models import BaseLocalDeliveryman
 
