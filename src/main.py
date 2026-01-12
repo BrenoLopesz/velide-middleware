@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import subprocess
 import sys
@@ -78,6 +79,7 @@ def open_installer(installer_path: str):
 
 def handle_startup_error(e: Exception):
     """Displays a fatal error to the user before exiting."""
+    logging.getLogger(__name__).critical("FATAL: Application failed to start.", exc_info=e)
     print("--- APPLICATION FAILED TO START ---")
     print(f"ERROR: {e}")
     traceback.print_exc()
@@ -307,6 +309,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
-        # handle_startup_error(e)
-        pass
+    except Exception as e:
+        handle_startup_error(e)
