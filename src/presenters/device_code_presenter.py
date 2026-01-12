@@ -22,7 +22,7 @@ class DeviceCodePresenter(QObject):
 
     def _on_device_code_received(self):
         """Handles receiving device code and updates the view."""
-        code_data = self._device_flow_state.waiting_for_login.property("code_data")
+        code_data = self._device_flow_state.waiting_for_login.property("device_code")
         self._view.set_device_code_and_qr(code_data)
 
     def on_expire(self):
