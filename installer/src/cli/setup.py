@@ -45,6 +45,8 @@ setup(
                 # "pillow",
                 "tqdm",
                 "screeninfo",
+                "sqlalchemy",
+                "sqlalchemy_firebird",
                 # "brotli",
                 # "win32file",
                 # "win32con",
