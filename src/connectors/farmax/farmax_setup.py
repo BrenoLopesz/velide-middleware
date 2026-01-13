@@ -79,6 +79,7 @@ class FarmaxSetup:
         self.logger.debug(
             f"Criando/Alterando trigger: {self.ADD_DELIVERY_TRIGGER_NAME}"
         )
+        # FIX: Added CURRENT_TIMESTAMP back to the INSERT statements
         query_str = dedent(f"""
             CREATE OR ALTER TRIGGER {self.ADD_DELIVERY_TRIGGER_NAME}
             FOR ENTREGAS
@@ -86,14 +87,14 @@ class FarmaxSetup:
             AS
             BEGIN
                 IF (INSERTING) THEN
-                    INSERT INTO {self.LOG_TABLE_NAME} (CD_VENDA, Action)
-                    VALUES (NEW.CD_VENDA, 'INSERT');
+                    INSERT INTO {self.LOG_TABLE_NAME} (CD_VENDA, Action, LogDate)
+                    VALUES (NEW.CD_VENDA, 'INSERT', CURRENT_TIMESTAMP);
                 ELSE IF (UPDATING) THEN
-                    INSERT INTO {self.LOG_TABLE_NAME} (CD_VENDA, Action)
-                    VALUES (NEW.CD_VENDA, 'UPDATE');
+                    INSERT INTO {self.LOG_TABLE_NAME} (CD_VENDA, Action, LogDate)
+                    VALUES (NEW.CD_VENDA, 'UPDATE', CURRENT_TIMESTAMP);
                 ELSE IF (DELETING) THEN
-                    INSERT INTO {self.LOG_TABLE_NAME} (CD_VENDA, Action)
-                    VALUES (OLD.CD_VENDA, 'DELETE');
+                    INSERT INTO {self.LOG_TABLE_NAME} (CD_VENDA, Action, LogDate)
+                    VALUES (OLD.CD_VENDA, 'DELETE', CURRENT_TIMESTAMP);
             END""")
         conn.execute(text(query_str))
 
