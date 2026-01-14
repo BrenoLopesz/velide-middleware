@@ -42,7 +42,22 @@ jobs:
           uv run python installer/src/cli/setup_installer.py build
           uv run python installer/src/cli/setup.py build
 
-      - name: "06. Compile 32-bit Inno Setup Installer"
+      - name: "06. Download Microsoft VC++ Redistributables"
+        shell: bash
+        run: |
+          # Define target directory matching your .iss location
+          TARGET_DIR="output/installer/resources"
+
+          # Download 64-bit Redistributable (for x64 installer)
+          curl -L -o "$TARGET_DIR/vc_redist.x64.exe" https://aka.ms/vc14/vc_redist.x64.exe
+
+          # Download 32-bit Redistributable (for x86 installer)
+          curl -L -o "$TARGET_DIR/vc_redist.x86.exe" https://aka.ms/vc14/vc_redist.x86.exe
+
+          # Verify files exist (optional but good for debugging)
+          ls -lh "$TARGET_DIR"
+
+      - name: "07. Compile 32-bit Inno Setup Installer"
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.7
         with:
           path: "output/installer/resources/installer.iss"
@@ -51,7 +66,7 @@ jobs:
             /DMyArch=x86
             /DMyAppVersion=v${{ github.ref_name }}
 
-      - name: "07. Compile 64-bit Inno Setup Installer"
+      - name: "08. Compile 64-bit Inno Setup Installer"
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.7
         with:
           path: "output/installer/resources/installer.iss"
@@ -60,10 +75,10 @@ jobs:
             /DMyArch=x64
             /DMyAppVersion=v${{ github.ref_name }}
 
-      - name: "08. Clean up build artifacts"
+      - name: "09. Clean up build artifacts"
         run: Remove-Item -Path './output/installer', './output/middleware' -Recurse -Force -ErrorAction SilentlyContinue
 
-      - name: "09. Generate and Sign Hashes"
+      - name: "10. Generate and Sign Hashes"
         env:
           SIGNING_KEY: ${{ secrets.SIGNING_PRIVATE_KEY }}
         shell: pwsh # Use PowerShell for its robust error handling
@@ -80,7 +95,7 @@ jobs:
             Remove-Item -Path "private_key.pem" -ErrorAction SilentlyContinue
           }
 
-      - name: "10. Create Release and Upload Assets"
+      - name: "11. Create Release and Upload Assets"
         uses: softprops/action-gh-release@v1
         with:
           # The release name will be the tag name
