@@ -55,19 +55,17 @@ class DeliverymenRetrieverService(QObject):
         self, external_id: str
     ) -> Optional[BaseLocalDeliveryman]:
         if not self._local_deliverymen:
+            self.logger.warning(
+                f"Busca por entregador falhou ({external_id})! "
+                "Lista ainda não foi inicializada."
+            )
             return None
         
-        internal_id = next(
-            (
-                mapping[1]
-                for mapping in self._mapping_ids
-                if mapping[0] == external_id
-            ),
-            None,
-        )
+        # O(1) Lookup: Get internal ID from the dictionary
+        internal_id = self._mapping_ids.get(external_id)
         local_deliverymen = self._local_deliverymen
 
-        if internal_id is None or local_deliverymen is None:
+        if internal_id is None:
             return None
         
         return next(
