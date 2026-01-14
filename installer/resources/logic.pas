@@ -22,6 +22,14 @@ var
   CDSLabel: TNewStaticText;
   CDSFolderNote: TNewStaticText;
 
+  // --- Page 3: Farmax Configuration (Conditional) ---
+  FarmaxConfigPage: TWizardPage;
+  FarmaxHostInput: TEdit;
+  FarmaxFileInput: TEdit;
+  FarmaxUserInput: TEdit;
+  FarmaxPassInput: TNewEdit; // Use PasswordEdit for security
+  FarmaxBrowseButton: TButton;
+
   // --- Global Variables ---
   SelectedFolderPath: String;
   IsUpgrade: Boolean;
@@ -154,6 +162,18 @@ begin
   Result := True;
 end;
 
+procedure FarmaxBrowseClick(Sender: TObject);
+var
+  FileName: String;
+begin
+  FileName := FarmaxFileInput.Text;
+  // GetOpenFileName parameters: Handle, Title, InitialDir, Filter, OutputVar
+  if GetOpenFileName(CustomMessage('FarmaxSelectDBTitle'), FileName, '', 'Firebird Database (*.fdb)|*.fdb|All Files (*.*)|*.*', FileName) then
+  begin
+    FarmaxFileInput.Text := FileName;
+  end;
+end;
+
 // ---------------------------------------------------------------------------------
 // INITIALIZE WIZARD
 // Creates the custom UI pages (System Selection & CDS Config).
@@ -200,6 +220,62 @@ begin
   CDSFolderNote.SetBounds(ScaleX(10), ScaleY(62), ScaleX(400), ScaleY(30));
   CDSFolderNote.Font.Style := [fsItalic];
   CDSFolderNote.Font.Color := clGray;
+
+  // 3. Farmax Configuration Page
+  FarmaxConfigPage := CreateCustomPage(SystemSelectionPage.ID, 'Farmax Configuration', 'Configure database connection settings.');
+
+  Y := ScaleY(10);
+  
+  // Host
+  TNewStaticText.Create(FarmaxConfigPage).Parent := FarmaxConfigPage.Surface;
+  TNewStaticText(FarmaxConfigPage.Surface.Controls[FarmaxConfigPage.Surface.ControlCount - 1]).Caption := CustomMessage('FarmaxHostLabel');
+  TNewStaticText(FarmaxConfigPage.Surface.Controls[FarmaxConfigPage.Surface.ControlCount - 1]).SetBounds(ScaleX(0), Y, ScaleX(150), ScaleY(20));
+  
+  FarmaxHostInput := TEdit.Create(FarmaxConfigPage);
+  FarmaxHostInput.Parent := FarmaxConfigPage.Surface;
+  FarmaxHostInput.SetBounds(ScaleX(160), Y - 3, ScaleX(250), ScaleY(21));
+  FarmaxHostInput.Text := 'localhost'; // Reasonable default
+
+  Y := Y + ScaleY(35);
+
+  // Database File
+  TNewStaticText.Create(FarmaxConfigPage).Parent := FarmaxConfigPage.Surface;
+  TNewStaticText(FarmaxConfigPage.Surface.Controls[FarmaxConfigPage.Surface.ControlCount - 1]).Caption := CustomMessage('FarmaxFileLabel');
+  TNewStaticText(FarmaxConfigPage.Surface.Controls[FarmaxConfigPage.Surface.ControlCount - 1]).SetBounds(ScaleX(0), Y, ScaleX(150), ScaleY(20));
+
+  FarmaxFileInput := TEdit.Create(FarmaxConfigPage);
+  FarmaxFileInput.Parent := FarmaxConfigPage.Surface;
+  FarmaxFileInput.SetBounds(ScaleX(160), Y - 3, ScaleX(175), ScaleY(21));
+
+  FarmaxBrowseButton := TButton.Create(FarmaxConfigPage);
+  FarmaxBrowseButton.Parent := FarmaxConfigPage.Surface;
+  FarmaxBrowseButton.SetBounds(ScaleX(340), Y - 3, ScaleX(70), ScaleY(21));
+  FarmaxBrowseButton.Caption := CustomMessage('BrowseCaption');
+  FarmaxBrowseButton.OnClick := @FarmaxBrowseClick; // We will define this next
+
+  Y := Y + ScaleY(35);
+
+  // User
+  TNewStaticText.Create(FarmaxConfigPage).Parent := FarmaxConfigPage.Surface;
+  TNewStaticText(FarmaxConfigPage.Surface.Controls[FarmaxConfigPage.Surface.ControlCount - 1]).Caption := CustomMessage('FarmaxUserLabel');
+  TNewStaticText(FarmaxConfigPage.Surface.Controls[FarmaxConfigPage.Surface.ControlCount - 1]).SetBounds(ScaleX(0), Y, ScaleX(150), ScaleY(20));
+
+  FarmaxUserInput := TEdit.Create(FarmaxConfigPage);
+  FarmaxUserInput.Parent := FarmaxConfigPage.Surface;
+  FarmaxUserInput.SetBounds(ScaleX(160), Y - 3, ScaleX(250), ScaleY(21));
+  FarmaxUserInput.Text := 'SYSDBA'; // Standard Firebird default
+
+  Y := Y + ScaleY(35);
+
+  // Password
+  TNewStaticText.Create(FarmaxConfigPage).Parent := FarmaxConfigPage.Surface;
+  TNewStaticText(FarmaxConfigPage.Surface.Controls[FarmaxConfigPage.Surface.ControlCount - 1]).Caption := CustomMessage('FarmaxPasswordLabel');
+  TNewStaticText(FarmaxConfigPage.Surface.Controls[FarmaxConfigPage.Surface.ControlCount - 1]).SetBounds(ScaleX(0), Y, ScaleX(150), ScaleY(20));
+
+  FarmaxPassInput := TNewEdit.Create(FarmaxConfigPage);
+  FarmaxPassInput.Parent := FarmaxConfigPage.Surface;
+  FarmaxPassInput.SetBounds(ScaleX(160), Y - 3, ScaleX(250), ScaleY(21));
+  FarmaxPassInput.Text := 'masterkey'; // Standard Firebird default
 end;
 
 // ---------------------------------------------------------------------------------
@@ -209,21 +285,27 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
-  
-  // If upgrading, skip ALL custom configuration pages
+
   if IsUpgrade then
   begin
-    if (PageID = SystemSelectionPage.ID) or (PageID = CDSConfigPage.ID) then
+    if (PageID = SystemSelectionPage.ID) or (PageID = CDSConfigPage.ID) or (PageID = FarmaxConfigPage.ID) then
     begin
       Result := True;
       Exit;
     end;
   end;
-  
-  // Logic for standard install: Skip CDS page if CDS was not selected
+
+  // Skip CDS page if System is NOT CDS
   if PageID = CDSConfigPage.ID then
   begin
-    if SystemDropDown.Text <> CustomMessage('SystemCDS') then
+    if SystemDropDown.Text <> 'CDS' then // Ensure this matches your DropDown item exactly
+      Result := True;
+  end;
+
+  // Skip Farmax page if System is NOT Farmax
+  if PageID = FarmaxConfigPage.ID then
+  begin
+    if SystemDropDown.Text <> 'Farmax' then // Ensure this matches your DropDown item exactly
       Result := True;
   end;
 end;
@@ -235,6 +317,16 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
+
+  // Validate Farmax Inputs
+  if CurPageID = FarmaxConfigPage.ID then
+  begin
+    if (Trim(FarmaxHostInput.Text) = '') or (Trim(FarmaxFileInput.Text) = '') or (Trim(FarmaxUserInput.Text) = '') then
+    begin
+      MsgBox(CustomMessage('FarmaxErrorMissing'), mbError, MB_OK);
+      Result := False;
+    end;
+  end;
   
   // Note: We do not check IsUpgrade here because ShouldSkipPage
   // ensures we never land on this page during an upgrade.
@@ -256,6 +348,16 @@ begin
       SelectedFolderPath := CDSFolderInput.Text;
     end;
   end;
+end;
+
+// Add this helper to append to array
+procedure AddLine(var Lines: TArrayOfString; const Line: String);
+var
+  Len: Integer;
+begin
+  Len := GetArrayLength(Lines);
+  SetArrayLength(Lines, Len + 1);
+  Lines[Len] := Line;
 end;
 
 // ---------------------------------------------------------------------------------
@@ -291,25 +393,46 @@ begin
       
       if LoadStringsFromFile(TemplatePath, FileContent) then
       begin
+        SelectedSystem := SystemDropDown.Text;
+
         for i := 0 to GetArrayLength(FileContent) - 1 do
         begin
-          // Replace system placeholder
+          // 1. Replace TARGET_SYSTEM
           FileContent[i] := StringReplace(FileContent[i], '{{ TARGET_SYSTEM }}', SelectedSystem);
-          
-          // Replace folder path only if system is CDS
-          if SelectedSystem = CustomMessage('SystemCDS') then
+
+          // 2. Handle CDS Folder logic
+          if SelectedSystem = 'CDS' then
           begin
-            EscapedPath := SelectedFolderPath;
-            // Escape backslashes for YAML/JSON compatibility
-            StringChangeEx(EscapedPath, '\', '\\', True);
-            FileContent[i] := StringReplace(FileContent[i], '{{ FOLDER_TO_WATCH }}', EscapedPath);
+             EscapedPath := SelectedFolderPath;
+             StringChangeEx(EscapedPath, '\', '\\', True);
+             FileContent[i] := StringReplace(FileContent[i], '{{ FOLDER_TO_WATCH }}', EscapedPath);
+          end
+          else
+          begin
+             // If Farmax, clear the folder_to_watch placeholder so it becomes null or empty
+             FileContent[i] := StringReplace(FileContent[i], '{{ FOLDER_TO_WATCH }}', 'null');
           end;
         end;
-        
+
+        // 3. INJECT FARMAX CONFIG
+        if SelectedSystem = 'Farmax' then
+        begin
+           EscapedFile := FarmaxFileInput.Text;
+           StringChangeEx(EscapedFile, '\', '\\', True); // Escape paths for YAML
+           
+           // Append the lines manually
+           AddLine(FileContent, ''); // Empty line for spacing
+           AddLine(FileContent, 'farmax:');
+           AddLine(FileContent, '  host: "' + FarmaxHostInput.Text + '"');
+           AddLine(FileContent, '  file: "' + EscapedFile + '"');
+           AddLine(FileContent, '  user: "' + FarmaxUserInput.Text + '"');
+           AddLine(FileContent, '  password: "' + FarmaxPassInput.Text + '"');
+        end;
+
         if SaveStringsToUTF8File(ConfigPath, FileContent, True) then
-          Log(Format('Successfully created config.yml with system: %s', [SelectedSystem]))
+          Log('Config generated successfully.')
         else
-          Log('Error saving config.yml');
+          Log('Error saving config.');
       end
       else
         Log('Error reading template file');

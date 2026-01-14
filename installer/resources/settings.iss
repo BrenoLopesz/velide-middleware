@@ -118,6 +118,39 @@ en.CDSObservationCaption=If you are unsure, please contact the CDS support.
 br.CDSObservationCaption=Se você não souber, por favor contate o suporte do CDS.
 es.CDSObservationCaption=Si no está seguro, comuníquese con el soporte de CDS.
 
+; --- Farmax Configuration Page ---
+en.FarmaxConfigTitle=Farmax Configuration
+br.FarmaxConfigTitle=Configuração do Farmax
+es.FarmaxConfigTitle=Configuración de Farmax
+
+en.FarmaxConfigDescription=Configure database connection settings.
+br.FarmaxConfigDescription=Configure as configurações de conexão com o banco de dados.
+es.FarmaxConfigDescription=Configure los ajustes de conexión a la base de datos.
+
+en.FarmaxHostLabel=Host Address:
+br.FarmaxHostLabel=Endereço do Host:
+es.FarmaxHostLabel=Dirección del Host:
+
+en.FarmaxFileLabel=Database File (.fdb):
+br.FarmaxFileLabel=Arquivo do Banco de Dados (.fdb):
+es.FarmaxFileLabel=Archivo de Base de Datos (.fdb):
+
+en.FarmaxUserLabel=User:
+br.FarmaxUserLabel=Usuário:
+es.FarmaxUserLabel=Usuario:
+
+en.FarmaxPasswordLabel=Password:
+br.FarmaxPasswordLabel=Senha:
+es.FarmaxPasswordLabel=Contraseña:
+
+en.FarmaxSelectDBTitle=Select Firebird Database
+br.FarmaxSelectDBTitle=Selecione o Banco de Dados Firebird
+es.FarmaxSelectDBTitle=Seleccionar Base de Datos Firebird
+
+en.FarmaxErrorMissing=Please fill in all Farmax connection details.
+br.FarmaxErrorMissing=Por favor, preencha todos os detalhes de conexão do Farmax.
+es.FarmaxErrorMissing=Por favor, complete todos los detalles de conexión de Farmax.
+
 ; --- Common Controls ---
 en.SelectFolder=Select folder:
 br.SelectFolder=Selecione uma pasta:
