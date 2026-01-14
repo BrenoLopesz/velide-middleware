@@ -179,6 +179,8 @@ end;
 // Creates the custom UI pages (System Selection & CDS Config).
 // ---------------------------------------------------------------------------------
 procedure InitializeWizard();
+var 
+  Y: Integer;
 begin
   // 1. System Selection Page
   SystemSelectionPage := CreateCustomPage(wpSelectTasks, CustomMessage('IntegrationConfigTitle'), CustomMessage('IntegrationConfigDescription'));
@@ -370,6 +372,7 @@ var
   FileContent: TArrayOfString;
   EscapedPath: String;
   i: Integer;
+  EscapedFile: String;
 begin
   if CurStep = ssPostInstall then
   begin
