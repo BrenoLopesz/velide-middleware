@@ -1,6 +1,6 @@
 from PyQt5.QtCore import QObject, pyqtSignal, QRunnable
 from utils.device_code import DeviceCode, DeviceCodeDict
-from utils.access_token import AccessToken
+from utils.access_token import AccessToken, AccessTokenDict
 import logging
 import time
 import traceback
@@ -18,10 +18,10 @@ class AuthorizationFlowSignals(QObject):
     QRunnable worker.
     """
 
-    authenticated = pyqtSignal(str)
+    authenticated = pyqtSignal(str, str)
     """Signal emitted upon successful authentication.
     
-    Sends the access_token (str).
+    Sends the access_token and the refresh_token (str, str).
     """
 
     error = pyqtSignal(str, str)
@@ -60,6 +60,7 @@ class AuthorizationFlowWorker(QRunnable):
     )
     ERROR_CODE_EXPIRED = "Código do dispositivo expirado."
     ERROR_UNEXPECTED = "Ocorreu um erro inesperado."
+    MISSING_REFRESH_TOKEN = "Erro: Token de atualização não recebido."
 
     def __init__(self, config: AuthenticationConfig):
         """
@@ -111,7 +112,10 @@ class AuthorizationFlowWorker(QRunnable):
         )
         return device_code_handler.request()
 
-    def _poll_for_access_token(self, device_code_info: Dict) -> Optional[str]:
+    def _poll_for_access_token(
+            self, 
+            device_code_info: Dict
+    ) -> Optional[AccessTokenDict]:
         """
         Polls the token endpoint until an access token is granted, the
         code expires, or the task is cancelled.
@@ -120,7 +124,7 @@ class AuthorizationFlowWorker(QRunnable):
             device_code_info: The dictionary received from _get_device_code.
 
         Returns:
-            The access_token string on success, or None if the loop
+            The token data on success, or None if the loop
             is exited (due to expiry or cancellation).
         """
         expires_at = time.time() + device_code_info["expires_in"]
@@ -138,7 +142,7 @@ class AuthorizationFlowWorker(QRunnable):
                 token_data = access_token_handler.request()
                 # SUCCESS! We got the token.
                 store_token_at_file(token_data)  # Store it securely
-                return token_data["access_token"]
+                return token_data
 
             except TokenPollingError as e:
                 # Handle specific OAuth errors
@@ -198,12 +202,20 @@ class AuthorizationFlowWorker(QRunnable):
             self.signals.device_code.emit(device_code_info)
 
             # Step 2: Poll for the access token
-            access_token = self._poll_for_access_token(device_code_info)
+            token_data = self._poll_for_access_token(device_code_info)
 
             # Step 3: Handle the result
-            if access_token:
-                # Success
-                self.signals.authenticated.emit(access_token)
+            if token_data:
+                access_token = token_data.get("access_token")
+                refresh_token = token_data.get("refresh_token")
+
+                if access_token and refresh_token:
+                    # Emit both tokens!
+                    self.signals.authenticated.emit(access_token, refresh_token)
+                else:
+                    # Edge case: Server didn't send a refresh token? 
+                    # Check your Auth0/Cognito "Offline Access" scope settings.
+                    self._emit_error(self.MISSING_REFRESH_TOKEN)
             else:
                 # This handles both expired and cancelled scenarios
                 if self._is_running:

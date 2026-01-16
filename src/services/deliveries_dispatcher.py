@@ -1,7 +1,7 @@
 import collections
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
 from workers.velide_worker import VelideWorker
-from api.velide import Velide
+from api.velide_gateway import VelideGateway
 from models.velide_delivery_models import Order
 from typing import Deque, Optional
 
@@ -23,15 +23,12 @@ class DeliveryDispatcher(QObject):
     # (internal_id, error_message)
     task_failed = pyqtSignal(str, str)
 
-    def __init__(self, thread_pool: QThreadPool):
+    def __init__(self, gateway: VelideGateway, thread_pool: QThreadPool):
         super().__init__()
         self._thread_pool = thread_pool
+        self._gateway = gateway
         self._queue: Deque[dict] = collections.deque()
         self._is_processing = False
-        self._velide_api: Optional[Velide] = None
-
-    def set_api(self, api: Velide):
-        self._velide_api = api
 
     def queue_add(self, internal_id: str, order: Order):
         self._queue.append({"type": TASK_ADD, "id": internal_id, "payload": order})
@@ -93,10 +90,10 @@ class DeliveryDispatcher(QObject):
         task_type = task["type"]
 
         if task_type == TASK_ADD:
-            return VelideWorker.for_add_delivery(self._velide_api, task["payload"])
+            return VelideWorker.for_add_delivery(self._gateway, task["payload"])
 
         elif task_type == TASK_DELETE:
-            return VelideWorker.for_delete_delivery(self._velide_api, task["ext_id"])
+            return VelideWorker.for_delete_delivery(self._gateway, task["ext_id"])
 
         return None
 

@@ -4,7 +4,7 @@ import httpx
 from PyQt5.QtCore import QObject, pyqtSignal, QRunnable
 from pydantic import ValidationError
 
-from api.velide import Velide
+from api.velide_gateway import VelideGateway
 
 # Importing all necessary models and exceptions from both original files
 from models.velide_delivery_models import (
@@ -46,40 +46,40 @@ class VelideWorker(QRunnable):
     to instantiate this worker for the desired task.
     """
 
-    def __init__(self, velide: Velide, operation: str, **kwargs):
+    def __init__(self, gateway: VelideGateway, operation: str, **kwargs):
         """
         Private constructor. Please use the @classmethod factory methods.
         """
         super().__init__()
         self.signals = VelideWorkerSignals()
-        self._velide = velide
+        self._gateway = gateway
         self._operation = operation  # 'add_delivery' or 'get_deliverymen'
         self._kwargs = kwargs  # Stores 'order' if required
         self.logger = logging.getLogger(__name__)
 
     @classmethod
-    def for_add_delivery(cls, velide: Velide, order: Order) -> "VelideWorker":
+    def for_add_delivery(cls, gateway: VelideGateway, order: Order) -> "VelideWorker":
         """
         Creates a worker configured to add a new delivery.
         """
-        return cls(velide, "add_delivery", order=order)
+        return cls(gateway, "add_delivery", order=order)
 
     @classmethod
-    def for_delete_delivery(cls, velide: Velide, delivery_id: str) -> "VelideWorker":
+    def for_delete_delivery(cls, gateway: VelideGateway, delivery_id: str) -> "VelideWorker":
         """Creates a worker configured to delete a delivery."""
-        return cls(velide, "delete_delivery", delivery_id=delivery_id)
+        return cls(gateway, "delete_delivery", delivery_id=delivery_id)
 
     @classmethod
-    def for_get_deliverymen(cls, velide: Velide) -> "VelideWorker":
+    def for_get_deliverymen(cls, gateway: VelideGateway) -> "VelideWorker":
         """
         Creates a worker configured to fetch the list of deliverymen.
         """
-        return cls(velide, "get_deliverymen")
+        return cls(gateway, "get_deliverymen")
 
     @classmethod
-    def for_snapshot(cls, velide: Velide) -> "VelideWorker":
+    def for_snapshot(cls, gateway: VelideGateway) -> "VelideWorker":
         """Creates a worker to fetch the global delivery snapshot."""
-        return cls(velide, "get_global_snapshot")
+        return cls(gateway, "get_global_snapshot")
 
     def run(self):
         """
@@ -159,7 +159,14 @@ class VelideWorker(QRunnable):
         """
         self.logger.debug("Entrando no contexto assíncrono do cliente Velide...")
 
-        async with self._velide as client:
+        client = self._gateway.get_client()
+        if not client:
+            self.logger.error(
+                "API do Velide não foi inicializada! Verifique as credenciais."
+            )
+            return
+
+        async with client:
             if self._operation == "add_delivery":
                 order = self._kwargs.get("order")
                 if not order:

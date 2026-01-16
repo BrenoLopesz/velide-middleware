@@ -3,12 +3,12 @@ from typing import Optional
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
 
 from config import ApiConfig, TargetSystem
-from api.velide import Velide
 from models.delivery_table_model import DeliveryRowStatus
 from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_dispatcher import DeliveryDispatcher
 from services.strategies.connectable_strategy import IConnectableStrategy
 from models.velide_delivery_models import Order
+from api.velide_gateway import VelideGateway
 
 
 class DeliveriesService(QObject):
@@ -18,33 +18,32 @@ class DeliveriesService(QObject):
 
     def __init__(
         self,
+        gateway: VelideGateway,
         api_config: ApiConfig,
         target_system: TargetSystem,
         delivery_repository: DeliveryRepository,
     ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
+        self._gateway = gateway
 
         # 1. DEPENDENCY INJECTION / COMPOSITION
         self._repository = delivery_repository
-        self._dispatcher = DeliveryDispatcher(QThreadPool.globalInstance())
+        self._dispatcher = DeliveryDispatcher(
+            gateway,
+            QThreadPool.globalInstance()
+        )
 
         # 2. CONFIGURATION
         self._api_config = api_config
         self._target_system = target_system
         self._active_strategy: Optional[IConnectableStrategy] = None
-        self._velide_api: Optional[Velide] = None
 
         # 3. CONNECT INTERNAL DISPATCHER SIGNALS
         # This bridges the gap between the Worker -> Dispatcher -> Service
         self._dispatcher.delivery_success.connect(self._on_add_delivery_request_success)
         self._dispatcher.deletion_success.connect(self._on_deletion_request_success)
         self._dispatcher.task_failed.connect(self._on_delivery_request_failure)
-
-    def set_access_token(self, access_token: str):
-        self._velide_api = Velide(access_token, self._api_config, self._target_system)
-        # Pass API to dispatcher so it can create workers
-        self._dispatcher.set_api(self._velide_api)
 
     def get_order(self, order_id: str) -> Optional[Order]:
         """Facade for the repository."""
@@ -122,7 +121,7 @@ class DeliveriesService(QObject):
         # 2. Acknowledge to UI
         self.delivery_acknowledged.emit(internal_id, normalized_order)
 
-        if self._velide_api is None:
+        if not self._gateway.is_ready():
             self.logger.error(
                 "Não é possível enviar entrega antes de " \
                 "efetuar autenticação! Aguardando..."

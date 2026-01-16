@@ -63,10 +63,6 @@ class DeliverymenMappingPresenter(QObject):
         self._services.sqlite.error_occurred.connect(self.error)
 
     def _on_start_gathering_deliverymen(self):
-        # Updates Deliverymen Retriever service access token
-        self._services.deliverymen_retriever.set_access_token(
-            self._machine.logged_in_state.property("access_token")
-        )
         # Then fetch deliverymen
         self._services.deliverymen_retriever.fetch_deliverymen()
 

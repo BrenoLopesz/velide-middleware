@@ -60,9 +60,6 @@ class DashboardPresenter(QObject):
 
     def on_authenticate(self):
         access_token = self._machine.logged_in_state.property("access_token")
-        self._services.reconciliation.set_access_token(access_token)
-        self._services.deliveries.set_access_token(access_token)
-
 
         if self._main_view.tray_icon is not None:
             app = QApplication.instance()

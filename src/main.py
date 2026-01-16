@@ -26,6 +26,7 @@ from services.strategies.farmax_strategy import FarmaxStrategy
 from services.tracking_persistence_service import TrackingPersistenceService
 from services.velide_action_handler import VelideActionHandler
 from services.velide_websockets_service import VelideWebsocketsService
+from services.velide_gateway import VelideGateway
 from utils.sql_utils import get_farmax_engine_string
 from utils.tray_guard import TrayGuard
 from utils.tray_manager import AppTrayIcon
@@ -220,10 +221,12 @@ def create_strategy(
 
 def build_services(app_config: Settings) -> Services:
     """Creates and wires together all core application services."""
-    auth_service = AuthService(app_config.auth)
+    velide_gateway = VelideGateway(app_config.api, app_config.target_system)
+    auth_service = AuthService(app_config.auth, velide_gateway)
     delivery_repository = DeliveryRepository()
     velide_action_handler = VelideActionHandler(delivery_repository)
     deliveries_service = DeliveriesService(
+        gateway=velide_gateway,
         api_config=app_config.api,
         target_system=app_config.target_system,
         delivery_repository=delivery_repository,
@@ -234,6 +237,7 @@ def build_services(app_config: Settings) -> Services:
         app_config.sqlite_days_retention
     )
     reconciliation_service = ReconciliationService(
+        gateway=velide_gateway,
         tracking_service=tracking_persistance_service,
         api_config=app_config.api,
         target_system=app_config.target_system,
@@ -241,7 +245,9 @@ def build_services(app_config: Settings) -> Services:
     )
     websockets_service = VelideWebsocketsService(app_config.api, auth_service)
     deliverymen_retriever_service = DeliverymenRetrieverService(
-        app_config.api, app_config.target_system
+        velide_gateway,
+        app_config.api, 
+        app_config.target_system
     )
 
     return Services(

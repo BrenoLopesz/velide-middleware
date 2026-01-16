@@ -8,6 +8,7 @@ from api.velide import Velide
 from config import ApiConfig, ReconciliationConfig, TargetSystem
 from utils.velide_status_to_local import map_velide_status_to_local
 from workers.velide_worker import VelideWorker
+from api.velide_gateway import VelideGateway
 
 # We import the SERVICE, not the DB Manager
 from services.tracking_persistence_service import TrackingPersistenceService
@@ -28,6 +29,7 @@ class ReconciliationService(QObject):
 
     def __init__(
         self,
+        gateway: VelideGateway,
         tracking_service: TrackingPersistenceService,
         api_config: ApiConfig,
         target_system: TargetSystem,
@@ -35,7 +37,7 @@ class ReconciliationService(QObject):
     ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
-        self._velide_api: Optional[Velide] = None
+        self._gateway = gateway
 
         # Dependency Injection
         self.tracking_service = tracking_service
@@ -54,12 +56,6 @@ class ReconciliationService(QObject):
         self._is_missing_api = False
         self._reconciliation_config = reconciliation_config
 
-    def set_access_token(self, access_token: str):
-        self._velide_api = Velide(access_token, self._api_config, self._target_system)
-        # If didn't start previosly due to missing API, start it now.
-        if self._is_missing_api:
-            self.start_service()
-
     def start_service(self):
         """Starts the automatic background timer."""
         if not self._reconciliation_config.enabled:
@@ -68,7 +64,7 @@ class ReconciliationService(QObject):
             )
             return
 
-        if self._velide_api is None:
+        if not self._gateway.is_ready():
             self.logger.error(
                 "É preciso estar autenticado para iniciar a reconciliação automática!"
             )
@@ -102,7 +98,7 @@ class ReconciliationService(QObject):
 
         # Create the worker
         # Note: We don't need to pass IDs anymore, we get the Global Snapshot
-        worker = VelideWorker(self._velide_api, "get_global_snapshot")
+        worker = VelideWorker(self._gateway, "get_global_snapshot")
 
         # Connect signals
         # We need a new signal in VelideWorkerSignals: 'snapshot_retrieved'

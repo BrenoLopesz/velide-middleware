@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, List, Optional, Tuple
-from api.velide import Velide
+from api.velide_gateway import VelideGateway
 from config import ApiConfig, TargetSystem
 from models.base_models import BaseLocalDeliveryman
 from models.velide_delivery_models import DeliverymanResponse
@@ -23,14 +23,19 @@ class DeliverymenRetrieverService(QObject):
 
     error = pyqtSignal(str)
 
-    def __init__(self, api_config: ApiConfig, target_system: TargetSystem):
+    def __init__(
+        self, 
+        gateway: VelideGateway,
+        api_config: ApiConfig, 
+        target_system: TargetSystem
+    ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
 
         self._api_config = api_config
+        self._gateway = gateway
         self._target_system = target_system
         self._strategy: Optional[IConnectableStrategy] = None
-        self._velide_api: Optional[Velide] = None
         self._waiting_for_token = False
 
         self._velide_deliverymen: Optional[list] = None
@@ -38,11 +43,6 @@ class DeliverymenRetrieverService(QObject):
         self.thread_pool = QThreadPool.globalInstance()
 
         self._mapping_ids: Dict[str, str] = {}
-
-    def set_access_token(self, access_token: str) -> None:
-        self._velide_api = Velide(access_token, self._api_config, self._target_system)
-        if self._waiting_for_token:
-            self.fetch_deliverymen()
 
     def set_strategy(self, strategy: IConnectableStrategy):
         """Sets the active deliverymen source strategy."""
@@ -155,10 +155,6 @@ class DeliverymenRetrieverService(QObject):
         )
 
     def fetch_deliverymen(self) -> None:
-        if self._velide_api is None:
-            self._waiting_for_token = True
-            return
-
         if not self._strategy:
             self.logger.error(
                 "Não há nenhum software conectado para buscar os entregadores!"
@@ -166,7 +162,7 @@ class DeliverymenRetrieverService(QObject):
             return
 
         velide_deliverymen_retriever = VelideWorker.for_get_deliverymen(
-            self._velide_api
+            self._gateway
         )
         velide_deliverymen_retriever.signals.deliverymen_retrieved.connect(
             self._on_receive_velide_deliverymen
