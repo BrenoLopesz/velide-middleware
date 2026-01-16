@@ -2,6 +2,7 @@ from datetime import datetime, time
 import logging
 from textwrap import dedent
 from typing import List, Tuple
+from pydantic import ValidationError
 
 from sqlalchemy import text, Engine
 from sqlalchemy.exc import SQLAlchemyError
