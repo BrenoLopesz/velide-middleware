@@ -204,7 +204,22 @@ class FarmaxRepository:
             row_dicts = [
                 {k.lower(): v for k, v in row._mapping.items()} for row in rows
             ]
-            return [DeliveryLog.model_validate(row_dict) for row_dict in row_dicts]
+           
+            valid_logs = []
+            for row_dict in row_dicts:
+                try:
+                    # Try to validate the row
+                    log = DeliveryLog.model_validate(row_dict)
+                    valid_logs.append(log)
+                except ValidationError as e:
+                    # If validation fails, skip this row and continue.
+                    # It is highly recommended to log this failure so you know data is missing.
+                    self.logger.exception(
+                        "Entrega possui formatação inválida! Prosseguindo..."
+                    )
+                    continue
+                    
+            return valid_logs
 
     def fetch_recent_changes_by_id(self, last_id: int) -> List[DeliveryLog]:
         """
@@ -218,7 +233,22 @@ class FarmaxRepository:
             row_dicts = [
                 {k.lower(): v for k, v in row._mapping.items()} for row in rows
             ]
-            return [DeliveryLog.model_validate(row_dict) for row_dict in row_dicts]
+
+            valid_logs = []
+            for row_dict in row_dicts:
+                try:
+                    # Try to validate the row
+                    log = DeliveryLog.model_validate(row_dict)
+                    valid_logs.append(log)
+                except ValidationError as e:
+                    # If validation fails, skip this row and continue.
+                    # It is highly recommended to log this failure so you know data is missing.
+                    self.logger.exception(
+                        "Entrega possui formatação inválida! Prosseguindo..."
+                    )
+                    continue
+                    
+            return valid_logs
 
     def fetch_deliverymen(self) -> List[FarmaxDeliveryman]:
         """
