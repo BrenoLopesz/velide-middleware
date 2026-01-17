@@ -43,4 +43,4 @@ class MinimizeToTrayFilter(QObject):
 
         # For all other events (Mouse, Resize, or programmatic Close), 
         # let standard processing continue.
-        return super().eventFilter(obj, event)
+        return bool(super().eventFilter(obj, event))
