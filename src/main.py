@@ -26,7 +26,7 @@ from services.strategies.farmax_strategy import FarmaxStrategy
 from services.tracking_persistence_service import TrackingPersistenceService
 from services.velide_action_handler import VelideActionHandler
 from services.velide_websockets_service import VelideWebsocketsService
-from services.velide_gateway import VelideGateway
+from api.velide_gateway import VelideGateway
 from utils.sql_utils import get_farmax_engine_string
 from utils.tray_guard import TrayGuard
 from utils.tray_manager import AppTrayIcon
