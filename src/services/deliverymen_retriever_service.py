@@ -137,6 +137,12 @@ class DeliverymenRetrieverService(QObject):
         self._mapping_ids = mapped_dict
         self.mapping_is_complete.emit()
 
+    def update_mapping_cache(self, new_mappings: List[Tuple[str, str]]) -> None:
+        """Called by the Presenter to update memory after a succesful save."""
+        # Convert list of tuples back to dict and merge/overwrite
+        updated_dict = dict(new_mappings)
+        self._mapping_ids.update(updated_dict)
+
     def _on_receive_velide_deliverymen(self, deliverymen: list) -> None:
         self._velide_deliverymen = deliverymen
         if self._local_deliverymen is not None:
