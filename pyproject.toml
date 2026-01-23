@@ -104,5 +104,6 @@ dev = [
     "pyqt5-stubs>=5.15.6.0",
     "ruff>=0.14.10",
     "types-pyyaml>=6.0.12.20241230",
+    "types-qrcode>=8.0.0.20241004",
     "types-requests>=2.32.0.20241016",
 ]

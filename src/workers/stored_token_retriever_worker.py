@@ -21,10 +21,10 @@ class StoredTokenRetrieverSignals(QObject):
     Sends the refresh_token (str) so a new one can be requested.
     """
 
-    token = pyqtSignal(str)
+    token = pyqtSignal(str, str)
     """Signal emitted when a valid, non-expired access token is found.
     
-    Sends the access_token (str).
+    Sends: (access_token, refresh_token)
     """
 
     error = pyqtSignal(str)
@@ -97,7 +97,7 @@ class StoredTokenRetrieverWorker(QRunnable):
                 return
 
             # Token is valid, emit signal with access token
-            self.signals.token.emit(token["access_token"])
+            self.signals.token.emit(access_token, refresh_token)
 
         except TokenStorageError as e:
             self.signals.error.emit(f"Falha ao atualizar token: {str(e)}")

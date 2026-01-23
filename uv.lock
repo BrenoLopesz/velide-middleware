@@ -4335,6 +4335,77 @@ wheels = [
 ]
 
 [[package]]
+name = "types-qrcode"
+version = "8.0.0.20241004"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version >= '3.8.1' and python_full_version < '3.9' and sys_platform != 'linux')",
+    "(python_full_version < '3.8.1' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version < '3.8.1' and sys_platform != 'linux')",
+]
+dependencies = [
+    { name = "pillow", version = "10.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0c/e0/9267106c43b29608789dfd8af7dc5c0c9a0f3b9af089ca4afff9b440f5c6/types-qrcode-8.0.0.20241004.tar.gz", hash = "sha256:a64761d332025df0a6009e39a2f3f8fd6a3c08bbe98e13420708b918486f0600", size = 10224 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4a/66/b3f0e392a644d6f086ba9c1227730c433c23bbff3543cddda15e2d03376b/types_qrcode-8.0.0.20241004-py3-none-any.whl", hash = "sha256:24455a0fbffaaac5be473b4ffcfdfa7149b0474f0aa39ba983fe86bdbd978101", size = 15080 },
+]
+
+[[package]]
+name = "types-qrcode"
+version = "8.2.0.20250914"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and python_full_version < '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.10.*' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and python_full_version < '3.13' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.10.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "(python_full_version >= '3.11' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.11' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "(python_full_version == '3.10.*' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version == '3.10.*' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "python_full_version == '3.9.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "(python_full_version == '3.9.*' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version == '3.9.*' and sys_platform != 'linux')",
+]
+dependencies = [
+    { name = "pillow", version = "11.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "pillow", version = "12.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a6/1b/b662d2baa355df5739ca084b0d959a5ce8d0e1bea742ee3e027372f89a56/types_qrcode-8.2.0.20250914.tar.gz", hash = "sha256:fc82e0112095c60c0ef3e403ab2a604a9ae1929c70fb0e708bc1ebfe8ca5c45e", size = 14988 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/47/9105e9949a83789b6982bcbab4874ce7804f74fd27e6ab83d0186805b0aa/types_qrcode-8.2.0.20250914-py3-none-any.whl", hash = "sha256:6b992d62f05c2df0422507c5307ddd969c0a4d2ab23863c4217f96226710c308", size = 19849 },
+]
+
+[[package]]
 name = "types-requests"
 version = "2.32.0.20241016"
 source = { registry = "https://pypi.org/simple" }
@@ -4626,6 +4697,8 @@ dev = [
     { name = "ruff" },
     { name = "types-pyyaml", version = "6.0.12.20241230", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "types-pyyaml", version = "6.0.12.20250915", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "types-qrcode", version = "8.0.0.20241004", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "types-qrcode", version = "8.2.0.20250914", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
     { name = "types-requests", version = "2.32.0.20241016", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "types-requests", version = "2.32.4.20250913", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
 ]
@@ -4685,6 +4758,7 @@ dev = [
     { name = "pyqt5-stubs", specifier = ">=5.15.6.0" },
     { name = "ruff", specifier = ">=0.14.10" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20241230" },
+    { name = "types-qrcode", specifier = ">=8.0.0.20241004" },
     { name = "types-requests", specifier = ">=2.32.0.20241016" },
 ]
 

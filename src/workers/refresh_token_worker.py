@@ -20,7 +20,7 @@ class RefreshTokenSignals(QObject):
     token = pyqtSignal(str)
     """Signal emitted on successful token refresh.
     
-    Sends the new access_token (str).
+    Sends: (access_token, refresh_token)
     """
 
     finished = pyqtSignal()
@@ -86,6 +86,17 @@ class RefreshTokenWorker(QRunnable):
                 self.url, headers=self.headers, data=self.data, verify=False
             )
 
+            # If the refresh token is revoked or the user was deleted, 
+            # we need to fail explicitly so the app can logout.
+            if response.status_code == 400:
+                try:
+                    error_data = response.json()
+                    if error_data.get("error") == "invalid_grant":
+                        self.signals.error.emit("Sessão expirada. Faça login novamente.")
+                        return
+                except ValueError:
+                    pass  # Not JSON, proceed to standard error handling
+
             # Raise an exception for 4xx or 5xx status codes
             response.raise_for_status()
 
@@ -100,13 +111,10 @@ class RefreshTokenWorker(QRunnable):
             access_token = jsonResponse["access_token"]
 
             # Emit success signal
-            self.signals.token.emit(access_token)
+            self.signals.token.emit(access_token, self._refresh_token)
 
             # Store the new token bundle
             store_token_at_file(jsonResponse)
-
-            # TODO: Should handle "Invalid Grant". 
-            #       It should request the user to log in again.
         except requests.HTTPError:
             # Catches non-2xx responses from raise_for_status()
             self.logger.exception(

@@ -139,6 +139,7 @@ class AuthService(QObject):
         # CHANGED: Success loops back to _on_access_token_received
         worker.signals.token.connect(self._on_access_token_received)
         
+        # TODO: 'error' signal is unused. Fix it.
         worker.signals.error.connect(
             # If refresh fails, we might need to logout.
             lambda msg: self.error.emit("Sessão expirada. Faça login novamente.", msg)
