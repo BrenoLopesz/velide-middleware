@@ -17,7 +17,7 @@ class RefreshTokenSignals(QObject):
     Inherits from QObject to provide signal/slot capabilities.
     """
 
-    token = pyqtSignal(str)
+    token = pyqtSignal(str, str)
     """Signal emitted on successful token refresh.
     
     Sends: (access_token, refresh_token)
