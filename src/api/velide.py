@@ -1,6 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
+from httpx import TimeoutException
 
 from models.velide_delivery_models import (
     AddDeliveryVariables,
@@ -16,8 +18,9 @@ from models.velide_delivery_models import (
     MetadataInput,
     Order,
 )
-from config import ApiConfig, TargetSystem
+from config import ApiConfig, ReconciliationConfig, TargetSystem
 from utils.async_retry import async_retry
+from api.reconciliation import DeliveryReconciliationStrategy
 
 
 class Velide:
@@ -77,6 +80,16 @@ class Velide:
             deliveries {
                 id
                 createdAt
+                metadata {
+                    customerName
+                    integrationName
+                }
+                location {
+                    properties {
+                        street
+                        housenumber
+                    }
+                }
             }
             deliverymen {
                 id
@@ -93,7 +106,11 @@ class Velide:
     """
 
     def __init__(
-        self, access_token: str, api_config: ApiConfig, target_system: TargetSystem
+        self,
+        access_token: str,
+        api_config: ApiConfig,
+        target_system: TargetSystem,
+        reconciliation_config: Optional[ReconciliationConfig] = None,
     ):
         """
         Initialize the Velide API client.
@@ -101,11 +118,25 @@ class Velide:
         Args:
             access_token: Bearer token for API authentication
             api_config: Configuration object containing URL, timeout, SSL settings
+            target_system: The integration target identifier
+            reconciliation_config: Optional configuration for reconciliation on retry
         """
         self._access_token = access_token
         self._api_config = api_config
         self._target_system = target_system
         self._client: Optional[httpx.AsyncClient] = None
+        self._reconciliation_config = reconciliation_config
+        self._reconciliation_strategy: Optional[DeliveryReconciliationStrategy] = None
+
+        # Initialize reconciliation strategy if enabled
+        if (
+            reconciliation_config is not None
+            and reconciliation_config.retry_reconciliation_enabled
+        ):
+            self._reconciliation_strategy = DeliveryReconciliationStrategy(
+                velide_client=self,
+                config=reconciliation_config,
+            )
 
     async def __aenter__(self):
         """Called when entering the 'async with' block."""
@@ -128,10 +159,56 @@ class Velide:
         if self._client:
             await self._client.aclose()
 
+    async def _on_add_delivery_exception(
+        self,
+        exc: Exception,
+        attempt: int,
+        args: tuple,
+        kwargs: dict
+    ) -> Optional[DeliveryResponse]:
+        """
+        Callback invoked when add_delivery encounters an exception.
+
+        Checks if reconciliation is enabled and if the exception is a timeout.
+        If so, attempts to reconcile by checking if the delivery was actually
+        created on the server before the timeout occurred.
+
+        Args:
+            exc: The exception that was raised
+            attempt: The current retry attempt number
+            args: Positional arguments passed to add_delivery
+            kwargs: Keyword arguments passed to add_delivery
+
+        Returns:
+            DeliveryResponse if reconciliation finds the delivery, None otherwise
+        """
+        # Check if reconciliation is enabled
+        if (
+            self._reconciliation_strategy is None
+            or self._reconciliation_config is None
+        ):
+            return None
+
+        # Only reconcile on timeout exceptions
+        if not isinstance(exc, TimeoutException):
+            return None
+
+        # Apply configured delay before reconciliation check
+        import asyncio
+        await asyncio.sleep(self._reconciliation_config.retry_reconciliation_delay_seconds)
+
+        # Attempt to find the delivery via reconciliation
+        return await self._reconciliation_strategy.check_exists(*args, **kwargs)
+
     @async_retry(
-        operation_desc="enviar nova entrega",  # <--- Friendly Name
+        operation_desc="enviar nova entrega",
         max_retries=4,
         initial_delay=2.0,
+        on_exception=lambda exc, attempt, args, kwargs: (
+            args[0]._on_add_delivery_exception(exc, attempt, args, kwargs)
+            if args and hasattr(args[0], '_on_add_delivery_exception')
+            else None
+        )
     )
     async def add_delivery(
         self,
@@ -221,6 +298,118 @@ class Velide:
 
         # Flatten the data for easier processing
         return self._flatten_snapshot(raw_data)
+
+    async def find_delivery_by_metadata(
+        self,
+        customer_name: str,
+        address: str,
+        time_window_seconds: float
+    ) -> Optional[DeliveryResponse]:
+        """
+        Search for a delivery by customer name and address within a time window.
+
+        Queries active deliveries and filters locally by:
+        - Customer name (case-insensitive exact match)
+        - Creation time within the specified window
+        - Address substring matching
+
+        Args:
+            customer_name: The customer name to search for
+            address: The delivery address to match against
+            time_window_seconds: How far back to look in seconds
+
+        Returns:
+            DeliveryResponse if a matching delivery is found, None otherwise
+        """
+        try:
+            # Calculate the cutoff time
+            from_date = datetime.now(timezone.utc) - timedelta(
+                seconds=time_window_seconds
+            )
+
+            # Query all active deliveries using the existing snapshot query
+            payload = GraphQLPayload(query=self.GET_GLOBAL_SNAPSHOT_QUERY)
+            response = await self._execute_request(payload)
+
+            # Parse the response - we only need the deliveries list
+            raw_data = self._parse_response(response, data_key=None)
+
+            if not raw_data or not hasattr(raw_data, 'deliveries'):
+                return None
+
+            deliveries = raw_data.deliveries
+
+            # Filter deliveries locally
+            for delivery in deliveries:
+                # Check if delivery has required attributes
+                if not hasattr(delivery, 'metadata') or not delivery.metadata:
+                    continue
+
+                # Check customer name match (case-insensitive)
+                delivery_customer = getattr(delivery.metadata, 'customer_name', None)
+                if not delivery_customer:
+                    continue
+
+                if delivery_customer.lower() != customer_name.lower():
+                    continue
+
+                # Check time window
+                if not hasattr(delivery, 'created_at') or not delivery.created_at:
+                    continue
+
+                # Handle both datetime objects and ISO strings
+                created_at = delivery.created_at
+                if isinstance(created_at, str):
+                    try:
+                        # Parse ISO format string
+                        created_at = datetime.fromisoformat(
+                            created_at.replace('Z', '+00:00')
+                        )
+                    except (ValueError, AttributeError):
+                        continue
+
+                # Ensure timezone-aware comparison
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+
+                if created_at < from_date:
+                    continue
+
+                # Check address match
+                if self._delivery_address_matches(delivery, address):
+                    return delivery
+
+            return None
+
+        except Exception:
+            # Log and return None on any error to allow retry
+            logger = logging.getLogger(__name__)
+            logger.exception("Erro ao buscar entrega por metadados")
+            return None
+
+    def _delivery_address_matches(self, delivery: DeliveryResponse, address: str) -> bool:
+        """
+        Check if delivery address matches the given address.
+
+        Uses substring matching for flexibility with address formatting differences.
+        """
+        if not delivery.location or not delivery.location.properties:
+            return False
+
+        props = delivery.location.properties
+        delivery_addr = f"{props.street or ''} {props.housenumber or ''}".strip()
+
+        if not delivery_addr:
+            return False
+
+        # Simple substring matching (case-insensitive)
+        addr_lower = address.lower()
+        delivery_addr_lower = delivery_addr.lower()
+
+        return (
+            addr_lower in delivery_addr_lower or
+            delivery_addr_lower in addr_lower
+        )
 
     def _build_variables_to_add_delivery(self, order: Order) -> AddDeliveryVariables:
         """

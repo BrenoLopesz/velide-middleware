@@ -221,7 +221,11 @@ def create_strategy(
 
 def build_services(app_config: Settings) -> Services:
     """Creates and wires together all core application services."""
-    velide_gateway = VelideGateway(app_config.api, app_config.target_system)
+    velide_gateway = VelideGateway(
+        app_config.api,
+        app_config.target_system,
+        app_config.reconciliation,
+    )
     auth_service = AuthService(app_config.auth, velide_gateway)
     delivery_repository = DeliveryRepository()
     velide_action_handler = VelideActionHandler(delivery_repository)

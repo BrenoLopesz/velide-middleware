@@ -102,6 +102,7 @@ select = ["E", "F"]
 dev = [
     "mypy<1.15",
     "pyqt5-stubs>=5.15.6.0",
+    "pytest-asyncio>=0.24.0",
     "ruff>=0.14.10",
     "types-pyyaml>=6.0.12.20241230",
     "types-qrcode>=8.0.0.20241004",

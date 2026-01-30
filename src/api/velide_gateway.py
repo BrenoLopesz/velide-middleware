@@ -3,7 +3,7 @@ from threading import RLock
 from typing import Optional
 
 from api.velide import Velide
-from config import ApiConfig, TargetSystem
+from config import ApiConfig, ReconciliationConfig, TargetSystem
 
 
 class VelideGateway:
@@ -20,9 +20,10 @@ class VelideGateway:
     """
 
     def __init__(
-        self, 
-        api_config: ApiConfig, 
-        target_system: TargetSystem
+        self,
+        api_config: ApiConfig,
+        target_system: TargetSystem,
+        reconciliation_config: Optional[ReconciliationConfig] = None,
     ):
         """
         Initialize the gateway with static configuration.
@@ -30,11 +31,13 @@ class VelideGateway:
         Args:
             api_config: Global API settings (URL, timeouts, SSL).
             target_system: The integration target identifier.
+            reconciliation_config: Optional configuration for reconciliation on retry.
         """
         self._access_token: Optional[str] = None
         self._lock = RLock()
         self.config = api_config
         self.target = target_system
+        self._reconciliation_config = reconciliation_config
 
     def update_token(self, access_token: str) -> None:
         """
@@ -65,7 +68,12 @@ class VelideGateway:
             # We return a new instance every time. This ensures that the
             # httpx.AsyncClient created inside 'Velide' belongs strictly
             # to the thread/loop that requested it.
-            return Velide(self._access_token, self.config, self.target)
+            return Velide(
+                self._access_token,
+                self.config,
+                self.target,
+                self._reconciliation_config,
+            )
 
     def is_ready(self) -> bool:
         """
