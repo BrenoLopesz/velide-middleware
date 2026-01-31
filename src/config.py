@@ -2,7 +2,7 @@ from enum import Enum
 import os
 from pathlib import Path
 from typing import Optional, Type, TypeVar
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import yaml
 
 from utils.bundle_dir import BUNDLE_DIR
@@ -93,6 +93,12 @@ class ReconciliationConfig(BaseModel):
             raise ValueError('Retry reconciliation time window must be at least 60 seconds')
         return v
 
+    @model_validator(mode='after')
+    def disable_retry_if_master_disabled(self) -> "ReconciliationConfig":
+        # Check master switch
+        if not self.enabled and self.retry_reconciliation_enabled:
+            self.retry_reconciliation_enabled = False
+        return self
 
 class FarmaxConfig(BaseModel):
     host: str = Field(..., description="Address that host the Firebird.")
