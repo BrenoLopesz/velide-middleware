@@ -7,15 +7,14 @@ callback for reconciliation-aware retry logic.
 """
 import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 
 from api.velide import Velide
 from config import ApiConfig, ReconciliationConfig, TargetSystem
 from models.velide_delivery_models import (
-    DeliveryResponse, Order, Location, LocationProperties, MetadataResponse,
-    GlobalSnapshotData
+    DeliveryResponse, Order, Location, LocationProperties, MetadataResponse
 )
 
 
@@ -73,7 +72,8 @@ class TestVelideFindDeliveryByMetadata:
     @pytest.mark.asyncio
     async def test_find_delivery_by_metadata_filters_by_customer_name(self, velide):
         """
-        Verify that find_delivery_by_metadata filters by customer name (case-insensitive).
+        Verify that find_delivery_by_metadata filters by customer name (case-insensitive)
+        AND requires metadata.address to match.
         """
         # Arrange
         now = datetime.now(timezone.utc)
@@ -83,17 +83,10 @@ class TestVelideFindDeliveryByMetadata:
                 "createdAt": now.isoformat(),
                 "routeId": None,
                 "endedAt": None,
-                "location": {
-                    "properties": {
-                        "street": "123 Main St",
-                        "housenumber": "",
-                        "neighbourhood": None,
-                        "name": None
-                    }
-                },
                 "metadata": {
                     "customerName": "John Doe",
-                    "integrationName": "TestSystem"
+                    "integrationName": "TestSystem",
+                    "address": "123 Main St"  # MATCH
                 }
             },
             {
@@ -101,17 +94,10 @@ class TestVelideFindDeliveryByMetadata:
                 "createdAt": now.isoformat(),
                 "routeId": None,
                 "endedAt": None,
-                "location": {
-                    "properties": {
-                        "street": "456 Oak Ave",
-                        "housenumber": "",
-                        "neighbourhood": None,
-                        "name": None
-                    }
-                },
                 "metadata": {
                     "customerName": "Jane Smith",
-                    "integrationName": "TestSystem"
+                    "integrationName": "TestSystem",
+                    "address": "123 Main St"
                 }
             }
         ])
@@ -143,17 +129,10 @@ class TestVelideFindDeliveryByMetadata:
                 "createdAt": (now - timedelta(seconds=600)).isoformat(),  # 10 minutes ago
                 "routeId": None,
                 "endedAt": None,
-                "location": {
-                    "properties": {
-                        "street": "123 Main St",
-                        "housenumber": "",
-                        "neighbourhood": None,
-                        "name": None
-                    }
-                },
                 "metadata": {
                     "customerName": "John Doe",
-                    "integrationName": "TestSystem"
+                    "integrationName": "TestSystem",
+                    "address": "123 Main St"
                 }
             },
             {
@@ -161,17 +140,10 @@ class TestVelideFindDeliveryByMetadata:
                 "createdAt": (now - timedelta(seconds=60)).isoformat(),  # 1 minute ago
                 "routeId": None,
                 "endedAt": None,
-                "location": {
-                    "properties": {
-                        "street": "123 Main St",
-                        "housenumber": "",
-                        "neighbourhood": None,
-                        "name": None
-                    }
-                },
                 "metadata": {
                     "customerName": "John Doe",
-                    "integrationName": "TestSystem"
+                    "integrationName": "TestSystem",
+                    "address": "123 Main St"
                 }
             }
         ])
@@ -193,7 +165,8 @@ class TestVelideFindDeliveryByMetadata:
     @pytest.mark.asyncio
     async def test_find_delivery_by_metadata_matches_address(self, velide):
         """
-        Verify that find_delivery_by_metadata matches address using substring logic.
+        Verify that find_delivery_by_metadata matches address using substring logic
+        AGAINST METADATA (not location).
         """
         # Arrange
         now = datetime.now(timezone.utc)
@@ -203,35 +176,11 @@ class TestVelideFindDeliveryByMetadata:
                 "createdAt": now.isoformat(),
                 "routeId": None,
                 "endedAt": None,
-                "location": {
-                    "properties": {
-                        "street": "123 Main Street, Building A",
-                        "housenumber": "",
-                        "neighbourhood": None,
-                        "name": None
-                    }
-                },
                 "metadata": {
                     "customerName": "John Doe",
-                    "integrationName": "TestSystem"
-                }
-            },
-            {
-                "id": "velide-456",
-                "createdAt": now.isoformat(),
-                "routeId": None,
-                "endedAt": None,
-                "location": {
-                    "properties": {
-                        "street": "456 Oak Avenue",
-                        "housenumber": "",
-                        "neighbourhood": None,
-                        "name": None
-                    }
-                },
-                "metadata": {
-                    "customerName": "John Doe",
-                    "integrationName": "TestSystem"
+                    "integrationName": "TestSystem",
+                    # The stored metadata address (what we search against)
+                    "address": "123 Main Street, Building A"
                 }
             }
         ])
@@ -242,7 +191,7 @@ class TestVelideFindDeliveryByMetadata:
         # Act
         result = await velide.find_delivery_by_metadata(
             customer_name="John Doe",
-            address="123 Main Street",
+            address="123 Main Street",  # Substring of metadata address
             time_window_seconds=300.0
         )
 
@@ -272,23 +221,22 @@ class TestVelideFindDeliveryByMetadata:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_find_delivery_by_metadata_handles_exception(self, velide):
+    async def test_find_delivery_by_metadata_raises_exception(self, velide):
         """
-        Verify that find_delivery_by_metadata returns None on API error.
+        Verify that find_delivery_by_metadata RAISES exceptions (bubbling up).
         """
         # Arrange
         velide._client = MagicMock()
         velide._client.post = AsyncMock(side_effect=Exception("API Error"))
 
-        # Act
-        result = await velide.find_delivery_by_metadata(
-            customer_name="John Doe",
-            address="123 Main St",
-            time_window_seconds=300.0
-        )
+        # Act & Assert
+        with pytest.raises(Exception, match="API Error"):
+            await velide.find_delivery_by_metadata(
+                customer_name="John Doe",
+                address="123 Main St",
+                time_window_seconds=300.0
+            )
 
-        # Assert
-        assert result is None
 
     @pytest.mark.asyncio
     async def test_find_delivery_by_metadata_handles_parsed_delivery_data(self, velide):
@@ -304,17 +252,10 @@ class TestVelideFindDeliveryByMetadata:
                 "createdAt": now.isoformat(),
                 "routeId": None,
                 "endedAt": None,
-                "location": {
-                    "properties": {
-                        "street": "123 Main St",
-                        "housenumber": "",
-                        "neighbourhood": None,
-                        "name": None
-                    }
-                },
                 "metadata": {
                     "customerName": "John Doe",
-                    "integrationName": "TestSystem"
+                    "integrationName": "TestSystem",
+                    "address": "123 Main St"
                 }
             }
         ])
@@ -445,7 +386,8 @@ class TestVelideOnAddDeliveryException:
             ),
             metadata=MetadataResponse(
                 customerName="John Doe",
-                integrationName="TestSystem"
+                integrationName="TestSystem",
+                address="123 Main St"  # Added address here too
             )
         )
 
