@@ -98,9 +98,9 @@ class MetadataResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     address: Optional[str] = Field(default=None)
-    customer_name: Optional[str] = Field(None, alias="customerName")
+    customer_name: Optional[str] = Field(default=None, alias="customerName")
     customer_contact: Optional[str] = Field(default=None, alias="customerContact")
-    integration_name: Optional[str] = Field(None, alias="integrationName")
+    integration_name: Optional[str] = Field(default=None, alias="integrationName")
     reference: Optional[str] = Field(default=None)
 
 
