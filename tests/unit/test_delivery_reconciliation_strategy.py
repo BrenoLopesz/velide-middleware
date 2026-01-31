@@ -5,6 +5,7 @@ These tests verify that the DeliveryReconciliationStrategy correctly implements
 the reconciliation logic for delivery operations, checking if deliveries that
 appeared to fail (due to timeout) actually succeeded on the server.
 """
+from httpx import TimeoutException
 import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -12,11 +13,12 @@ from unittest.mock import AsyncMock, MagicMock
 from api.reconciliation.delivery_reconciliation_strategy import (
     DeliveryReconciliationStrategy
 )
+from api.velide import Velide
 from models.velide_delivery_models import (
     DeliveryResponse, Order, Location, LocationProperties, 
     MetadataResponse, GlobalSnapshotData
 )
-from config import ReconciliationConfig
+from config import ApiConfig, ReconciliationConfig, TargetSystem
 
 
 # --- Helpers ---
@@ -86,6 +88,27 @@ class TestDeliveryReconciliationStrategyCheckExists:
         # Mock the NEW method used by strategy
         mock.get_full_global_snapshot = AsyncMock()
         return mock
+
+    @pytest.fixture
+    def velide_real_instance(self):
+        """Returns a REAL Velide instance with mocked HTTP client."""
+        mock_config = MagicMock()
+        recon_config = ReconciliationConfig(
+            retry_reconciliation_enabled=True,
+            retry_reconciliation_delay_seconds=0
+        )
+        
+        # Instantiate the REAL class
+        client = Velide(
+            access_token="fake", 
+            api_config=mock_config, 
+            target_system=TargetSystem.FARMAX, # Use your actual Enum
+            reconciliation_config=recon_config
+        )
+        
+        # Mock the internal HTTP client so it doesn't actually hit the internet
+        client._client = AsyncMock()
+        return client
 
     @pytest.fixture
     def config(self):
@@ -221,6 +244,29 @@ class TestDeliveryReconciliationStrategyCheckExists:
         assert result.metadata is not None
         assert result.metadata.customer_name == "John Doe"
 
+    @pytest.mark.asyncio
+    async def test_reconciliation_receives_clean_arguments(self, velide_real_instance, order):
+        """
+        Verifies that 'self' is stripped from args before calling reconciliation.
+        """
+        # 1. Setup the Strategy Mock
+        mock_strategy = AsyncMock()
+        # Return a dummy response so the flow succeeds
+        mock_strategy.check_exists.return_value = {"id": "123"} 
+        velide_real_instance._reconciliation_strategy = mock_strategy
+        
+        # 2. Force the Timeout Exception
+        # We patch the request execution to simulate a network timeout
+        velide_real_instance._execute_request = AsyncMock(side_effect=TimeoutException("Boom"))
+
+        # 3. Call the MAIN method (add_delivery), not the exception handler directly
+        # This ensures we go through the decorator and the 'args' capture logic
+        await velide_real_instance.add_delivery(order)
+
+        # 4. THE CRITICAL ASSERTION
+        # If the bug exists, this assertion will FAIL because the mock 
+        # was actually called with (velide_client, mock_order)
+        mock_strategy.check_exists.assert_called_once_with(order)
 
 class TestDeliveryReconciliationStrategyAddressMatching:
     """Test the internal _address_matches logic."""

@@ -198,8 +198,12 @@ class Velide:
         import asyncio
         await asyncio.sleep(self._reconciliation_config.retry_reconciliation_delay_seconds)
 
+        # FIX: Slice args to remove 'self' (args[0])
+        # We assume args[1:] contains the actual arguments for the method
+        actual_args = args[1:] if len(args) > 0 else ()
+
         # Attempt to find the delivery via reconciliation
-        return await self._reconciliation_strategy.check_exists(*args, **kwargs)
+        return await self._reconciliation_strategy.check_exists(*actual_args, **kwargs)
 
     @async_retry(
         operation_desc="enviar nova entrega",
