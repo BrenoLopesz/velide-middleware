@@ -281,6 +281,18 @@ class Velide:
         return [DeliverymanResponse.model_validate(dm) for dm in parsed_response]
 
     @async_retry(operation_desc="buscar snapshot global", max_retries=3)
+    async def get_full_global_snapshot(self) -> GlobalSnapshotData:
+        """
+        Fetches the raw global snapshot data. 
+        Pure IO: Fetches and parses, does NOT process logic.
+        """
+        payload = GraphQLPayload(query=self.GET_GLOBAL_SNAPSHOT_QUERY)
+        response = await self._execute_request(payload)
+        
+        # Parses the full structure (deliveries + deliverymen)
+        return self._parse_response(response, data_key=None)
+
+    # NO decorator here - logic is safe, IO is handled by the call below
     async def get_active_deliveries_snapshot(self) -> dict:
         """
         Fetches ALL unassigned deliveries and ALL active routes.
@@ -290,135 +302,11 @@ class Velide:
             dict: { "delivery_id": "STATUS" }
             e.g. { "abc-123": "PENDING", "xyz-789": "ROUTED" }
         """
-        payload = GraphQLPayload(query=self.GET_GLOBAL_SNAPSHOT_QUERY)
-
-        response = await self._execute_request(payload)
-
-        # Pass None to get the full data structure containing both keys
-        raw_data: GlobalSnapshotData = self._parse_response(response, data_key=None)
+        # Reuse the core IO method (which handles retries)
+        raw_data = await self.get_full_global_snapshot()
 
         # Flatten the data for easier processing
         return self._flatten_snapshot(raw_data)
-
-    async def find_delivery_by_metadata(
-        self,
-        customer_name: str,
-        address: str,
-        time_window_seconds: float
-    ) -> Optional[DeliveryResponse]:
-        """Search for a delivery by customer name and address within a time window.
-
-        Fetches the global snapshot of active deliveries and performs a local
-        filter using the raw metadata. This avoids issues where the server's
-        geocoding alters the address format.
-
-        If multiple matches are found, the most recently created delivery is returned.
-
-        Args:
-            customer_name: The customer name to search for (case-insensitive).
-            address: The delivery address string to match against.
-            time_window_seconds: The lookback window in seconds (e.g., 3600 for 1 hour).
-
-        Returns:
-            DeliveryResponse: The matching delivery object if found.
-            None: If no matching delivery is found within the time window.
-
-        Raises:
-            GraphQLRequestError: If the snapshot query fails.
-            GraphQLParseError: If the response cannot be parsed.
-        """
-        # 1. Calculate the cutoff time (UTC)
-        cutoff_time = datetime.now(timezone.utc) - timedelta(seconds=time_window_seconds)
-
-        # 2. Query global snapshot (Active Deliveries)
-        payload = GraphQLPayload(query=self.GET_GLOBAL_SNAPSHOT_QUERY)
-        response = await self._execute_request(payload)
-        
-        # Parse response using the generic parser; we expect 'GlobalSnapshotData' structure
-        snapshot_data: GlobalSnapshotData = self._parse_response(response, data_key=None)
-
-        if not snapshot_data or not snapshot_data.deliveries:
-            return None
-
-        candidates: List[Tuple[DeliveryResponse, datetime]] = []
-
-        # 3. Iterate and Filter
-        for delivery in snapshot_data.deliveries:
-            # A. Check Metadata Existence
-            if not delivery.metadata:
-                continue
-
-            # B. Check Customer Name (Case-Insensitive)
-            # Use safe access in case fields are missing in legacy data
-            stored_name = delivery.metadata.customer_name
-            if not stored_name or stored_name.lower() != customer_name.lower():
-                continue
-
-            # C. Check Time Window (Timezone Safe)
-            created_at = delivery.created_at
-            
-            # Ensure we have an aware datetime for comparison.
-            # If the API returned a naive datetime, assume it implies UTC 
-            # (or the system's standard time) to avoid crash against 'cutoff_time'.
-            if created_at.tzinfo is None:
-                created_at = created_at.replace(tzinfo=timezone.utc)
-            
-            if created_at < cutoff_time:
-                continue
-
-            # D. Check Address Match using Metadata
-            if self._metadata_address_matches(delivery.metadata, address):
-                candidates.append((delivery, created_at))
-
-        # 4. Deterministic Selection
-        if not candidates:
-            return None
-
-        # Sort by creation time descending (newest first) and return the best match.
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        
-        return candidates[0][0]
-
-    def _metadata_address_matches(
-        self, metadata: MetadataResponse, input_address: str
-    ) -> bool:
-        """Checks if the input address matches the raw address stored in metadata.
-
-        Compares the raw address string sent during creation against the current
-        input. This is more reliable than comparing against the server-processed
-        'location' field, which may have been geocoded or normalized.
-
-        Args:
-            metadata: The metadata object from the delivery response.
-            input_address: The raw address string to match against.
-
-        Returns:
-            True if the addresses are considered a match, False otherwise.
-        """
-        # 1. fast fail if no address in metadata
-        if not metadata.address:
-            return False
-
-        # 2. Normalize strings (strip whitespace, lowercase)
-        stored_addr = metadata.address.strip().lower()
-        search_addr = input_address.strip().lower()
-
-        if not stored_addr or not search_addr:
-            return False
-
-        # 3. Exact match check
-        if stored_addr == search_addr:
-            return True
-
-        # 4. Safety check for short strings to prevent false positives
-        # e.g., prevents "10" from matching inside "100 Main St"
-        if len(search_addr) < 5:
-            return False
-
-        # 5. Substring match
-        # Since both strings are "raw inputs" from the same source system, 
-        # a bidirectional substring check is usually safe and effective.
-        return search_addr in stored_addr or stored_addr in search_addr
 
     def _build_variables_to_add_delivery(self, order: Order) -> AddDeliveryVariables:
         """
