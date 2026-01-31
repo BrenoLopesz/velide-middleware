@@ -133,7 +133,7 @@ def test_lifecycle_update_status(repository, setup_database, db_engine):
 
     # 2. Update to "In Route"
     man = FarmaxDeliveryman(cd_vendedor="870", nome="RODRIGO")
-    repository.update_delivery_as_in_route(delivery, man, time(10, 30))
+    repository.update_delivery_as_in_route(delivery.sale_id, float(man.id), time(10, 30))
 
     # Verify DB
     with db_engine.connect() as conn:
@@ -144,7 +144,7 @@ def test_lifecycle_update_status(repository, setup_database, db_engine):
         assert row.CD_ENTREGADOR == 870.0
 
     # 3. Update to "Done"
-    repository.update_delivery_as_done(delivery, time(11, 0))
+    repository.update_delivery_as_done(delivery.sale_id, time(11, 0))
 
     # Verify DB
     with db_engine.connect() as conn:
