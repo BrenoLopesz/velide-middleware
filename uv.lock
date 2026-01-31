@@ -3836,6 +3836,151 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-mock"
+version = "3.14.1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version >= '3.8.1' and python_full_version < '3.9' and sys_platform != 'linux')",
+    "(python_full_version < '3.8.1' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version < '3.8.1' and sys_platform != 'linux')",
+]
+dependencies = [
+    { name = "pytest", version = "8.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/71/28/67172c96ba684058a4d24ffe144d64783d2a270d0af0d9e792737bddc75c/pytest_mock-3.14.1.tar.gz", hash = "sha256:159e9edac4c451ce77a5cdb9fc5d1100708d2dd4ba3c3df572f14097351af80e", size = 33241 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/05/77b60e520511c53d1c1ca75f1930c7dd8e971d0c4379b7f4b3f9644685ba/pytest_mock-3.14.1-py3-none-any.whl", hash = "sha256:178aefcd11307d874b4cd3100344e7e2d888d9791a6a1d9bfe90fbc1b74fd1d0", size = 9923 },
+]
+
+[[package]]
+name = "pytest-mock"
+version = "3.15.1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and python_full_version < '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.10.*' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and python_full_version < '3.13' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.10.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "(python_full_version >= '3.11' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.11' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "(python_full_version == '3.10.*' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version == '3.10.*' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "python_full_version == '3.9.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "(python_full_version == '3.9.*' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version == '3.9.*' and sys_platform != 'linux')",
+]
+dependencies = [
+    { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "pytest", version = "9.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/68/14/eb014d26be205d38ad5ad20d9a80f7d201472e08167f0bb4361e251084a9/pytest_mock-3.15.1.tar.gz", hash = "sha256:1849a238f6f396da19762269de72cb1814ab44416fa73a8686deac10b0d87a0f", size = 34036 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/cc/06253936f4a7fa2e0f48dfe6d851d9c56df896a9ab09ac019d70b760619c/pytest_mock-3.15.1-py3-none-any.whl", hash = "sha256:0a25e2eb88fe5168d535041d09a4529a188176ae608a6d249ee65abc0949630d", size = 10095 },
+]
+
+[[package]]
+name = "pytest-qt"
+version = "4.4.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version < '3.8.1' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.8.1' and python_full_version < '3.9' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version >= '3.8.1' and python_full_version < '3.9' and sys_platform != 'linux')",
+    "(python_full_version < '3.8.1' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version < '3.8.1' and sys_platform != 'linux')",
+]
+dependencies = [
+    { name = "pluggy", version = "1.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "pytest", version = "8.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/53/2c/6a477108342bbe1f5a81a2c54c86c3efadc35f6ad47c76f00c75764a0f7c/pytest-qt-4.4.0.tar.gz", hash = "sha256:76896142a940a4285339008d6928a36d4be74afec7e634577e842c9cc5c56844", size = 125443 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4c/51/6cc5b9c1ecdcd78e6cde97e03d05f5a4ace8f720c5ce0f26f9dce474a0da/pytest_qt-4.4.0-py3-none-any.whl", hash = "sha256:001ed2f8641764b394cf286dc8a4203e40eaf9fff75bf0bfe5103f7f8d0c591d", size = 36286 },
+]
+
+[[package]]
+name = "pytest-qt"
+version = "4.5.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and python_full_version < '3.13' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.10.*' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and python_full_version < '3.13' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.10.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "python_full_version == '3.10.*' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "(python_full_version >= '3.11' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.11' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "(python_full_version == '3.10.*' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version == '3.10.*' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "python_full_version == '3.9.*' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'i686' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'armv7l' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 'ppc64le' and sys_platform == 'linux'",
+    "python_full_version == '3.9.*' and platform_machine == 's390x' and sys_platform == 'linux'",
+    "(python_full_version == '3.9.*' and platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (python_full_version == '3.9.*' and sys_platform != 'linux')",
+]
+dependencies = [
+    { name = "pluggy", version = "1.6.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "pytest", version = "9.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d3/61/8bdec02663c18bf5016709b909411dce04a868710477dc9b9844ffcf8dd2/pytest_qt-4.5.0.tar.gz", hash = "sha256:51620e01c488f065d2036425cbc1cbcf8a6972295105fd285321eb47e66a319f", size = 128702 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cc/d0/8339b888ad64a3d4e508fed8245a402b503846e1972c10ad60955883dcbb/pytest_qt-4.5.0-py3-none-any.whl", hash = "sha256:ed21ea9b861247f7d18090a26bfbda8fb51d7a8a7b6f776157426ff2ccf26eff", size = 37214 },
+]
+
+[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 source = { registry = "https://pypi.org/simple" }
@@ -4757,6 +4902,10 @@ dependencies = [
     { name = "pyjwt", version = "2.10.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
     { name = "pyqt5" },
     { name = "pyqt5-qt5" },
+    { name = "pytest-mock", version = "3.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "pytest-mock", version = "3.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "pytest-qt", version = "4.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "pytest-qt", version = "4.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
     { name = "python-dotenv", version = "1.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "python-dotenv", version = "1.2.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
     { name = "pyyaml" },
@@ -4834,6 +4983,8 @@ requires-dist = [
     { name = "pyqt5", specifier = ">=5.15.11" },
     { name = "pyqt5-qt5", specifier = "==5.15.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
+    { name = "pytest-mock", specifier = ">=3.14.1" },
+    { name = "pytest-qt", specifier = ">=4.4.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "qrcode", specifier = ">=7.4.2" },

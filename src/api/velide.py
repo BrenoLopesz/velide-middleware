@@ -16,6 +16,7 @@ from models.velide_delivery_models import (
     GraphQLResponse,
     GraphQLResponseError,
     MetadataInput,
+    MetadataResponse,
     Order,
 )
 from config import ApiConfig, ReconciliationConfig, TargetSystem
@@ -305,111 +306,119 @@ class Velide:
         address: str,
         time_window_seconds: float
     ) -> Optional[DeliveryResponse]:
-        """
-        Search for a delivery by customer name and address within a time window.
+        """Search for a delivery by customer name and address within a time window.
 
-        Queries active deliveries and filters locally by:
-        - Customer name (case-insensitive exact match)
-        - Creation time within the specified window
-        - Address substring matching
+        Fetches the global snapshot of active deliveries and performs a local
+        filter using the raw metadata. This avoids issues where the server's
+        geocoding alters the address format.
+
+        If multiple matches are found, the most recently created delivery is returned.
 
         Args:
-            customer_name: The customer name to search for
-            address: The delivery address to match against
-            time_window_seconds: How far back to look in seconds
+            customer_name: The customer name to search for (case-insensitive).
+            address: The delivery address string to match against.
+            time_window_seconds: The lookback window in seconds (e.g., 3600 for 1 hour).
 
         Returns:
-            DeliveryResponse if a matching delivery is found, None otherwise
+            DeliveryResponse: The matching delivery object if found.
+            None: If no matching delivery is found within the time window.
+
+        Raises:
+            GraphQLRequestError: If the snapshot query fails.
+            GraphQLParseError: If the response cannot be parsed.
         """
-        try:
-            # Calculate the cutoff time
-            from_date = datetime.now(timezone.utc) - timedelta(
-                seconds=time_window_seconds
-            )
+        # 1. Calculate the cutoff time (UTC)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(seconds=time_window_seconds)
 
-            # Query all active deliveries using the existing snapshot query
-            payload = GraphQLPayload(query=self.GET_GLOBAL_SNAPSHOT_QUERY)
-            response = await self._execute_request(payload)
+        # 2. Query global snapshot (Active Deliveries)
+        payload = GraphQLPayload(query=self.GET_GLOBAL_SNAPSHOT_QUERY)
+        response = await self._execute_request(payload)
+        
+        # Parse response using the generic parser; we expect 'GlobalSnapshotData' structure
+        snapshot_data: GlobalSnapshotData = self._parse_response(response, data_key=None)
 
-            # Parse the response - we only need the deliveries list
-            raw_data = self._parse_response(response, data_key=None)
-
-            if not raw_data or not hasattr(raw_data, 'deliveries'):
-                return None
-
-            deliveries = raw_data.deliveries
-
-            # Filter deliveries locally
-            for delivery in deliveries:
-                # Check if delivery has required attributes
-                if not hasattr(delivery, 'metadata') or not delivery.metadata:
-                    continue
-
-                # Check customer name match (case-insensitive)
-                delivery_customer = getattr(delivery.metadata, 'customer_name', None)
-                if not delivery_customer:
-                    continue
-
-                if delivery_customer.lower() != customer_name.lower():
-                    continue
-
-                # Check time window
-                if not hasattr(delivery, 'created_at') or not delivery.created_at:
-                    continue
-
-                # Handle both datetime objects and ISO strings
-                created_at = delivery.created_at
-                if isinstance(created_at, str):
-                    try:
-                        # Parse ISO format string
-                        created_at = datetime.fromisoformat(
-                            created_at.replace('Z', '+00:00')
-                        )
-                    except (ValueError, AttributeError):
-                        continue
-
-                # Ensure timezone-aware comparison
-                if created_at.tzinfo is None:
-                    created_at = created_at.replace(tzinfo=timezone.utc)
-
-                if created_at < from_date:
-                    continue
-
-                # Check address match
-                if self._delivery_address_matches(delivery, address):
-                    return delivery
-
+        if not snapshot_data or not snapshot_data.deliveries:
             return None
 
-        except Exception:
-            # Log and return None on any error to allow retry
-            logger = logging.getLogger(__name__)
-            logger.exception("Erro ao buscar entrega por metadados")
+        candidates: List[Tuple[DeliveryResponse, datetime]] = []
+
+        # 3. Iterate and Filter
+        for delivery in snapshot_data.deliveries:
+            # A. Check Metadata Existence
+            if not delivery.metadata:
+                continue
+
+            # B. Check Customer Name (Case-Insensitive)
+            # Use safe access in case fields are missing in legacy data
+            stored_name = delivery.metadata.customer_name
+            if not stored_name or stored_name.lower() != customer_name.lower():
+                continue
+
+            # C. Check Time Window (Timezone Safe)
+            created_at = delivery.created_at
+            
+            # Ensure we have an aware datetime for comparison.
+            # If the API returned a naive datetime, assume it implies UTC 
+            # (or the system's standard time) to avoid crash against 'cutoff_time'.
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            
+            if created_at < cutoff_time:
+                continue
+
+            # D. Check Address Match using Metadata
+            if self._metadata_address_matches(delivery.metadata, address):
+                candidates.append((delivery, created_at))
+
+        # 4. Deterministic Selection
+        if not candidates:
             return None
 
-    def _delivery_address_matches(self, delivery: DeliveryResponse, address: str) -> bool:
-        """
-        Check if delivery address matches the given address.
+        # Sort by creation time descending (newest first) and return the best match.
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        
+        return candidates[0][0]
 
-        Uses substring matching for flexibility with address formatting differences.
+    def _metadata_address_matches(
+        self, metadata: MetadataResponse, input_address: str
+    ) -> bool:
+        """Checks if the input address matches the raw address stored in metadata.
+
+        Compares the raw address string sent during creation against the current
+        input. This is more reliable than comparing against the server-processed
+        'location' field, which may have been geocoded or normalized.
+
+        Args:
+            metadata: The metadata object from the delivery response.
+            input_address: The raw address string to match against.
+
+        Returns:
+            True if the addresses are considered a match, False otherwise.
         """
-        if not delivery.location or not delivery.location.properties:
+        # 1. fast fail if no address in metadata
+        if not metadata.address:
             return False
 
-        props = delivery.location.properties
-        delivery_addr = f"{props.street or ''} {props.housenumber or ''}".strip()
+        # 2. Normalize strings (strip whitespace, lowercase)
+        stored_addr = metadata.address.strip().lower()
+        search_addr = input_address.strip().lower()
 
-        if not delivery_addr:
+        if not stored_addr or not search_addr:
             return False
 
-        # Simple substring matching (case-insensitive)
-        addr_lower = address.lower()
-        delivery_addr_lower = delivery_addr.lower()
+        # 3. Exact match check
+        if stored_addr == search_addr:
+            return True
 
-        return (
-            addr_lower in delivery_addr_lower or
-            delivery_addr_lower in addr_lower
-        )
+        # 4. Safety check for short strings to prevent false positives
+        # e.g., prevents "10" from matching inside "100 Main St"
+        if len(search_addr) < 5:
+            return False
+
+        # 5. Substring match
+        # Since both strings are "raw inputs" from the same source system, 
+        # a bidirectional substring check is usually safe and effective.
+        return search_addr in stored_addr or stored_addr in search_addr
 
     def _build_variables_to_add_delivery(self, order: Order) -> AddDeliveryVariables:
         """
