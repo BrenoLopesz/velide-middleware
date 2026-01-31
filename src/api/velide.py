@@ -1,6 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
+from httpx import TimeoutException
 
 from models.velide_delivery_models import (
     AddDeliveryVariables,
@@ -14,10 +16,12 @@ from models.velide_delivery_models import (
     GraphQLResponse,
     GraphQLResponseError,
     MetadataInput,
+    MetadataResponse,
     Order,
 )
-from config import ApiConfig, TargetSystem
+from config import ApiConfig, ReconciliationConfig, TargetSystem
 from utils.async_retry import async_retry
+from api.reconciliation import DeliveryReconciliationStrategy
 
 
 class Velide:
@@ -77,6 +81,16 @@ class Velide:
             deliveries {
                 id
                 createdAt
+                metadata {
+                    customerName
+                    integrationName
+                }
+                location {
+                    properties {
+                        street
+                        housenumber
+                    }
+                }
             }
             deliverymen {
                 id
@@ -93,7 +107,11 @@ class Velide:
     """
 
     def __init__(
-        self, access_token: str, api_config: ApiConfig, target_system: TargetSystem
+        self,
+        access_token: str,
+        api_config: ApiConfig,
+        target_system: TargetSystem,
+        reconciliation_config: Optional[ReconciliationConfig] = None,
     ):
         """
         Initialize the Velide API client.
@@ -101,11 +119,25 @@ class Velide:
         Args:
             access_token: Bearer token for API authentication
             api_config: Configuration object containing URL, timeout, SSL settings
+            target_system: The integration target identifier
+            reconciliation_config: Optional configuration for reconciliation on retry
         """
         self._access_token = access_token
         self._api_config = api_config
         self._target_system = target_system
         self._client: Optional[httpx.AsyncClient] = None
+        self._reconciliation_config = reconciliation_config
+        self._reconciliation_strategy: Optional[DeliveryReconciliationStrategy] = None
+
+        # Initialize reconciliation strategy if enabled
+        if (
+            reconciliation_config is not None
+            and reconciliation_config.retry_reconciliation_enabled
+        ):
+            self._reconciliation_strategy = DeliveryReconciliationStrategy(
+                velide_client=self,
+                config=reconciliation_config,
+            )
 
     async def __aenter__(self):
         """Called when entering the 'async with' block."""
@@ -128,10 +160,60 @@ class Velide:
         if self._client:
             await self._client.aclose()
 
+    async def _on_add_delivery_exception(
+        self,
+        exc: Exception,
+        attempt: int,
+        args: tuple,
+        kwargs: dict
+    ) -> Optional[DeliveryResponse]:
+        """
+        Callback invoked when add_delivery encounters an exception.
+
+        Checks if reconciliation is enabled and if the exception is a timeout.
+        If so, attempts to reconcile by checking if the delivery was actually
+        created on the server before the timeout occurred.
+
+        Args:
+            exc: The exception that was raised
+            attempt: The current retry attempt number
+            args: Positional arguments passed to add_delivery
+            kwargs: Keyword arguments passed to add_delivery
+
+        Returns:
+            DeliveryResponse if reconciliation finds the delivery, None otherwise
+        """
+        # Check if reconciliation is enabled
+        if (
+            self._reconciliation_strategy is None
+            or self._reconciliation_config is None
+        ):
+            return None
+
+        # Only reconcile on timeout exceptions
+        if not isinstance(exc, TimeoutException):
+            return None
+
+        # Apply configured delay before reconciliation check
+        import asyncio
+        await asyncio.sleep(self._reconciliation_config.retry_reconciliation_delay_seconds)
+
+        # FIX: Slice args to remove 'self' (args[0])
+        # We assume args[1:] contains the actual arguments for the method
+        actual_args = args[1:] if len(args) > 0 else ()
+
+        # Attempt to find the delivery via reconciliation
+        return await self._reconciliation_strategy.check_exists(*actual_args, **kwargs)
+
     @async_retry(
-        operation_desc="enviar nova entrega",  # <--- Friendly Name
+        operation_desc="enviar nova entrega",
         max_retries=4,
         initial_delay=2.0,
+        on_exception=lambda exc, attempt, args, kwargs: (
+            args[0]._on_add_delivery_exception(exc, attempt, args, kwargs)
+            if args and hasattr(args[0], '_on_add_delivery_exception')
+            else None
+        )
     )
     async def add_delivery(
         self,
@@ -203,6 +285,18 @@ class Velide:
         return [DeliverymanResponse.model_validate(dm) for dm in parsed_response]
 
     @async_retry(operation_desc="buscar snapshot global", max_retries=3)
+    async def get_full_global_snapshot(self) -> GlobalSnapshotData:
+        """
+        Fetches the raw global snapshot data. 
+        Pure IO: Fetches and parses, does NOT process logic.
+        """
+        payload = GraphQLPayload(query=self.GET_GLOBAL_SNAPSHOT_QUERY)
+        response = await self._execute_request(payload)
+        
+        # Parses the full structure (deliveries + deliverymen)
+        return self._parse_response(response, data_key=None)
+
+    # NO decorator here - logic is safe, IO is handled by the call below
     async def get_active_deliveries_snapshot(self) -> dict:
         """
         Fetches ALL unassigned deliveries and ALL active routes.
@@ -212,12 +306,8 @@ class Velide:
             dict: { "delivery_id": "STATUS" }
             e.g. { "abc-123": "PENDING", "xyz-789": "ROUTED" }
         """
-        payload = GraphQLPayload(query=self.GET_GLOBAL_SNAPSHOT_QUERY)
-
-        response = await self._execute_request(payload)
-
-        # Pass None to get the full data structure containing both keys
-        raw_data: GlobalSnapshotData = self._parse_response(response, data_key=None)
+        # Reuse the core IO method (which handles retries)
+        raw_data = await self.get_full_global_snapshot()
 
         # Flatten the data for easier processing
         return self._flatten_snapshot(raw_data)

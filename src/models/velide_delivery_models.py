@@ -92,14 +92,29 @@ class Location(BaseModel):
     properties: LocationProperties
 
 
+class MetadataResponse(BaseModel):
+    """Metadata from GraphQL response"""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    address: Optional[str] = Field(default=None)
+    customer_name: Optional[str] = Field(default=None, alias="customerName")
+    customer_contact: Optional[str] = Field(default=None, alias="customerContact")
+    integration_name: Optional[str] = Field(default=None, alias="integrationName")
+    reference: Optional[str] = Field(default=None)
+
+
 class DeliveryResponse(BaseModel):
     """Delivery data from GraphQL response"""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     id: str
     route_id: Optional[str] = Field(None, alias="routeId")
     ended_at: Optional[datetime] = Field(None, alias="endedAt")
     created_at: datetime = Field(..., alias="createdAt")
     location: Optional[Location] = None
+    metadata: Optional[MetadataResponse] = None
 
 
 class RouteResponse(BaseModel):

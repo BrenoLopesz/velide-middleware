@@ -176,7 +176,7 @@ def test_poll_cycle_resilience_to_exceptions(tracker, mock_persistence):
     tracker._execute_poll_cycle()
 
     assert tracker._is_processing is False  # Vital: Lock must be released
-    tracker._logger.error.assert_called()
+    tracker._logger.exception.assert_called()
 
 
 # -----------------------------------------------------------------------------
@@ -242,7 +242,7 @@ def test_on_statuses_retrieved_handles_malformed_data(tracker):
     tracker._on_statuses_retrieved([object()])
 
     tracker.error_occurred.emit.assert_called()
-    tracker._logger.error.assert_called()
+    tracker._logger.exception.assert_called()
 
 
 def test_on_worker_error_logs_only(tracker):

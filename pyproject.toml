@@ -40,6 +40,8 @@ dependencies = [
     "pyjwt>=2.9.0",
     "pyqt5>=5.15.11",
     "pyqt5-qt5==5.15.2",
+    "pytest-mock>=3.14.1",
+    "pytest-qt>=4.4.0",
     "python-dotenv>=1.0.1",
     "pyyaml>=6.0.3",
     "qrcode>=7.4.2",
@@ -102,6 +104,7 @@ select = ["E", "F"]
 dev = [
     "mypy<1.15",
     "pyqt5-stubs>=5.15.6.0",
+    "pytest-asyncio>=0.24.0",
     "ruff>=0.14.10",
     "types-pyyaml>=6.0.12.20241230",
     "types-qrcode>=8.0.0.20241004",
