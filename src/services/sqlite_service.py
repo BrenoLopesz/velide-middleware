@@ -37,8 +37,8 @@ class SQLiteService(QObject):
     # Emits a list of all mappings
     all_mappings_found = pyqtSignal(list)
 
-    # Emits a simplified error message (str) if any worker fails
-    error_occurred = pyqtSignal(str)
+    # Emits error info (tuple from sys.exc_info()) if any worker fails
+    error_occurred = pyqtSignal(tuple)
 
     # --- Delivery Service-Level Signals ---
 
