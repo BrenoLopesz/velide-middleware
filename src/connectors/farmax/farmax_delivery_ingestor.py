@@ -106,6 +106,11 @@ class FarmaxDeliveryIngestor(QObject):
         self._retry_timer = QTimer(self)
         self._retry_timer.setSingleShot(True)
 
+        # Emergency watchdog timer to prevent stuck processing flag
+        self._watchdog_timer = QTimer(self)
+        self._watchdog_timer.setSingleShot(True)
+        self._watchdog_timer.timeout.connect(self._emergency_release_lock)
+
     # --- Public Interface ---
 
     def start(self) -> None:
@@ -128,6 +133,7 @@ class FarmaxDeliveryIngestor(QObject):
         self._is_running = False
         self._poll_timer.stop()
         self._retry_timer.stop()
+        self._watchdog_timer.stop()
         try:
             self._retry_timer.timeout.disconnect()
         except TypeError:
@@ -146,6 +152,9 @@ class FarmaxDeliveryIngestor(QObject):
             return
 
         self._is_processing_cycle = True
+
+        # Start emergency watchdog (2 minutes timeout)
+        self._watchdog_timer.start(120000)
 
         # FIX: Grab the value into a local variable first
         last_id = self._cursor.last_log_id
@@ -183,11 +192,13 @@ class FarmaxDeliveryIngestor(QObject):
         """
         if not self._is_running:
             self._is_processing_cycle = False  # Release
+            self._watchdog_timer.stop()
             return
 
         if not logs:
             # Nothing happened, wait for next cycle
             self._is_processing_cycle = False  # Release
+            self._watchdog_timer.stop()
             return
 
         # 1. Identify relevant IDs (INSERT + Not Tracked)
@@ -205,6 +216,7 @@ class FarmaxDeliveryIngestor(QObject):
             # Safe to advance cursor immediately.
             self._cursor.commit()
             self._is_processing_cycle = False  # Release lock
+            self._watchdog_timer.stop()
             return
 
         if len(ids_to_fetch) == 1:
@@ -241,6 +253,7 @@ class FarmaxDeliveryIngestor(QObject):
         """
         if not self._is_running:
             self._is_processing_cycle = False  # Release lock
+            self._watchdog_timer.stop()
             return
 
         processed_orders: List[Order] = []
@@ -271,6 +284,7 @@ class FarmaxDeliveryIngestor(QObject):
         finally:
             # ALWAYS Release lock so the next timer tick can work
             self._is_processing_cycle = False
+            self._watchdog_timer.stop()
 
     def _on_fetch_details_error(
         self, error_msg: str, payload: Tuple[float, ...]
@@ -281,6 +295,7 @@ class FarmaxDeliveryIngestor(QObject):
         """
         if not self._is_running:
             self._is_processing_cycle = False  # Release lock
+            self._watchdog_timer.stop()
             return
 
         self._logger.warning(
@@ -323,8 +338,9 @@ class FarmaxDeliveryIngestor(QObject):
             self._cursor.rollback()  # Don't advance ID
 
             self._is_processing_cycle = False  # <--- Release Lock Here
+            self._watchdog_timer.stop()
 
-            # Restart main loop; the system acts as a 
+            # Restart main loop; the system acts as a
             # Dead Letter Queue (tries again later)
             self._poll_timer.start(self._config.poll_interval_ms)
 
@@ -336,9 +352,18 @@ class FarmaxDeliveryIngestor(QObject):
 
         # Release the lock so the timer can try again later
         self._is_processing_cycle = False
+        self._watchdog_timer.stop()
 
     # --- Helpers ---
 
     def _get_midnight_timestamp(self) -> datetime:
         """Returns the datetime for today at 00:00:00."""
         return datetime.combine(date.today(), datetime.min.time())
+
+    def _emergency_release_lock(self) -> None:
+        """Emergency watchdog to release stuck processing lock."""
+        if self._is_processing_cycle:
+            self._logger.warning(
+                "Liberando lock de processamento preso."
+            )
+            self._is_processing_cycle = False
