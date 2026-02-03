@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 class DeliverymenMappingPresenter(QObject):
     mapping_done = pyqtSignal()
-    error = pyqtSignal(str)
+    error = pyqtSignal(tuple)
 
     def __init__(self, view: MainView, services: "Services", machine: MainStateMachine):
         super().__init__()
