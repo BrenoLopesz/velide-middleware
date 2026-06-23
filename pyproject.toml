@@ -54,6 +54,7 @@ dependencies = [
     "striprtf>=0.0.29",
     "tdqm>=0.0.1",
     "tqdm>=4.67.1",
+    "typing-extensions>=4.13.2",
     "urllib3>=2.2.3",
     "watchdog>=4.0.2",
 ]
