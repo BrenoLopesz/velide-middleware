@@ -20,7 +20,7 @@ from models.velide_delivery_models import (
     Order,
 )
 from config import ApiConfig, ReconciliationConfig, TargetSystem
-from utils.async_retry import async_retry
+from utils.async_retry import async_retry, execute_with_retry
 from api.reconciliation import DeliveryReconciliationStrategy
 
 
@@ -35,7 +35,8 @@ class Velide:
             $address2: String,
             $neighbourhood: String,
             $reference: String,
-            $offset: Int
+            $offset: Int,
+            $idempotencyKey: String
         ) {
             addDeliveryFromIntegration(
                 metadata: $metadata
@@ -44,6 +45,7 @@ class Velide:
                 neighbourhood: $neighbourhood
                 reference: $reference
                 offset: $offset
+                idempotencyKey: $idempotencyKey
             ) {
                 id
                 routeId
@@ -205,25 +207,16 @@ class Velide:
         # Attempt to find the delivery via reconciliation
         return await self._reconciliation_strategy.check_exists(*actual_args, **kwargs)
 
-    @async_retry(
-        operation_desc="enviar nova entrega",
-        max_retries=4,
-        initial_delay=2.0,
-        on_exception=lambda exc, attempt, args, kwargs: (
-            args[0]._on_add_delivery_exception(exc, attempt, args, kwargs)
-            if args and hasattr(args[0], '_on_add_delivery_exception')
-            else None
-        )
-    )
     async def add_delivery(
         self,
         order: Order,
     ) -> DeliveryResponse:
         """
         Add a delivery via GraphQL mutation with full type safety.
+        Retry behaviour is read from the runtime ApiConfig.
 
         Args:
-            sale_info: Dictionary containing sale information
+            order: Validated order
 
         Returns:
             DeliveryResponse: The created delivery information
@@ -234,18 +227,33 @@ class Velide:
             GraphQLResponseError: When response structure is invalid
             ValidationError: When input data validation fails
         """
-        # Build request components
-        variables = self._build_variables_to_add_delivery(order)
-        payload = GraphQLPayload(query=self.ADD_DELIVERY_MUTATION, variables=variables)
+        async def _impl():
+            # Build request components
+            variables = self._build_variables_to_add_delivery(order)
+            payload = GraphQLPayload(query=self.ADD_DELIVERY_MUTATION, variables=variables)
 
-        # Make request and parse response
-        response = await self._execute_request(payload)
+            # Make request and parse response
+            response = await self._execute_request(payload)
 
-        # Use the new generic parser
-        parsed_response = self._parse_response(
-            response, data_key="addDeliveryFromIntegration"
+            # Use the new generic parser
+            parsed_response = self._parse_response(
+                response, data_key="addDeliveryFromIntegration"
+            )
+            return DeliveryResponse.model_validate(parsed_response)
+
+        async def _on_exc(exc, attempt, retry_args, retry_kwargs):
+            # Reconstruct args in the shape _on_add_delivery_exception expects.
+            # It slices args[1:] to drop 'self', so we prepend it.
+            return await self._on_add_delivery_exception(exc, attempt, (self, order), {})
+
+        return await execute_with_retry(
+            _impl,
+            operation_desc="enviar nova entrega",
+            max_retries=self._api_config.add_delivery_max_retries,
+            initial_delay=self._api_config.add_delivery_initial_delay,
+            backoff_factor=self._api_config.add_delivery_backoff_factor,
+            on_exception=_on_exc,
         )
-        return DeliveryResponse.model_validate(parsed_response)
 
     @async_retry(operation_desc="deletar entrega", max_retries=3)
     async def delete_delivery(self, delivery_id: str) -> bool:
@@ -346,6 +354,8 @@ class Velide:
             variables_dict["address2"] = order.address2
         if self._api_config.use_neighbourhood and order.neighbourhood:
             variables_dict["neighbourhood"] = order.neighbourhood
+        if self._api_config.add_delivery_idempotency_enabled:
+            variables_dict["idempotencyKey"] = order.internal_id
 
         return AddDeliveryVariables.model_validate(variables_dict)
 

@@ -9,6 +9,11 @@ api:
   velide_server: "https://api.velide.com.br/"
   velide_websockets_server: "wss://api.velide.com.br/"
   use_ssl: false
+  # Retry & idempotency settings for add_delivery
+  add_delivery_max_retries: 4          # total attempts (1 = no retry at all)
+  add_delivery_initial_delay: 2.0      # seconds before first retry
+  add_delivery_backoff_factor: 2.0     # exponential backoff multiplier
+  add_delivery_idempotency_enabled: true  # sends idempotencyKey to prevent duplicates
 
 target_system: "{{ TARGET_SYSTEM }}"
 folder_to_watch: "{{ FOLDER_TO_WATCH }}"

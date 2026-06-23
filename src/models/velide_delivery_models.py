@@ -59,6 +59,7 @@ class AddDeliveryVariables(BaseModel):
     address2: Optional[str] = None
     neighbourhood: Optional[str] = None
     reference: Optional[str] = None
+    idempotency_key: Optional[str] = Field(default=None, alias="idempotencyKey")
 
 
 class DeleteDeliveryVariables(BaseModel):

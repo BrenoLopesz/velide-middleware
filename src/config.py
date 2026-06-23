@@ -117,6 +117,27 @@ class ApiConfig(BaseModel):
     )
     timeout: float = Field(default=15.0, description="API requests timeout.")
 
+    add_delivery_max_retries: int = Field(
+        default=4,
+        ge=0,
+        le=10,
+        description="Max total attempts for add_delivery (1 = no retry)."
+    )
+    add_delivery_initial_delay: float = Field(
+        default=2.0,
+        ge=0,
+        description="Seconds to wait before first retry for add_delivery."
+    )
+    add_delivery_backoff_factor: float = Field(
+        default=2.0,
+        ge=1.0,
+        description="Exponential backoff multiplier for add_delivery retries."
+    )
+    add_delivery_idempotency_enabled: bool = Field(
+        default=True,
+        description="Send an idempotencyKey when adding deliveries."
+    )
+
     velide_websockets_server: str = Field(
         description="Websockets server to receive updates from."
     )
