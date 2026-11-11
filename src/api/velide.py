@@ -99,6 +99,8 @@ class Velide:
                 name
                 route {
                     id
+                    startedAt
+                    endAt
                     deliveries {
                         id
                         createdAt
@@ -330,6 +332,8 @@ class Velide:
         Returns:
             GraphQLVariables: Validated variables for the mutation
         """
+        if order.request_variables is not None:
+            return AddDeliveryVariables.model_validate(order.request_variables)
         # Calculate time offset
         offset = self._calculate_offset(order.created_at)
 
@@ -414,7 +418,13 @@ class Velide:
             if dm.route:
                 for item in dm.route.deliveries:
                     # Store a tuple: (STATUS, DELIVERYMEN_EXTERNAL_ID)
-                    snapshot_map[item.id] = ("ROUTED", dm.id)
+                    if dm.route.started_at:
+                        snapshot_map[item.id] = ("ROUTED", dm.id, {
+                            "execution_id": dm.route.id,
+                            "occurred_at": dm.route.started_at.isoformat(),
+                        })
+                    else:
+                        snapshot_map[item.id] = ("ROUTED", dm.id)
 
         return snapshot_map
 

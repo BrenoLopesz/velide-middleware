@@ -1,4 +1,5 @@
 import logging
+import json
 from dataclasses import dataclass
 from datetime import datetime, date
 from functools import partial
@@ -10,6 +11,7 @@ from PyQt5.QtCore import pyqtSignal, QObject, QThreadPool, QTimer
 from connectors.farmax.farmax_mapper import FarmaxMapper
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_worker import FarmaxWorker
+from connectors.farmax.identity import normalize_farmax_id
 from models.farmax_models import FarmaxDelivery, DeliveryLog
 from models.velide_delivery_models import Order
 from services.tracking_persistence_service import TrackingPersistenceService
@@ -88,6 +90,10 @@ class FarmaxDeliveryIngestor(QObject):
         self._repository = repository
         self._persistence = persistence
         self._config = config
+        self._journal = getattr(persistence, "journal", None)
+        self._pending_sale_ids = []
+        self._scan_cursor = 0
+        self._poll_count = 0
 
         self._cursor = _CursorState()
         self._thread_pool = QThreadPool.globalInstance()
@@ -156,6 +162,42 @@ class FarmaxDeliveryIngestor(QObject):
         # Start emergency watchdog (2 minutes timeout)
         self._watchdog_timer.start(120000)
 
+        if self._journal:
+            self._journal.submit("source_state", success=self._on_source_state,
+                                 failure=self._on_poll_error)
+        else:
+            self._poll_logs()
+
+    def _on_source_state(self, state):
+        if not self._is_running:
+            self._finish_cycle()
+            return
+        self._cursor.last_log_id = state["cursor"]
+        self._pending_sale_ids = [int(json.loads(row["payload"])["sale_id"])
+                                  for row in state["pending"]]
+        self._poll_count += 1
+        if self._scan_cursor or self._poll_count % 10 == 1:
+            worker = FarmaxWorker(self._repository, "fetch_pending_ids", after_id=self._scan_cursor)
+            worker.signals.success.connect(self._on_pending_scan)
+            worker.signals.error.connect(self._on_poll_error)
+            self._thread_pool.start(worker)
+        else:
+            self._poll_logs()
+
+    def _on_pending_scan(self, ids):
+        self._scan_cursor = max(ids) if len(ids) == 100 else 0
+        unknown = [sale_id for sale_id in ids if not self._persistence.is_tracked(sale_id)]
+        self._pending_sale_ids = sorted(set(self._pending_sale_ids + unknown))
+        observations = [("farmax:" + normalize_farmax_id(sale_id),
+                         {"sale_id": normalize_farmax_id(sale_id)}) for sale_id in unknown]
+        self._journal.submit("observe_source", observations, success=lambda _: self._poll_logs(),
+                             failure=self._on_poll_error)
+
+    def _poll_logs(self):
+        if not self._is_running:
+            self._finish_cycle()
+            return
+
         # FIX: Grab the value into a local variable first
         last_id = self._cursor.last_log_id
 
@@ -196,6 +238,9 @@ class FarmaxDeliveryIngestor(QObject):
             return
 
         if not logs:
+            if self._pending_sale_ids:
+                self._fetch_details_payload(tuple(self._pending_sale_ids))
+                return
             # Nothing happened, wait for next cycle
             self._is_processing_cycle = False  # Release
             self._watchdog_timer.stop()
@@ -209,6 +254,16 @@ class FarmaxDeliveryIngestor(QObject):
 
         # 2. Update the pending cursor (Highest ID found in logs)
         self._cursor.prepare_pending_cursor(logs)
+
+        if self._journal:
+            observations = [("farmax:" + normalize_farmax_id(sale_id),
+                             {"sale_id": normalize_farmax_id(sale_id)})
+                            for sale_id in ids_to_fetch]
+            ids = tuple(sorted(set(ids_to_fetch + self._pending_sale_ids)))
+            self._journal.submit("observe_source", observations, max(log.id for log in logs),
+                                 success=lambda _: self._source_recorded(ids),
+                                 failure=self._on_poll_error)
+            return
 
         # 3. Branching logic
         if not ids_to_fetch:
@@ -230,6 +285,13 @@ class FarmaxDeliveryIngestor(QObject):
         self._fetch_details_payload(tuple(ids_to_fetch))
 
     # --- Step 2: Fetching Details (With Retry) ---
+
+    def _source_recorded(self, ids):
+        self._cursor.commit()
+        if self._is_running and ids:
+            self._fetch_details_payload(ids)
+        else:
+            self._finish_cycle()
 
     def _fetch_details_payload(self, sale_ids: Tuple[float, ...]) -> None:
         """Initiates the worker to fetch full order details."""
@@ -257,6 +319,10 @@ class FarmaxDeliveryIngestor(QObject):
             return
 
         processed_orders: List[Order] = []
+
+        if self._journal:
+            self._persist_details(deliveries)
+            return
 
         try:
             for delivery in deliveries:
@@ -347,6 +413,48 @@ class FarmaxDeliveryIngestor(QObject):
 
             # Restart main loop; the system acts as a
             # Dead Letter Queue (tries again later)
+            self._poll_timer.start(self._config.poll_interval_ms)
+
+    def _persist_details(self, deliveries):
+        orders = []
+        for delivery in deliveries:
+            try:
+                orders.append(FarmaxMapper.to_order(delivery))
+            except Exception as error:
+                self.error_occurred.emit(str(error))
+        if not orders:
+            self._finish_cycle()
+            return
+        remaining = [len(orders)]
+
+        def finished():
+            remaining[0] -= 1
+            if remaining[0] == 0:
+                self._finish_cycle()
+
+        def accepted(order, row):
+            if self._is_running and row["submission"] != "TERMINAL" and row["cancellation"] != "ACKNOWLEDGED":
+                if self._persistence.reserve_id(order.internal_id):
+                    self.orders_received.emit([order])
+            self._journal.submit("resolve_source", "farmax:" + order.internal_id,
+                                 success=lambda _: finished(), failure=failed)
+
+        def failed(error):
+            self.error_occurred.emit(error)
+            finished()
+
+        for order in orders:
+            order.internal_id = normalize_farmax_id(order.internal_id)
+            payload = order.model_dump(mode="json", by_alias=True)
+            payload["internal_id"] = order.internal_id
+            self._journal.submit("accept", order.internal_id, payload,
+                                 success=lambda row, order=order: accepted(order, row), failure=failed)
+
+    def _finish_cycle(self):
+        self._is_processing_cycle = False
+        self._watchdog_timer.stop()
+        self._retry_count = 0
+        if self._is_running and not self._poll_timer.isActive():
             self._poll_timer.start(self._config.poll_interval_ms)
 
     def _on_poll_error(self, error_msg: str) -> None:

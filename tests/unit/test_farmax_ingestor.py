@@ -59,7 +59,8 @@ def ingestor(mock_repo, mock_persistence, qtbot):
 
     ingestor._thread_pool.start.side_effect = immediate_execution
 
-    return ingestor
+    yield ingestor
+    ingestor.stop()
 
 
 # --- Tests ---

@@ -132,6 +132,9 @@ class DashboardPresenter(QObject):
         self._services.reconciliation.delivery_in_route.connect(
             self._services.deliveries.on_reconciliation_detects_route_start
         )
+        self._services.reconciliation.delivery_route_fact.connect(
+            self._services.deliveries.on_reconciliation_route_fact
+        )
         self._services.reconciliation.delivery_missing.connect(
             self._services.deliveries.on_reconciliation_misses_delivery
         )

@@ -221,8 +221,8 @@ class SQLiteWorker(QRunnable):
                 # Call the method with the stored arguments
                 op_result = method_to_call(*self.args)
 
-                # Emit the result back to the main thread
-                self.signals.result.emit(op_result)
+            # Context exit commits. Never acknowledge a result before commit.
+            self.signals.result.emit(op_result)
 
         except Exception:
             # An error occurred, emit the error signal with traceback info

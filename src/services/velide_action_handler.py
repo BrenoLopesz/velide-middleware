@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 from PyQt5.QtCore import QObject, pyqtSignal
 
 from models.velide_delivery_models import Order
@@ -52,6 +53,8 @@ class VelideActionHandler(QObject):
 
         for order in orders:
             if order is not None:
+                occurred = action.route.started_at or (action.timestamp - timedelta(milliseconds=action.offset))
+                order.effect_context = {"execution_id": action.route.id, "occurred_at": occurred.isoformat()}
                 # 2. Notify UI (Presenter)
                 self.delivery_in_route.emit(order, deliveryman.id)
 
@@ -69,6 +72,8 @@ class VelideActionHandler(QObject):
 
         for order in orders:
             if order is not None:
+                occurred = action.route.ended_at or (action.timestamp - timedelta(milliseconds=action.offset))
+                order.effect_context = {"execution_id": action.route.id, "occurred_at": occurred.isoformat()}
                 # 2. Notify UI (Presenter)
                 self.delivery_delivered.emit(order)
 

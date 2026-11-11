@@ -31,7 +31,7 @@ class MockWorker(QObject):
 def mock_deps(mocker):
     """Mocks the repository, persistence, and threadpool."""
     repo = mocker.MagicMock()
-    persistence = mocker.MagicMock()
+    persistence = mocker.MagicMock(journal=None)
 
     # Mock QThreadPool to prevent actual threading and count calls
     mock_thread_pool = mocker.patch("PyQt5.QtCore.QThreadPool.globalInstance")
@@ -49,7 +49,8 @@ def ingestor(mock_deps, qtbot):
         persistence=mock_deps["persistence"],
         config=FarmaxIngestorConfig(poll_interval_ms=1000),
     )
-    return ingestor
+    yield ingestor
+    ingestor.stop()
 
 
 # --- The Tests ---

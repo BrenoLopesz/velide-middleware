@@ -30,18 +30,21 @@ class TrackingPersistenceService(QObject):
             self, 
             sqlite_service: SQLiteService, 
             sqlite_days_retention: Optional[int] =30,
-            parent=None
+            parent=None,
+            journal=None,
         ):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self._sqlite = sqlite_service
+        self.journal = journal
         self._cleanup_service = DailyCleanupService(
             sqlite_service=self._sqlite, 
             days_retention=sqlite_days_retention
         )
         # Start it once (e.g., when the main window shows)
         # This will run a prune immediately, and then again every 24h.
-        self._cleanup_service.start_routine()
+        # Upgrade/copy retained identities before any terminal-history pruning.
+        self.hydrated.connect(self._cleanup_service.start_routine)
 
         # --- In-Memory Cache ---
 
@@ -99,8 +102,6 @@ class TrackingPersistenceService(QObject):
             is_terminal = (
                 status == DeliveryStatus.CANCELLED
                 or status == DeliveryStatus.DELIVERED
-                or status == DeliveryStatus.FAILED
-                or status == DeliveryStatus.MISSING
             )
 
             if not is_terminal:
@@ -119,6 +120,21 @@ class TrackingPersistenceService(QObject):
         self.logger.info(
             f"Entregas recuperadas. {count_active} entregas carregadas na memória."
         )
+        if self.journal:
+            self.journal.submit("restore", success=self._on_journal_loaded)
+        else:
+            self.hydrated.emit()
+
+    def _on_journal_loaded(self, rows):
+        for row in rows:
+            key = self._normalize_id(row["internal_id"])
+            if row["submission"] == "TERMINAL" or row["cancellation"] == "ACKNOWLEDGED":
+                self._archived_ids.add(key)
+                self._status_cache.pop(key, None)
+            else:
+                self._status_cache.setdefault(key, DeliveryStatus.PENDING)
+            if row["external_id"]:
+                self._id_map[key] = row["external_id"]
         self.hydrated.emit()
 
     # --- Public API for Strategy ---
@@ -129,7 +145,7 @@ class TrackingPersistenceService(QObject):
         """
         norm_id = self._normalize_id(internal_id)
 
-        if norm_id in self._status_cache:
+        if self.is_tracked(norm_id):
             self.logger.debug(f"ID {norm_id} já está sendo processado ou rastreado.")
             return False
 
@@ -183,7 +199,7 @@ class TrackingPersistenceService(QObject):
         """
         Returns ONLY Active IDs for the Status Tracker to poll.
         """
-        return [float(k) for k in self._status_cache.keys()]
+        return [int(k) for k in self._status_cache.keys()]
 
     def register_new_delivery(
         self, internal_id: RawID, external_id: str, status: DeliveryStatus
@@ -211,6 +227,9 @@ class TrackingPersistenceService(QObject):
         self._status_cache[norm_id] = final_status
         self._id_map[norm_id] = external_id
 
+        if self.journal:
+            # Durable dispatcher has committed this mapping before its signal.
+            return
         # TODO: Check if this was succesful. Rollback everything if not.
         # 2. Async Persist to SQLite (Sending the CLEAN STRING ID)
         self._sqlite.request_add_delivery_mapping(
@@ -287,14 +306,12 @@ class TrackingPersistenceService(QObject):
         Returns IDs that need status checking.
         """
         terminal_states = (
-            DeliveryStatus.DELIVERED.value,
-            DeliveryStatus.FAILED.value,
-            DeliveryStatus.CANCELLED.value,
-            DeliveryStatus.MISSING.value,
+            DeliveryStatus.DELIVERED,
+            DeliveryStatus.CANCELLED,
         )
 
         return [
-            float(k[0]) for k in self._status_cache.items() 
+            int(k[0]) for k in self._status_cache.items()
             if k[1] not in terminal_states
         ]
 

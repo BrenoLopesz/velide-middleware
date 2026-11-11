@@ -6,6 +6,7 @@ from config import ApiConfig, TargetSystem
 from models.delivery_table_model import DeliveryRowStatus
 from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_dispatcher import DeliveryDispatcher
+from services.durable_delivery_dispatcher import DurableDeliveryDispatcher
 from services.strategies.connectable_strategy import IConnectableStrategy
 from models.velide_delivery_models import Order
 from api.velide_gateway import VelideGateway
@@ -23,6 +24,7 @@ class DeliveriesService(QObject):
         api_config: ApiConfig,
         target_system: TargetSystem,
         delivery_repository: DeliveryRepository,
+        journal=None,
     ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
@@ -30,7 +32,8 @@ class DeliveriesService(QObject):
 
         # 1. DEPENDENCY INJECTION / COMPOSITION
         self._repository = delivery_repository
-        self._dispatcher = DeliveryDispatcher(
+        self._journal = journal
+        self._dispatcher = DurableDeliveryDispatcher(gateway, journal) if journal else DeliveryDispatcher(
             gateway,
             QThreadPool.globalInstance()
         )
@@ -46,6 +49,8 @@ class DeliveriesService(QObject):
         self._dispatcher.delivery_success.connect(self._on_add_delivery_request_success)
         self._dispatcher.deletion_success.connect(self._on_deletion_request_success)
         self._dispatcher.task_failed.connect(self._on_delivery_request_failure)
+        if journal:
+            self._dispatcher.order_restored.connect(self._on_order_restored)
 
     def get_order(self, order_id: str) -> Optional[Order]:
         """Facade for the repository."""
@@ -66,6 +71,7 @@ class DeliveriesService(QObject):
         self._active_strategy.order_normalized.connect(self._on_order_normalized)
         self._active_strategy.order_cancelled.connect(self._on_internal_order_cancelled)
         self._active_strategy.order_restored.connect(self._on_order_restored)
+        self._active_strategy.synchronization_failed.connect(self._on_delivery_request_failure)
 
     def start_listening(self):
         if self._active_strategy is None:
@@ -73,6 +79,8 @@ class DeliveriesService(QObject):
                 "Nenhum sistema conectado! Entregas não serão processadas."
             )
             return
+        if self._journal:
+            self._dispatcher.start()
         self._active_strategy.start_listening()
 
     # =========================================================================
@@ -123,7 +131,7 @@ class DeliveriesService(QObject):
         # 2. Acknowledge to UI
         self.delivery_acknowledged.emit(internal_id, normalized_order)
 
-        if not self._gateway.is_ready():
+        if not self._journal and not self._gateway.is_ready():
             self.logger.error(
                 "Não é possível enviar entrega antes de " \
                 "efetuar autenticação! Aguardando..."
@@ -152,6 +160,10 @@ class DeliveriesService(QObject):
         """
         if self._target_system == TargetSystem.FARMAX:
             internal_id = normalize_farmax_id(internal_id)
+        if self._journal:
+            self._dispatcher.request_cancel(internal_id, external_id)
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.DELETING)
+            return
         self._cancellation_intents.add(internal_id)
         self.logger.debug(
             "Solicitação de cancelamento recebida. "
@@ -205,6 +217,12 @@ class DeliveriesService(QObject):
 
     def on_reconciliation_misses_delivery(self, internal_id: str):
         self.delivery_update.emit(internal_id, DeliveryRowStatus.MISSING)
+
+    def on_reconciliation_route_fact(self, internal_id, courier_id, facts):
+        order = self.get_order(internal_id)
+        if order:
+            order.effect_context = facts
+            self.on_delivery_route_started_in_velide(order, courier_id)
 
     # =========================================================================
     # DISPATCHER CALLBACKS (Results from API)

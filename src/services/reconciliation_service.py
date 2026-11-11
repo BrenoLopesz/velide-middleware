@@ -27,6 +27,7 @@ class ReconciliationService(QObject):
 
     delivery_in_route = pyqtSignal(str, str)  # Delivery ID, Deliveryman ID
     delivery_missing = pyqtSignal(str)
+    delivery_route_fact = pyqtSignal(str, str, dict)
 
     def __init__(
         self,
@@ -56,6 +57,7 @@ class ReconciliationService(QObject):
 
         self._is_missing_api = False
         self._reconciliation_config = reconciliation_config
+        self._in_flight = False
 
     def start_service(self):
         """Starts the automatic background timer."""
@@ -94,6 +96,9 @@ class ReconciliationService(QObject):
         """
         Step 1: Spawns the Worker to fetch the Global Snapshot.
         """
+        if self._in_flight:
+            return
+        self._in_flight = True
         self.sync_started.emit()
         self.logger.debug("Iniciando ciclo de reconciliação...")
 
@@ -106,6 +111,7 @@ class ReconciliationService(QObject):
         # Or reuse 'deliverymen_retrieved' if passing a dict/list
         worker.signals.snapshot_retrieved.connect(self._handle_snapshot_results)
         worker.signals.error.connect(self._handle_error)
+        worker.signals.finished.connect(lambda: setattr(self, "_in_flight", False))
 
         # Run in global thread pool 
         QThreadPool.globalInstance().start(worker)
@@ -150,9 +156,19 @@ class ReconciliationService(QObject):
 
             # --- CHECK 3: STATUS MISMATCH ---
             # Unpack the tuple from Velide._flatten_snapshot
-            remote_status_str, remote_deliveryman_id = snapshot_map[velide_id]
+            remote_status_str, remote_deliveryman_id = snapshot_map[velide_id][:2]
 
             expected_local_enum = map_velide_status_to_local(remote_status_str)
+
+            if expected_local_enum == DeliveryStatus.IN_PROGRESS and remote_deliveryman_id:
+                facts = snapshot_map[velide_id]
+                if len(facts) > 2:
+                    self.delivery_route_fact.emit(internal_id, remote_deliveryman_id, facts[2])
+                elif expected_local_enum != local_status:
+                    self.delivery_in_route.emit(internal_id, remote_deliveryman_id)
+                # The ERP acknowledgement advances local status, not this read.
+                updates_count += 1
+                continue
 
             if expected_local_enum != local_status:
                 self.logger.warning(
@@ -172,9 +188,6 @@ class ReconciliationService(QObject):
                 # Emit signal to update UI
                 # Only emit deliveryman ID if status is 
                 # 'ROUTED'/'IN_ROUTE' and ID exists
-                if expected_local_enum == DeliveryStatus.IN_PROGRESS and remote_deliveryman_id:
-                    self.delivery_in_route.emit(internal_id, remote_deliveryman_id)
-
                 # (Optional) Handle other status changes via generic signal if needed
 
                 updates_count += 1

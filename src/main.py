@@ -204,7 +204,9 @@ def create_strategy(
         )
         farmax_setup = FarmaxSetup(engine)
         farmax_setup.initial_setup()
-        farmax_repository = FarmaxRepository(engine)
+        farmax_repository = FarmaxRepository(
+            engine, journal=tracking_persistence_service.journal.journal
+        )
         return FarmaxStrategy(
             farmax_config=app_config.farmax,
             # farmax_setup=farmax_setup,
@@ -229,16 +231,21 @@ def build_services(app_config: Settings) -> Services:
     auth_service = AuthService(app_config.auth, velide_gateway)
     delivery_repository = DeliveryRepository()
     velide_action_handler = VelideActionHandler(delivery_repository)
+    from services.sync_journal_service import SyncJournalService
+    db_path = os.path.join(BUNDLE_DIR, app_config.sqlite_path)
+    journal = SyncJournalService(db_path, app_config.api.velide_server + "|" + app_config.target_system.value)
     deliveries_service = DeliveriesService(
         gateway=velide_gateway,
         api_config=app_config.api,
         target_system=app_config.target_system,
         delivery_repository=delivery_repository,
+        journal=journal,
     )
     sqlite_service = SQLiteService(os.path.join(BUNDLE_DIR, app_config.sqlite_path))
     tracking_persistance_service = TrackingPersistenceService(
         sqlite_service,
-        app_config.sqlite_days_retention
+        app_config.sqlite_days_retention,
+        journal=journal,
     )
     reconciliation_service = ReconciliationService(
         gateway=velide_gateway,

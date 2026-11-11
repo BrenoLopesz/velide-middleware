@@ -32,6 +32,8 @@ class Order(BaseModel):
         ..., description="Internal ERP ID used for tracking.", exclude=True
     )
     ui_status_hint: Optional[Any] = Field(None, exclude=True)
+    request_variables: Optional[dict] = Field(None, exclude=True)
+    effect_context: Optional[dict] = Field(None, exclude=True)
 
     @field_validator("customer_name", "address")
     @classmethod
@@ -122,6 +124,8 @@ class RouteResponse(BaseModel):
     """Route info nested inside deliveryman"""
 
     id: str
+    started_at: Optional[datetime] = Field(None, alias="startedAt")
+    ended_at: Optional[datetime] = Field(None, alias="endAt")
     deliveries: List[DeliveryResponse] = Field(default_factory=list)
 
 

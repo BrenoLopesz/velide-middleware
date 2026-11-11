@@ -17,9 +17,10 @@ from models.farmax_models import (
 class FarmaxRepository:
     LOG_TABLE_NAME = "DELIVERYLOG"
 
-    def __init__(self, engine: Engine):
+    def __init__(self, engine: Engine, journal=None):
         self.logger = logging.getLogger(__name__)
         self._engine = engine
+        self._journal = journal
 
     def _build_in_clause_params(self, values: Tuple) -> Tuple[str, dict]:
         """Builds placeholders and params for an IN clause."""
@@ -42,13 +43,20 @@ class FarmaxRepository:
         """
         query = text(
             "UPDATE ENTREGAS SET CD_ENTREGADOR = :man_id, HORA_SAIDA = :time, "
-            "STATUS = 'R' WHERE CD_VENDA = :sale_id"
+            "STATUS = 'R' WHERE CD_VENDA = :sale_id AND STATUS IN ('S','R')"
         )
         params = {"man_id": driver_id, "time": left_at, "sale_id": sale_id}
 
         try:
             with self._engine.begin() as conn:
-                conn.execute(query, params)
+                state = self._read_write_state(conn, sale_id)
+                if state["status"] not in ("S", "R"):
+                    raise ValueError("Departure conflicts with current Farmax delivery state")
+                if (state["status"] == "R" and state["cd_entregador"] == driver_id
+                        and str(state["hora_saida"]) == str(left_at)):
+                    return
+                if conn.execute(query, params).rowcount != 1:
+                    raise ValueError("Departure did not update exactly one delivery")
         except SQLAlchemyError:
             self.logger.exception(
                 f"Falha ao atualizar entrega {sale_id} para 'Em Rota'."
@@ -66,24 +74,46 @@ class FarmaxRepository:
         """
         update_entregas_query = text(
             "UPDATE ENTREGAS SET HORA_CHEGADA = :time, STATUS = 'V' "
-            "WHERE CD_VENDA = :sale_id"
+            "WHERE CD_VENDA = :sale_id AND STATUS IN ('S','R','V')"
         )
         update_vendas_query = text(
             "UPDATE VENDAS SET CONCLUIDO = 'S', STATUS = 'V', HORAFINAL = :time "
-            "WHERE CD_VENDA = :sale_id"
+            "WHERE CD_VENDA = :sale_id AND STATUS IN ('S','V')"
         )
         params = {"time": ended_at, "sale_id": sale_id}
 
         try:
             with self._engine.begin() as conn:
-                conn.execute(update_entregas_query, params)
-                conn.execute(update_vendas_query, params)
+                state = self._read_write_state(conn, sale_id)
+                if state["status"] not in ("S", "R", "V"):
+                    raise ValueError("Completion conflicts with current Farmax delivery state")
+                if state["status"] == "V":
+                    if str(state["hora_chegada"]) != str(ended_at):
+                        raise ValueError("Completion timestamp conflicts with an existing completion")
+                    return  # Firebird committed this effect before its local acknowledgement.
+                if conn.execute(update_entregas_query, params).rowcount != 1:
+                    raise ValueError("Completion did not update exactly one delivery")
+                if conn.execute(update_vendas_query, params).rowcount < 1:
+                    raise ValueError("Completion did not update any eligible sale items")
         except SQLAlchemyError:
             self.logger.exception(f"Falha ao finalizar entrega {sale_id}.")
             raise
         except Exception:
             self.logger.exception(f"Erro inesperado ao finalizar entrega {sale_id}.")
             raise
+
+    def _read_write_state(self, conn, sale_id):
+        suffix = " WITH LOCK" if self._engine.dialect.name == "firebird" else ""
+        rows = conn.execute(text("SELECT STATUS, CD_ENTREGADOR, HORA_SAIDA, HORA_CHEGADA "
+                                 "FROM ENTREGAS WHERE CD_VENDA=:sale_id" + suffix),
+                            {"sale_id": sale_id}).fetchall()
+        if len(rows) != 1:
+            raise ValueError("Expected exactly one Farmax delivery for this sale")
+        statuses = conn.execute(text("SELECT STATUS FROM VENDAS WHERE CD_VENDA=:sale_id"),
+                                {"sale_id": sale_id}).fetchall()
+        if not statuses or not any(row[0] in ("S", "V") for row in statuses):
+            raise ValueError("No active sale items remain for this delivery")
+        return {key.lower(): value for key, value in rows[0]._mapping.items()}
 
     def fetch_sales_statuses_by_id(
         self, cd_vendas: Tuple[float, ...]
@@ -119,7 +149,7 @@ class FarmaxRepository:
             return [FarmaxSale.model_validate(row_dict) for row_dict in row_dicts]
 
     def fetch_deliveries_by_id(
-        self, cd_vendas: Tuple[float, ...]
+        self, cd_vendas: Tuple[float, ...], pending_only: bool = True
     ) -> List[FarmaxDelivery]:
         """
         Fetches detailed delivery info from both ENTREGAS and VENDAS
@@ -184,7 +214,7 @@ class FarmaxRepository:
             LEFT JOIN CLIENTES C ON E.CD_CLIENTE = C.CD_CLIENTE
             
             WHERE
-                E.STATUS = 'S' AND E.CD_VENDA IN ({placeholders}) -- Filter main query
+                {"E.STATUS = 'S' AND" if pending_only else ""} E.CD_VENDA IN ({placeholders})
             ORDER BY
                 E.CD_VENDA DESC
         """)
@@ -196,14 +226,24 @@ class FarmaxRepository:
                 {k.lower(): v for k, v in row._mapping.items()} for row in rows
             ]
 
-            # Directly convert the complete rows to Pydantic models
-            return [FarmaxDelivery.model_validate(row_dict) for row_dict in row_dicts]
+            valid = []
+            for row_dict in row_dicts:
+                try:
+                    valid.append(FarmaxDelivery.model_validate(row_dict))
+                except ValidationError as error:
+                    if not self._journal:
+                        raise
+                    from connectors.farmax.identity import normalize_farmax_id
+                    key = "farmax:" + normalize_farmax_id(row_dict["cd_venda"])
+                    self._journal.resolve_source(key, str(error))
+                    self.logger.error("Invalid Farmax source record %s: %s", key, error)
+            return valid
 
     def fetch_recent_changes(self, last_check_time: datetime) -> List[DeliveryLog]:
         """
         Fetches all delivery log changes since the last check time.
         """
-        query = text(f"SELECT * FROM {self.LOG_TABLE_NAME} WHERE LOGDATE > :last_check")
+        query = self._bounded_log_query("LOGDATE >= :last_check")
 
         with self._engine.connect() as conn:
             result = conn.execute(query, {"last_check": last_check_time})
@@ -219,6 +259,7 @@ class FarmaxRepository:
                     log = DeliveryLog.model_validate(row_dict)
                     valid_logs.append(log)
                 except ValidationError as e:
+                    self._quarantine_log(row_dict, e)
                     # If validation fails, skip this row and continue.
                     # It is highly recommended to log this failure so you know data is missing.
                     self.logger.exception(
@@ -232,10 +273,10 @@ class FarmaxRepository:
         """
         Fetches all delivery log changes since the last check time.
         """
-        query = text(f"SELECT * FROM {self.LOG_TABLE_NAME} WHERE ID > :last_id")
+        query = self._bounded_log_query("ID > :last_id")
 
         with self._engine.connect() as conn:
-            result = conn.execute(query, {"last_id": last_id})
+            result = conn.execute(query, {"last_id": max(0, last_id - 100)})
             rows = result.fetchall()
             row_dicts = [
                 {k.lower(): v for k, v in row._mapping.items()} for row in rows
@@ -248,6 +289,7 @@ class FarmaxRepository:
                     log = DeliveryLog.model_validate(row_dict)
                     valid_logs.append(log)
                 except ValidationError as e:
+                    self._quarantine_log(row_dict, e)
                     # If validation fails, skip this row and continue.
                     # It is highly recommended to log this failure so you know data is missing.
                     self.logger.exception(
@@ -256,6 +298,26 @@ class FarmaxRepository:
                     continue
                     
             return valid_logs
+
+    def _bounded_log_query(self, predicate):
+        if self._engine.dialect.name == "firebird":
+            return text(f"SELECT FIRST 500 * FROM {self.LOG_TABLE_NAME} WHERE {predicate} ORDER BY ID")
+        return text(f"SELECT * FROM {self.LOG_TABLE_NAME} WHERE {predicate} ORDER BY ID LIMIT 500")
+
+    def _quarantine_log(self, row, error):
+        if not self._journal:
+            raise error
+        key = "invalid-log:" + str(row.get("id"))
+        self._journal.observe_source([(key, row)])
+        self._journal.resolve_source(key, str(error))
+
+    def fetch_pending_ids(self, after_id=0):
+        prefix = "FIRST 100 " if self._engine.dialect.name == "firebird" else ""
+        suffix = "" if prefix else " LIMIT 100"
+        query = text(f"SELECT {prefix}DISTINCT CD_VENDA FROM ENTREGAS "
+                     "WHERE STATUS='S' AND CD_VENDA>:after_id ORDER BY CD_VENDA" + suffix)
+        with self._engine.connect() as conn:
+            return [row[0] for row in conn.execute(query, {"after_id": after_id})]
 
     def fetch_deliverymen(self) -> List[FarmaxDeliveryman]:
         """

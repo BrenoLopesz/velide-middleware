@@ -105,6 +105,7 @@ class FarmaxConfig(BaseModel):
     file: str = Field(..., description="Firebird database file.")
     user: str = Field(..., description="Firebird user.")
     password: str = Field(..., description="Firebird password.")
+    timezone: str = Field(default="America/Sao_Paulo", description="IANA timezone used by this Farmax database.")
 
 
 class ApiConfig(BaseModel):

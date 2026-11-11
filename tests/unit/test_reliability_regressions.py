@@ -58,7 +58,7 @@ def test_cds_string_identity_is_unchanged(qtbot):
 
 
 def test_successful_detail_retry_resumes_real_poll_timer(qtbot, monkeypatch):
-    ingestor = FarmaxDeliveryIngestor(MagicMock(), MagicMock())
+    ingestor = FarmaxDeliveryIngestor(MagicMock(), MagicMock(journal=None))
     ingestor._is_running = True
     ingestor._config.poll_interval_ms = 10
     ingestor._on_fetch_details_error("temporary", (123.0,))

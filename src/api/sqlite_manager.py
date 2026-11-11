@@ -2,6 +2,7 @@ import sqlite3
 import logging
 from typing import Optional, List, Tuple
 from enum import Enum
+from api.sync_schema import migrate_sync_schema
 
 
 class DeliveryStatus(Enum):
@@ -78,19 +79,22 @@ class SQLiteManager:
             # This allows concurrent readers and writers.
             self.conn.execute("PRAGMA journal_mode = WAL;")
 
-            # Optimize Synchronization
-            # 'NORMAL' is safe for WAL and much faster than default 'FULL'.
-            self.conn.execute("PRAGMA synchronous = NORMAL;")
+            # Acknowledged queue entries must survive a host power loss as well.
+            self.conn.execute("PRAGMA synchronous = FULL;")
 
             # Foreign Keys
             self.conn.execute("PRAGMA foreign_keys = ON;")
 
             self._create_tables()
+            migrate_sync_schema(self.conn, self.db_path)
             return self
-        except sqlite3.Error:
+        except Exception:
             self.logger.exception(
                 f"Erro ao conectar ao banco de dados em {self.db_path}."
             )
+            if self.conn:
+                self.conn.close()
+                self.conn = None
             raise
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -113,6 +117,7 @@ class SQLiteManager:
                     self.conn.rollback()
             except sqlite3.Error:
                 self.logger.exception("Erro durante saída.")
+                raise
             finally:
                 self.conn.close()
                 self.conn = None
@@ -609,10 +614,10 @@ class SQLiteManager:
             return [(row[0], row[1], DeliveryStatus(row[2])) for row in rows]
         except sqlite3.Error:
             self.logger.exception("Erro ao buscar todos os mapeamentos de entrega.")
-            return []
+            raise
         except ValueError:
             self.logger.exception("Erro ao converter status do DB para Enum.")
-            return []
+            raise
 
     def get_active_deliveries(self) -> List[Tuple[str, str, DeliveryStatus]]:
         """
@@ -674,9 +679,7 @@ class SQLiteManager:
         # even if they are old, as they might require manual review.
         safe_to_delete_states = (
             DeliveryStatus.DELIVERED.value,
-            DeliveryStatus.FAILED.value,
             DeliveryStatus.CANCELLED.value,
-            DeliveryStatus.MISSING.value,
         )
 
         # 2. Prepare the query
@@ -688,6 +691,8 @@ class SQLiteManager:
             DELETE FROM DeliveryMapping 
             WHERE status IN ({placeholders})
             AND updated_at < date('now', ?)
+            AND NOT EXISTS (SELECT 1 FROM SyncOrders S
+                WHERE S.internal_id = DeliveryMapping.internal_delivery_id)
         """
 
         time_modifier = f"-{days_retention} days"

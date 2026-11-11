@@ -161,6 +161,31 @@ def test_fetch_deliverymen(repository, setup_database):
     assert "RODRIGO NUNES" in [m.name for m in men]
 
 
+def test_completion_preserves_partial_item_states_and_replay(repository, setup_database, db_engine):
+    with db_engine.begin() as conn:
+        conn.execute(text("UPDATE VENDAS SET STATUS='D' WHERE CD_PRODUTO=114830"))
+    repository.update_delivery_as_in_route(562083, 870, time(10, 30))
+    assert repository.fetch_deliveries_by_id((562083,), pending_only=False)
+    assert not repository.fetch_deliveries_by_id((562083,))
+    repository.update_delivery_as_done(562083, time(11))
+    repository.update_delivery_as_done(562083, time(11))
+    with db_engine.connect() as conn:
+        assert conn.execute(text("SELECT STATUS FROM VENDAS ORDER BY CD_PRODUTO")).fetchall() == [("D",), ("V",)]
+    with pytest.raises(ValueError, match="conflicts"):
+        repository.update_delivery_as_in_route(562083, 870, time(10, 30))
+
+
+def test_missing_or_cancelled_sale_does_not_acknowledge_write(repository, setup_database, db_engine):
+    with pytest.raises(ValueError, match="exactly one"):
+        repository.update_delivery_as_done(999, time(11))
+    with db_engine.begin() as conn:
+        conn.execute(text("UPDATE VENDAS SET STATUS='C'"))
+    with pytest.raises(ValueError, match="active sale"):
+        repository.update_delivery_as_done(562083, time(11))
+    with db_engine.connect() as conn:
+        assert conn.execute(text("SELECT STATUS FROM ENTREGAS")).scalar() == "S"
+
+
 def test_cancellation_snapshot_carries_all_items_and_current_removal_evidence(repository, setup_database, db_engine):
     from connectors.farmax.cancellation import classify_cancellation, CancellationDecision
     with db_engine.begin() as conn:

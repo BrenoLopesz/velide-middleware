@@ -27,6 +27,7 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):  # type: ignore[mi
     order_normalized = pyqtSignal(Order)
     order_restored = pyqtSignal(Order, object)  # Order and external ID (optional)
     order_cancelled = pyqtSignal(str, object)  # Internal ID, (optional) external ID
+    synchronization_failed = pyqtSignal(str, str)
     # normalization_failed = pyqtSignal(dict, str) # raw_data, error_message
 
     @property
