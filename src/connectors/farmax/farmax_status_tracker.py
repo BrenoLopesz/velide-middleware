@@ -1,4 +1,5 @@
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import List
 
@@ -7,6 +8,7 @@ from PyQt5.QtCore import pyqtSignal, QObject, QThreadPool, QTimer
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_worker import FarmaxWorker
 from connectors.farmax.identity import normalize_farmax_id
+from connectors.farmax.cancellation import classify_cancellation, CancellationDecision
 
 # We must import the model to type-hint the callback correctly
 from models.farmax_models import FarmaxSale
@@ -54,6 +56,7 @@ class FarmaxStatusTracker(QObject):
         self._thread_pool = QThreadPool.globalInstance()
         self._is_running = False
         self._is_processing = False  # Semaphore to prevent overlapping poll cycles
+        self._pending_workers = 0
 
         # Timer
         self._poll_timer = QTimer(self)
@@ -118,6 +121,7 @@ class FarmaxStatusTracker(QObject):
                 for i in range(0, len(active_ids), self._config.batch_size)
             ]
 
+            self._pending_workers = len(batches)
             for batch in batches:
                 self._spawn_worker_for_batch(batch)
 
@@ -147,7 +151,8 @@ class FarmaxStatusTracker(QObject):
 
     def _set_processing_finished(self):
         """Releases the lock allow next timer cycle."""
-        self._is_processing = False
+        self._pending_workers = max(0, self._pending_workers - 1)
+        self._is_processing = self._pending_workers > 0
 
     # --- Callbacks ---
 
@@ -162,47 +167,19 @@ class FarmaxStatusTracker(QObject):
             return
 
         try:
-            for sale in sales_updates:
-                sale_id = sale.id
-                raw_status = sale.status
-
-                # Check for Cancellation
-                if self._is_cancelled(raw_status):
-                    internal_id_str = normalize_farmax_id(sale_id)
-
-                    self._logger.info(
-                        "Cancelamento detectado no Farmax para o "
-                        f"pedido {internal_id_str} (Status: {raw_status})."
-                    )
-
-                    # We look up the Velide ID so the Service knows what to delete
-                    external_id = self._persistence.get_external_id(internal_id_str)
-
-                    # Emit both IDs.
-                    # If external_id is None, DeliveriesService 
-                    # will handle it (remove from queue only).
-                    self.order_cancelled.emit(internal_id_str, external_id)
-
-                    # TODO: We SHOULD NOT mark as cancelled here. It should 
-                    #       have an intermediary status called "CANCELLING", 
-                    #       so if the application crashed during this 
-                    #       operation, or if the cancellation failed, the
-                    #       user would be able to retry it. However, since it 
-                    #       isn't possible to delete deliveries in route yet,
-                    #       this is inevitable, so we won't handle it yet.
-                    # Update local persistence
-                    self._persistence.mark_as_cancelled(sale_id)
-
-                # Optional: Check for "Finished/Delivered" in ERP to close local loop
-                elif self._is_finished(raw_status):
+            by_sale = defaultdict(list)
+            for item in sales_updates:
+                by_sale[normalize_farmax_id(item.id)].append(item)
+            for internal_id, items in by_sale.items():
+                decision = classify_cancellation(items)
+                if decision == CancellationDecision.CANCEL:
+                    external_id = self._persistence.get_external_id(internal_id)
+                    self.order_cancelled.emit(internal_id, external_id)
+                elif decision == CancellationDecision.UNRESOLVED:
                     self._logger.warning(
-                        f"Pedido {sale_id} finalizado no Farmax mas não foi entregue "
-                        "no Velide! Para melhor sincronização informe o "
-                        "retorno sempre através do Velide."
+                        "Pedido %s com alteração parcial ou evidência incompleta; "
+                        "aguardando nova consulta.", internal_id
                     )
-                    # EDIT: Do not mark as finished, so it keeps 
-                    # being tracked through Velide.
-                    # self._persistence.mark_as_finished(sale_id)
 
         except Exception as e:
             self._logger.exception(
@@ -223,8 +200,8 @@ class FarmaxStatusTracker(QObject):
         """
         if not status:
             return False
-        # Common patterns: 'C' = Cancelado, 'D' = Devolvido (sometimes)
-        return status.strip().upper() in ["C", "D"]
+        # Item-return status D is not a whole-delivery cancellation.
+        return status.strip().upper() == "C"
 
     def _is_finished(self, status: str) -> bool:
         """Determines if the order is done and needs no further monitoring."""

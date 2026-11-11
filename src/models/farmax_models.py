@@ -22,6 +22,9 @@ class FarmaxDeliveryman(BaseLocalDeliveryman):
 class FarmaxSale(BaseModel):
     id: float = Field(alias="cd_venda")  # Firebird uses DOUBLE PRECISION
     status: str = Field(alias="status")
+    concluded: Optional[str] = Field(default=None, alias="concluido")
+    delivery_exists: Optional[bool] = None
+    delivery_deleted: bool = False
 
 
 class FarmaxDelivery(BaseModel):

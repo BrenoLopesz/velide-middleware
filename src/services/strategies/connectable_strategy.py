@@ -69,6 +69,10 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):  # type: ignore[mi
         deliver is detected through Websockets."""
         pass
 
+    def on_cancellation_acknowledged(self, internal_id: str):
+        """Called only after a queued-only or remotely confirmed cancellation."""
+        pass
+
     def on_delivery_route_started_on_velide(
         self, order: Order, deliveryman_external_id: str
     ):

@@ -199,7 +199,7 @@ def test_on_statuses_retrieved_handles_cancellation(tracker, mock_persistence):
     # Assert
     mock_persistence.get_external_id.assert_called_with("123")
     tracker.order_cancelled.emit.assert_called_with("123", "EXT_REF_001")
-    mock_persistence.mark_as_cancelled.assert_called_with(123.0)
+    mock_persistence.mark_as_cancelled.assert_not_called()
 
 
 def test_on_statuses_retrieved_handles_delivery(tracker, mock_persistence):
@@ -268,7 +268,7 @@ def test_set_processing_finished(tracker):
     [
         ("C", True),
         ("c", True),  # Case insensitive
-        ("D", True),  # Devolvido
+        ("D", False),  # Item return is not whole-delivery cancellation
         ("A", False),
         ("F", False),
         ("", False),

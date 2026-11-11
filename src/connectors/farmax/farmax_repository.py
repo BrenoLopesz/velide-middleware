@@ -99,9 +99,15 @@ class FarmaxRepository:
         placeholders, params = self._build_in_clause_params(cd_vendas)
 
         query = text(
-            f"SELECT CD_VENDA, STATUS FROM VENDAS "
-            f"WHERE CD_VENDA IN ({placeholders}) "
-            f"ORDER BY CD_VENDA DESC"
+            f"SELECT V.CD_VENDA, V.STATUS, V.CONCLUIDO, "
+            f"CASE WHEN EXISTS (SELECT 1 FROM ENTREGAS E "
+            f"WHERE E.CD_VENDA = V.CD_VENDA) THEN 1 ELSE 0 END AS DELIVERY_EXISTS, "
+            f"CASE WHEN EXISTS (SELECT 1 FROM {self.LOG_TABLE_NAME} L "
+            f"WHERE L.CD_VENDA = V.CD_VENDA AND L.ACTION = 'DELETE' "
+            f"AND L.ID = (SELECT MAX(L2.ID) FROM {self.LOG_TABLE_NAME} L2 "
+            f"WHERE L2.CD_VENDA = V.CD_VENDA)) THEN 1 ELSE 0 END AS DELIVERY_DELETED "
+            f"FROM VENDAS V WHERE V.CD_VENDA IN ({placeholders}) "
+            f"ORDER BY V.CD_VENDA DESC"
         )
 
         with self._engine.connect() as conn:

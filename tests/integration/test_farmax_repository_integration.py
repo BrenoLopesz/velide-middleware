@@ -28,6 +28,7 @@ def repository(db_engine):
 def setup_database(db_engine):
     with db_engine.begin() as conn:
         # Tables
+        conn.execute(text("CREATE TABLE DELIVERYLOG (ID INTEGER PRIMARY KEY, CD_VENDA REAL, ACTION TEXT, LOGDATE TEXT)"))
         conn.execute(
             text(
                 "CREATE TABLE ENTREGAS "
@@ -158,3 +159,17 @@ def test_fetch_deliverymen(repository, setup_database):
     men = repository.fetch_deliverymen()
     assert len(men) == 2
     assert "RODRIGO NUNES" in [m.name for m in men]
+
+
+def test_cancellation_snapshot_carries_all_items_and_current_removal_evidence(repository, setup_database, db_engine):
+    from connectors.farmax.cancellation import classify_cancellation, CancellationDecision
+    with db_engine.begin() as conn:
+        conn.execute(text("UPDATE VENDAS SET STATUS='I', CONCLUIDO='S'"))
+        conn.execute(text("DELETE FROM ENTREGAS"))
+        conn.execute(text("INSERT INTO DELIVERYLOG VALUES (1, 562083, 'DELETE', '2026-11-11')"))
+    items = repository.fetch_sales_statuses_by_id((562083.0,))
+    assert len(items) == 2
+    assert classify_cancellation(items) == CancellationDecision.CANCEL
+    with db_engine.begin() as conn:
+        conn.execute(text("INSERT INTO DELIVERYLOG VALUES (2, 562083, 'INSERT', '2026-11-11')"))
+    assert classify_cancellation(repository.fetch_sales_statuses_by_id((562083.0,))) == CancellationDecision.UNRESOLVED

@@ -39,6 +39,7 @@ class DeliveriesService(QObject):
         self._api_config = api_config
         self._target_system = target_system
         self._active_strategy: Optional[IConnectableStrategy] = None
+        self._cancellation_intents = set()
 
         # 3. CONNECT INTERNAL DISPATCHER SIGNALS
         # This bridges the gap between the Worker -> Dispatcher -> Service
@@ -151,6 +152,7 @@ class DeliveriesService(QObject):
         """
         if self._target_system == TargetSystem.FARMAX:
             internal_id = normalize_farmax_id(internal_id)
+        self._cancellation_intents.add(internal_id)
         self.logger.debug(
             "Solicitação de cancelamento recebida. "
             f"Interno: {internal_id}, Externo: {external_id}"
@@ -168,6 +170,7 @@ class DeliveriesService(QObject):
             self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
             # We won't care about this order anymore. We can cleanup from memory.
             self._repository.remove(internal_id)
+            self._acknowledge_cancellation(internal_id)
             return
 
         # 2. If not pending, we must delete via API if we have an External ID
@@ -180,8 +183,8 @@ class DeliveriesService(QObject):
                 f"Pedido {internal_id} cancelado localmente "
                 "(nenhum ID externo encontrado)."
             )
-            self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
-            self._repository.remove(internal_id)
+            # A missing mapping can mean a submission is still in flight.
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.DELETING)
 
     # =========================================================================
     # RECONCILIATION CALLBACKS
@@ -221,6 +224,9 @@ class DeliveriesService(QObject):
 
         # 3. Update UI
         self.delivery_update.emit(internal_id, DeliveryRowStatus.ADDED)
+        if internal_id in self._cancellation_intents:
+            self._dispatcher.queue_delete(internal_id, external_id)
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.DELETING)
 
     def _on_deletion_request_success(self, internal_id: str, external_id: str):
         """Called when Dispatcher successfully DELETEs from Velide."""
@@ -229,6 +235,12 @@ class DeliveriesService(QObject):
         )
         self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
         self._repository.remove(internal_id)
+        self._acknowledge_cancellation(internal_id)
+
+    def _acknowledge_cancellation(self, internal_id):
+        self._cancellation_intents.discard(internal_id)
+        if self._active_strategy:
+            self._active_strategy.on_cancellation_acknowledged(internal_id)
 
     def _on_delivery_request_failure(self, internal_id: str, error_msg: str):
         """Called when Dispatcher encounters an error."""

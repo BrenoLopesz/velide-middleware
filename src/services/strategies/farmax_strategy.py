@@ -219,6 +219,9 @@ class FarmaxStrategy(IConnectableStrategy):
         # the cancellation was requested internally or not.
         self._logger.info(f"Uma entrega ({order.internal_id}) foi deletada no Velide.")
 
+    def on_cancellation_acknowledged(self, internal_id: str):
+        self._persistence.mark_as_cancelled(internal_id)
+
     def on_delivery_route_started_on_velide(
         self, order: Order, deliveryman_external_id: str
     ):
