@@ -9,6 +9,7 @@ from config import ApiConfig, ReconciliationConfig, TargetSystem
 from utils.velide_status_to_local import map_velide_status_to_local
 from workers.velide_worker import VelideWorker
 from api.velide_gateway import VelideGateway
+from api.sqlite_manager import DeliveryStatus
 
 # We import the SERVICE, not the DB Manager
 from services.tracking_persistence_service import TrackingPersistenceService
@@ -139,10 +140,9 @@ class ReconciliationService(QObject):
             if velide_id not in snapshot_map:
                 # Still just logging, as per strategy
                 self.logger.warning(
-                    f"Entrega {velide_id} ausente no Velide. Considere como "
-                    "entregue ou deletada. Nenhuma ação será realizada no ERP."
+                    f"Entrega {velide_id} ausente da lista ativa. "
+                    "Sincronização pendente de confirmação do estado remoto."
                 )
-                self.tracking_service.mark_as_missing(internal_id)
                 # Emit signal to update UI
                 self.delivery_missing.emit(internal_id)
                 updates_count += 1
@@ -172,7 +172,7 @@ class ReconciliationService(QObject):
                 # Emit signal to update UI
                 # Only emit deliveryman ID if status is 
                 # 'ROUTED'/'IN_ROUTE' and ID exists
-                if expected_local_enum.name == "IN_ROUTE" and remote_deliveryman_id:
+                if expected_local_enum == DeliveryStatus.IN_PROGRESS and remote_deliveryman_id:
                     self.delivery_in_route.emit(internal_id, remote_deliveryman_id)
 
                 # (Optional) Handle other status changes via generic signal if needed

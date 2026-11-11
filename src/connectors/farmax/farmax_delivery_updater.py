@@ -40,9 +40,8 @@ class FarmaxDeliveryUpdater(QObject):
             deliveryman_external_id
         )
         if not driver:
-            self._logger.error(
-                f"Não foi possível definir uma entrega ({order.internal_id}) "
-                "como rota iniciada! Entregador não foi encontrado."
+            self._on_error(
+                order.internal_id, "IN_ROUTE", "Entregador não foi encontrado."
             )
             return
         current_time = datetime.now().time()

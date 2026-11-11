@@ -1,5 +1,11 @@
 # tests/conftest.py
 import pytest
+import os
+from pathlib import Path
+
+# Import-time application configuration must never load workstation credentials.
+os.environ["VELIDE_CONFIG_PATH"] = str(Path(__file__).parent / "fixtures" / "test_config.yml")
+
 from services.sqlite_service import SQLiteService
 from services.tracking_persistence_service import TrackingPersistenceService
 from api.sqlite_manager import SQLiteManager

@@ -1,0 +1,9 @@
+auth:
+  domain: "auth.invalid"
+  client_id: "test-client"
+  scope: "openid"
+  audience: "https://api.invalid/"
+api:
+  velide_server: "https://api.invalid/"
+  velide_websockets_server: "wss://api.invalid/"
+target_system: "Farmax"

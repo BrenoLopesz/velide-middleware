@@ -6,6 +6,7 @@ from PyQt5.QtCore import pyqtSignal, QObject, QThreadPool, QTimer
 
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_worker import FarmaxWorker
+from connectors.farmax.identity import normalize_farmax_id
 
 # We must import the model to type-hint the callback correctly
 from models.farmax_models import FarmaxSale
@@ -167,7 +168,7 @@ class FarmaxStatusTracker(QObject):
 
                 # Check for Cancellation
                 if self._is_cancelled(raw_status):
-                    internal_id_str = str(sale_id)
+                    internal_id_str = normalize_farmax_id(sale_id)
 
                     self._logger.info(
                         "Cancelamento detectado no Farmax para o "

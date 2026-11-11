@@ -161,10 +161,9 @@ class VelideWorker(QRunnable):
 
         client = self._gateway.get_client()
         if not client:
-            self.logger.error(
+            raise RuntimeError(
                 "API do Velide não foi inicializada! Verifique as credenciais."
             )
-            return
 
         async with client:
             if self._operation == "add_delivery":
@@ -176,7 +175,7 @@ class VelideWorker(QRunnable):
 
                 response = await client.add_delivery(order)
                 self.logger.info(
-                    f"Nova entrega adicionada: {response.location.properties.name}"
+                    f"Nova entrega adicionada: {response.id}"
                 )
                 self.signals.delivery_added.emit(response.model_dump())
 

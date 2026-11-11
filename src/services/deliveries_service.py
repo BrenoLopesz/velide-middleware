@@ -9,6 +9,7 @@ from services.deliveries_dispatcher import DeliveryDispatcher
 from services.strategies.connectable_strategy import IConnectableStrategy
 from models.velide_delivery_models import Order
 from api.velide_gateway import VelideGateway
+from connectors.farmax.identity import normalize_farmax_id
 
 
 class DeliveriesService(QObject):
@@ -148,6 +149,8 @@ class DeliveriesService(QObject):
         Handles cancellation requests.
         Logic: Check Queue (Optimization) -> OR -> Send Delete Task.
         """
+        if self._target_system == TargetSystem.FARMAX:
+            internal_id = normalize_farmax_id(internal_id)
         self.logger.debug(
             "Solicitação de cancelamento recebida. "
             f"Interno: {internal_id}, Externo: {external_id}"
@@ -278,14 +281,6 @@ class DeliveriesService(QObject):
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.DELIVERED)
 
     def _sanitize_order_id(self, order: Order):
-        """
-        Force the internal_id to be a clean string integer (no decimals).
-        Fixes mismatch between Strategy (Float) and Persistence (Int/Str).
-        """
-        try:
-            # "650257.0" -> 650257 -> "650257"
-            clean_id = str(int(float(order.internal_id)))
-            order.internal_id = clean_id
-        except (ValueError, TypeError):
-            # Fallback if it's alphanumeric like "ORD-A1"
-            order.internal_id = str(order.internal_id)
+        """Numeric normalization belongs only to the Farmax connector."""
+        if self._target_system == TargetSystem.FARMAX:
+            order.internal_id = normalize_farmax_id(order.internal_id)

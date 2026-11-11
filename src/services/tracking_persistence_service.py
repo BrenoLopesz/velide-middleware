@@ -6,6 +6,7 @@ from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 from api.sqlite_manager import DeliveryStatus
 from services.daily_cleanup_service import DailyCleanupService
 from services.sqlite_service import SQLiteService
+from connectors.farmax.identity import normalize_farmax_id
 
 RawID = Union[str, float, int]
 
@@ -77,7 +78,7 @@ class TrackingPersistenceService(QObject):
           - 623604 (int)     -> "623604"
         """
         try:
-            return str(int(float(raw_id)))
+            return normalize_farmax_id(raw_id)
         except (ValueError, TypeError):
             self.logger.error(f"Falha ao normalizar ID: {raw_id}. Usando string crua.")
             return str(raw_id)

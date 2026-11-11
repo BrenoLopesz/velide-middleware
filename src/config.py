@@ -228,5 +228,7 @@ class Settings(BaseModel):
             return cls(**config_data)
 
 
-config_path = os.path.join(BUNDLE_DIR, "resources", "config.yml")
+config_path = os.environ.get(
+    "VELIDE_CONFIG_PATH", os.path.join(BUNDLE_DIR, "resources", "config.yml")
+)
 config = Settings.from_yaml(config_path)

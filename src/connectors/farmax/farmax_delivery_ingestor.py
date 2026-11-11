@@ -286,6 +286,11 @@ class FarmaxDeliveryIngestor(QObject):
             self._is_processing_cycle = False
             self._watchdog_timer.stop()
 
+            # Detail retries pause the regular timer. Resume even if normalization
+            # failed: the uncommitted cursor must be collected again.
+            if self._is_running and not self._poll_timer.isActive():
+                self._poll_timer.start(self._config.poll_interval_ms)
+
     def _on_fetch_details_error(
         self, error_msg: str, payload: Tuple[float, ...]
     ) -> None:

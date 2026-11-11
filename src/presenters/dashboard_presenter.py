@@ -120,9 +120,6 @@ class DashboardPresenter(QObject):
         self._services.deliveries.delivery_update.connect(
             self._on_delivery_status_update
         )
-        self._services.websockets.action_received.connect(
-            self._services.velide_action_handler.handle_action
-        )
         self._services.velide_action_handler.delivery_deleted.connect(
             self._services.deliveries.on_delivery_deleted_in_velide
         )

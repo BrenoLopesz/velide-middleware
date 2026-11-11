@@ -197,8 +197,8 @@ def test_on_statuses_retrieved_handles_cancellation(tracker, mock_persistence):
     tracker._on_statuses_retrieved([sale_cancelled])
 
     # Assert
-    mock_persistence.get_external_id.assert_called_with("123.0")
-    tracker.order_cancelled.emit.assert_called_with("123.0", "EXT_REF_001")
+    mock_persistence.get_external_id.assert_called_with("123")
+    tracker.order_cancelled.emit.assert_called_with("123", "EXT_REF_001")
     mock_persistence.mark_as_cancelled.assert_called_with(123.0)
 
 
