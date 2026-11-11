@@ -5,7 +5,7 @@ from typing import Dict, Optional
 from PyQt5.QtCore import QRunnable, QObject, pyqtSignal
 from gql import gql, Client
 from gql.transport.websockets import WebsocketsTransport
-from gql.transport.exceptions import TransportError
+from gql.transport.exceptions import TransportError, TransportQueryError
 from pydantic import ValidationError
 from websockets.exceptions import ConnectionClosedError
 
@@ -33,6 +33,7 @@ class VelideWebsocketsSignals(QObject):
         finished (None): Emitted when the worker thread completely shuts down.
     """
     action_received = pyqtSignal(object)
+    refresh_requested = pyqtSignal()
     error_occurred = pyqtSignal(str)
     connection_closed = pyqtSignal(str)
     connection_state_changed = pyqtSignal(ConnectionState)
@@ -75,6 +76,7 @@ class VelideWebsocketsWorker(QRunnable):
         # Control flags
         self._is_running = True
         self._transport: Optional[WebsocketsTransport] = None
+        self._loop = None
         
         # Retry logic state
         self._retry_delay = 2
@@ -106,6 +108,10 @@ class VelideWebsocketsWorker(QRunnable):
                 }
             }
         """)
+        if api_config.native:
+            self._subscription_query = gql("""subscription($merchantId: ID!, $connectionId: ID!) {
+                integrationJobStatusUpdated(merchantId:$merchantId,connectionId:$connectionId) { jobId status }
+            }""")
 
     def stop(self):
         """
@@ -117,9 +123,8 @@ class VelideWebsocketsWorker(QRunnable):
         
         if self._transport:
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.run_coroutine_threadsafe(self._transport.close(), loop)
+                if self._loop and self._loop.is_running():
+                    asyncio.run_coroutine_threadsafe(self._transport.close(), self._loop)
             except Exception:
                 # Ignore errors during shutdown sequence
                 pass
@@ -144,6 +149,7 @@ class VelideWebsocketsWorker(QRunnable):
         and exponential backoff logic.
         """
         self._retry_delay = 2
+        self._loop = asyncio.get_running_loop()
 
         while self._is_running:
             try:
@@ -157,6 +163,10 @@ class VelideWebsocketsWorker(QRunnable):
                 await self._subscribe_and_listen(token)
 
             except (ConnectionClosedError, OSError, asyncio.TimeoutError) as e:
+                if self.api_config.native and getattr(e, "code", None) == 4403:
+                    self.signals.error_occurred.emit("Acesso ao canal nativo recusado.")
+                    self.signals.connection_state_changed.emit(ConnectionState.ERROR)
+                    break
                 self.logger.warning(
                     f"Conexão perdida ou falha na rede ({type(e).__name__}: {e}). "
                     f"Tentando reconectar em {self._retry_delay}s..."
@@ -164,6 +174,11 @@ class VelideWebsocketsWorker(QRunnable):
                 self.signals.connection_state_changed.emit(
                     ConnectionState.DISCONNECTED
                 )
+
+            except TransportQueryError as e:
+                self.signals.error_occurred.emit(str(e))
+                self.signals.connection_state_changed.emit(ConnectionState.ERROR)
+                break
 
             except TransportError as e:
                 # Should restart almost immediately. This is cleaned up later.
@@ -194,7 +209,10 @@ class VelideWebsocketsWorker(QRunnable):
 
             # Wait before retrying (Exponential Backoff)
             if self._is_running:
-                await asyncio.sleep(self._retry_delay)
+                for _ in range(max(1, int(self._retry_delay * 10))):
+                    if not self._is_running:
+                        break
+                    await asyncio.sleep(0.1)
                 self._retry_delay = min(self._retry_delay * 2, 60)
         
         # Loop finished cleanly
@@ -210,12 +228,16 @@ class VelideWebsocketsWorker(QRunnable):
         # Protocol: graphql-transport-ws
         self._transport = WebsocketsTransport(
             url=self.api_config.velide_websockets_server,
-            init_payload={},  # Standard handshake
+            init_payload={"Authorization": "Bearer " + (token[7:] if token.startswith("Bearer ") else token),
+                          "X-Merchant-ID": self.api_config.native.merchant_id} if self.api_config.native else {},
+            subprotocols=["graphql-transport-ws"] if self.api_config.native else None,
             keep_alive_timeout=60,
             ping_interval=30
         )
 
         variables: Dict[str, str] = {"authorization": token}
+        if self.api_config.native:
+            variables = {"merchantId": self.api_config.native.merchant_id, "connectionId": self.api_config.native.connection_id}
 
         async with Client(
             transport=self._transport, fetch_schema_from_transport=False
@@ -232,6 +254,9 @@ class VelideWebsocketsWorker(QRunnable):
             ):
                 if not self._is_running:
                     break
+                if self.api_config.native:
+                    self.signals.refresh_requested.emit()
+                    continue
                 
                 # Safe data extraction
                 action_data = data.get("latestAction")

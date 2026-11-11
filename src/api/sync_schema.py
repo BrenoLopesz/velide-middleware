@@ -5,12 +5,18 @@ import sqlite3
 
 def migrate_sync_schema(conn, path):
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version > 1:
+    if version > 2:
         raise RuntimeError("Synchronization database is newer than this application")
+    if version == 2:
+        return
     if version == 1:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("CREATE TABLE IF NOT EXISTS SyncScope (id INTEGER PRIMARY KEY CHECK(id=1), scope TEXT NOT NULL)")
+        conn.execute("PRAGMA user_version=2")
+        conn.commit()
         return
     # Back up an existing installation using SQLite's WAL-aware backup API.
-    if path != ":memory:" and conn.execute("SELECT 1 FROM DeliveryMapping LIMIT 1").fetchone():
+    if path != ":memory:" and conn.execute("SELECT 1 FROM DeliveryMapping UNION ALL SELECT 1 FROM DeliverymenMapping LIMIT 1").fetchone():
         backup_path = path + ".pre-sync-v1.db"
         if not os.path.exists(backup_path):
             with sqlite3.connect(backup_path) as backup:
@@ -44,3 +50,4 @@ def migrate_sync_schema(conn, path):
     except Exception:
         conn.rollback()
         raise
+    migrate_sync_schema(conn, path)

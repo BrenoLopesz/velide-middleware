@@ -23,6 +23,7 @@ class VelideWebsocketsService(QObject):
 
     # Data Signal
     action_received = pyqtSignal(LatestAction)
+    refresh_requested = pyqtSignal()
     
     # Lifecycle Signals
     started = pyqtSignal()
@@ -63,12 +64,13 @@ class VelideWebsocketsService(QObject):
         
         # Connect Data & Lifecycle Signals
         self._worker.signals.action_received.connect(self.action_received.emit)
+        self._worker.signals.refresh_requested.connect(self.refresh_requested.emit)
         self._worker.signals.finished.connect(self._on_worker_finished)
         
         # Connect Status & Error Signals
         self._worker.signals.connection_state_changed.connect(self._dispatch_status_signal)
         # CHANGED: Connect directly to the signal that accepts string
-        self._worker.signals.error_occurred.connect(self.sig_error.emit)
+        self._worker.signals.error_occurred.connect(lambda _: self.sig_error.emit())
         
         # Launch in background thread
         self._thread_pool.start(self._worker)

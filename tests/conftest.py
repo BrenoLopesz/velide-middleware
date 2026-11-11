@@ -32,9 +32,14 @@ def persistence_stack(tmp_path, qtbot):
     # to verify that TPS actually wrote to the disk.
     db_manager = SQLiteManager(db_path=db_path_str)
 
-    return {
+    yield {
         "tps": tps,
         "sqlite": sqlite_service,
         "db_manager": db_manager,
         "db_path": db_path_str,
     }
+    # Do not destroy Qt service receivers while cleanup/write workers still emit.
+    tps._cleanup_service.stop_routine()
+    sqlite_service.thread_pool.waitForDone()
+    from PyQt5.QtWidgets import QApplication
+    QApplication.processEvents()

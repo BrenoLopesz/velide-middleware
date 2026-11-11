@@ -17,6 +17,7 @@ class DeliveriesService(QObject):
     delivery_acknowledged = pyqtSignal(str, Order)
     delivery_update = pyqtSignal(str, DeliveryRowStatus)
     delivery_failed = pyqtSignal(str, str)  # Order ID, error message
+    listening_started = pyqtSignal()
 
     def __init__(
         self,
@@ -51,6 +52,8 @@ class DeliveriesService(QObject):
         self._dispatcher.task_failed.connect(self._on_delivery_request_failure)
         if journal:
             self._dispatcher.order_restored.connect(self._on_order_restored)
+            self._dispatcher.import_accepted.connect(
+                lambda internal_id, _: self.delivery_update.emit(internal_id, DeliveryRowStatus.PROCESSING))
 
     def get_order(self, order_id: str) -> Optional[Order]:
         """Facade for the repository."""
@@ -82,6 +85,7 @@ class DeliveriesService(QObject):
         if self._journal:
             self._dispatcher.start()
         self._active_strategy.start_listening()
+        self.listening_started.emit()
 
     # =========================================================================
     # CORE EVENT HANDLERS (Refactored Logic)
@@ -96,6 +100,7 @@ class DeliveriesService(QObject):
         self._sanitize_order_id(restored_order)
 
         internal_id = restored_order.internal_id
+        already_visible = self._repository.get_by_internal(internal_id) is not None
 
         # 1. Update Repository
         self._repository.add(restored_order)
@@ -104,7 +109,8 @@ class DeliveriesService(QObject):
             self._repository.link_ids(internal_id, external_id)
 
         # 2. Acknowledge to UI
-        self.delivery_acknowledged.emit(internal_id, restored_order)
+        if not already_visible:
+            self.delivery_acknowledged.emit(internal_id, restored_order)
 
         # Use actual status
         order_status = getattr(
@@ -224,6 +230,56 @@ class DeliveriesService(QObject):
             order.effect_context = facts
             self.on_delivery_route_started_in_velide(order, courier_id)
 
+    def on_native_state(self, state):
+        internal_id = state["externalOrderId"]
+        if state.get("retainedOutcome") in ("COMPLETED", "CANCELLED"):
+            if self.get_order(internal_id):
+                status = DeliveryRowStatus.DELIVERED if state["retainedOutcome"] == "COMPLETED" else DeliveryRowStatus.CANCELLED
+                self.delivery_update.emit(internal_id, status)
+            return
+        if not self.get_order(internal_id) and (state.get("deliveryStatus") in ("CANCELLED", "COMPLETED") or state.get("cancellation") == "ACKNOWLEDGED"):
+            return
+        if not state["found"]:
+            self.on_reconciliation_misses_delivery(internal_id)
+            return
+        if state.get("deliveryId"):
+            self._on_add_delivery_request_success(internal_id, state["deliveryId"])
+        if state["cancellation"] == "ACKNOWLEDGED" or state.get("deliveryStatus") == "CANCELLED" or state["deleted"]:
+            self._on_deletion_request_success(internal_id, state.get("deliveryId") or "")
+        elif state.get("error") or state.get("code") == "UNRESOLVED_HISTORY":
+            self._on_delivery_request_failure(internal_id, state.get("error") or state["code"])
+        elif state.get("deliveryStatus") == "IN_TRANSIT":
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.IN_PROGRESS)
+        elif state.get("deliveryStatus") == "COMPLETED":
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.DELIVERED)
+        elif not state.get("deliveryId"):
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.PROCESSING)
+
+    def stop_listening(self):
+        if self._journal:
+            self._dispatcher.stop()
+        if self._active_strategy:
+            self._active_strategy.stop_listening()
+
+    @property
+    def supports_native_retry(self):
+        return self._api_config.native is not None
+
+    def retry_native_order(self, internal_id):
+        if not self.supports_native_retry or not self._journal:
+            return
+        from workers.native_api_worker import NativeApiWorker
+        def prepared(row):
+            if row["retry_operation"] != "JOB":
+                return
+            worker = NativeApiWorker(self._gateway, "retry_order", internal_id)
+            worker.signals.result.connect(lambda result: self._journal.submit("accepted_job", internal_id, result["jobId"],
+                success=lambda _: self.delivery_update.emit(internal_id, DeliveryRowStatus.PROCESSING)))
+            worker.signals.failed.connect(lambda error: self._on_delivery_request_failure(internal_id, error["message"]))
+            QThreadPool.globalInstance().start(worker)
+        self._journal.submit("retry_work", internal_id, success=prepared,
+                             failure=lambda error: self._on_delivery_request_failure(internal_id, error))
+
     # =========================================================================
     # DISPATCHER CALLBACKS (Results from API)
     # =========================================================================
@@ -262,6 +318,7 @@ class DeliveriesService(QObject):
 
     def _on_delivery_request_failure(self, internal_id: str, error_msg: str):
         """Called when Dispatcher encounters an error."""
+        self.logger.error("Sincronização pendente (%s): %s", internal_id, error_msg)
         self.delivery_failed.emit(internal_id, error_msg)
         self.delivery_update.emit(internal_id, DeliveryRowStatus.ERROR)
         # Original code removed it on failure. Depending on 

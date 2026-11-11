@@ -54,11 +54,13 @@ def setup_database(db_engine):
         conn.execute(
             text(
                 "CREATE TABLE VENDEDORES "
-                "(CD_VENDEDOR REAL PRIMARY KEY, NOME TEXT, TIPO_FUNCIONARIO TEXT)"
+                "(CD_VENDEDOR REAL PRIMARY KEY, NOME TEXT, TIPO_FUNCIONARIO TEXT, CD_FILIAL REAL DEFAULT 1, STATUS TEXT DEFAULT 'A')"
             )
         )
 
         # Data Injection (Sanitized from your CSVs)
+        conn.execute(text("CREATE TABLE PARAMETROS(CD_FILIAL REAL)"))
+        conn.execute(text("INSERT INTO PARAMETROS VALUES(1)"))
         # Note: Dates are ISO format for SQLite compatibility
         conn.execute(
             text(
@@ -159,6 +161,18 @@ def test_fetch_deliverymen(repository, setup_database):
     men = repository.fetch_deliverymen()
     assert len(men) == 2
     assert "RODRIGO NUNES" in [m.name for m in men]
+
+
+def test_departure_rejects_inactive_or_other_branch_couriers(repository, setup_database, db_engine):
+    with db_engine.begin() as conn:
+        conn.execute(text("UPDATE VENDEDORES SET STATUS='I' WHERE CD_VENDEDOR=870"))
+        conn.execute(text("UPDATE VENDEDORES SET CD_FILIAL=2 WHERE CD_VENDEDOR=444"))
+    assert not repository.fetch_deliverymen()
+    with pytest.raises(ValueError, match="active"):
+        repository.update_delivery_as_in_route(562083, 870, time(12))
+    repository.update_delivery_as_in_route(562083, 870, time(12), historical=True)
+    with pytest.raises(ValueError, match="branch"):
+        repository.update_delivery_as_in_route(562083, 444, time(12), historical=True)
 
 
 def test_completion_preserves_partial_item_states_and_replay(repository, setup_database, db_engine):

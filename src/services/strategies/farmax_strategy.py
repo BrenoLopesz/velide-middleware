@@ -182,6 +182,9 @@ class FarmaxStrategy(IConnectableStrategy):
         self._status_tracker.stop()
         self._updater.stop()
         self._reconciliation.timer.stop()
+        if hasattr(self._reconciliation, "stop_service"):
+            self._reconciliation.stop_service()
+        self._websockets.stop_service()
 
     def fetch_deliverymen(self, success: Callable, error: Callable) -> None:
         """
@@ -199,7 +202,9 @@ class FarmaxStrategy(IConnectableStrategy):
 
     def on_delivery_added(self, internal_id: str, external_id: str):
         """Callback: Velide API accepted the order."""
-        if not self._persistence.is_tracked(float(internal_id)):
+        if self._persistence.is_archived(internal_id):
+            return
+        if not self._persistence.journal and not self._persistence.is_tracked(int(internal_id)):
             self._logger.warning(
                 f"Pedido {internal_id} adicionado ao Velide, "
                 "mas não encontrado no rastreamento local."

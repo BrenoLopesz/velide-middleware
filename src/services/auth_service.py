@@ -32,6 +32,7 @@ class AuthService(QObject):
         self._authorization_flow_worker = None
         self._stored_token_retriever_worker = None
         self._refresh_token_worker = None
+        self._current_refresh_token = None
 
         # The Timer that will trigger the refresh automatically
         self._refresh_timer = QTimer(self)

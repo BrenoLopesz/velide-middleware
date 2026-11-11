@@ -68,7 +68,11 @@ class VelideGateway:
             # We return a new instance every time. This ensures that the
             # httpx.AsyncClient created inside 'Velide' belongs strictly
             # to the thread/loop that requested it.
-            return Velide(
+            client_type = Velide
+            if self.config.native:
+                from api.native_velide import NativeVelide
+                client_type = NativeVelide
+            return client_type(
                 self._access_token,
                 self.config,
                 self.target,

@@ -36,7 +36,7 @@ class FarmaxRepository:
         return placeholders, params
 
     def update_delivery_as_in_route(
-        self, sale_id: float, driver_id: float, left_at: time
+        self, sale_id: float, driver_id: float, left_at: time, historical: bool = False
     ):
         """
         Updates the delivery status to 'R' (Route) and assigns the driver.
@@ -55,6 +55,11 @@ class FarmaxRepository:
                 if (state["status"] == "R" and state["cd_entregador"] == driver_id
                         and str(state["hora_saida"]) == str(left_at)):
                     return
+                eligible = conn.execute(text("SELECT CD_VENDEDOR FROM VENDEDORES WHERE CD_VENDEDOR=:driver_id "
+                    "AND CD_FILIAL=(SELECT CD_FILIAL FROM PARAMETROS) AND TIPO_FUNCIONARIO='E' AND (STATUS='A' OR :historical=1)"),
+                    {"driver_id": driver_id, "historical": int(historical)}).fetchall()
+                if len(eligible) != 1:
+                    raise ValueError("Courier is not active in the configured Farmax branch")
                 if conn.execute(query, params).rowcount != 1:
                     raise ValueError("Departure did not update exactly one delivery")
         except SQLAlchemyError:
@@ -85,7 +90,7 @@ class FarmaxRepository:
         try:
             with self._engine.begin() as conn:
                 state = self._read_write_state(conn, sale_id)
-                if state["status"] not in ("S", "R", "V"):
+                if state["status"] not in ("R", "V"):
                     raise ValueError("Completion conflicts with current Farmax delivery state")
                 if state["status"] == "V":
                     if str(state["hora_chegada"]) != str(ended_at):
@@ -103,7 +108,7 @@ class FarmaxRepository:
             raise
 
     def _read_write_state(self, conn, sale_id):
-        suffix = " WITH LOCK" if self._engine.dialect.name == "firebird" else ""
+        suffix = " WITH LOCK" if self._engine.dialect.name.startswith("firebird") else ""
         rows = conn.execute(text("SELECT STATUS, CD_ENTREGADOR, HORA_SAIDA, HORA_CHEGADA "
                                  "FROM ENTREGAS WHERE CD_VENDA=:sale_id" + suffix),
                             {"sale_id": sale_id}).fetchall()
@@ -300,7 +305,7 @@ class FarmaxRepository:
             return valid_logs
 
     def _bounded_log_query(self, predicate):
-        if self._engine.dialect.name == "firebird":
+        if self._engine.dialect.name.startswith("firebird"):
             return text(f"SELECT FIRST 500 * FROM {self.LOG_TABLE_NAME} WHERE {predicate} ORDER BY ID")
         return text(f"SELECT * FROM {self.LOG_TABLE_NAME} WHERE {predicate} ORDER BY ID LIMIT 500")
 
@@ -312,7 +317,7 @@ class FarmaxRepository:
         self._journal.resolve_source(key, str(error))
 
     def fetch_pending_ids(self, after_id=0):
-        prefix = "FIRST 100 " if self._engine.dialect.name == "firebird" else ""
+        prefix = "FIRST 100 " if self._engine.dialect.name.startswith("firebird") else ""
         suffix = "" if prefix else " LIMIT 100"
         query = text(f"SELECT {prefix}DISTINCT CD_VENDA FROM ENTREGAS "
                      "WHERE STATUS='S' AND CD_VENDA>:after_id ORDER BY CD_VENDA" + suffix)
@@ -326,6 +331,7 @@ class FarmaxRepository:
         query = text(
             "SELECT CD_VENDEDOR, NOME FROM VENDEDORES "
             "WHERE TIPO_FUNCIONARIO = 'E' "
+            "AND STATUS='A' AND CD_FILIAL=(SELECT CD_FILIAL FROM PARAMETROS) "
             "ORDER BY NOME"
         )
 

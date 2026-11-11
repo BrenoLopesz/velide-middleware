@@ -1,5 +1,5 @@
 from presenters.app_presenter import AppPresenter
-from typing import Optional
+from typing import Optional, Union
 from pydantic import BaseModel, ConfigDict
 
 from presenters.dashboard_presenter import DashboardPresenter
@@ -11,6 +11,7 @@ from services.auth_service import AuthService
 from services.deliveries_service import DeliveriesService
 from services.deliverymen_retriever_service import DeliverymenRetrieverService
 from services.reconciliation_service import ReconciliationService
+from services.native_reconciliation_service import NativeReconciliationService
 from services.sqlite_service import SQLiteService
 from services.tracking_persistence_service import TrackingPersistenceService
 from services.velide_action_handler import VelideActionHandler
@@ -35,5 +36,5 @@ class Services(BaseModel):
     sqlite: SQLiteService
     websockets: VelideWebsocketsService
     velide_action_handler: VelideActionHandler
-    reconciliation: ReconciliationService
+    reconciliation: Union[ReconciliationService, NativeReconciliationService]
     # tracking_persistance: TrackingPersistenceService

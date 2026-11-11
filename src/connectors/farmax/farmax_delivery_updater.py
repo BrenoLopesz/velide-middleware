@@ -82,11 +82,12 @@ class FarmaxDeliveryUpdater(QObject):
             local_time = occurred.astimezone(self._timezone).time()
             if operation == "IN_ROUTE":
                 driver = self._deliverymen_retriever.get_deliveryman_by_external_id(payload["courier"])
-                if not driver:
+                driver_id = driver.id if driver else self._deliverymen_retriever.get_mapped_local_id(payload["courier"])
+                if not isinstance(driver_id, (str, int, float)):
                     raise ValueError("Entregador não foi encontrado")
                 worker = FarmaxWorker.for_update_delivery_as_in_route(
                     self._repository, sale_id=int(internal_id),
-                    driver_id=int(normalize_farmax_id(driver.id)), left_at=local_time)
+                    driver_id=int(normalize_farmax_id(driver_id)), left_at=local_time, historical=True)
             else:
                 worker = FarmaxWorker.for_update_delivery_as_done(
                     self._repository, sale_id=int(internal_id), ended_at=local_time)

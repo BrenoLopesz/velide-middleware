@@ -155,6 +155,7 @@ class FarmaxWorker(QRunnable):
         sale_id: float,
         driver_id: float,
         left_at: time,
+        historical: bool = False,
     ) -> "FarmaxWorker":
         """Creates a worker to update a delivery to 'In Route'."""
         return cls(
@@ -163,6 +164,7 @@ class FarmaxWorker(QRunnable):
             sale_id=sale_id,
             driver_id=driver_id,
             left_at=left_at,
+            historical=historical,
         )
 
     @classmethod

@@ -174,6 +174,9 @@ class TrackingPersistenceService(QObject):
         norm_id = self._normalize_id(internal_id)
         return (norm_id in self._status_cache) or (norm_id in self._archived_ids)
 
+    def is_archived(self, internal_id: RawID) -> bool:
+        return self._normalize_id(internal_id) in self._archived_ids
+
     def get_current_status(self, internal_id: RawID) -> Optional[DeliveryStatus]:
         """
         Returns the last known status or None if not found.
@@ -291,6 +294,7 @@ class TrackingPersistenceService(QObject):
         """
         norm_id = self._normalize_id(internal_id)
 
+        self._archived_ids.add(norm_id)
         if norm_id in self._status_cache:
             # Remove from Active
             del self._status_cache[norm_id]

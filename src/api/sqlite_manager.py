@@ -263,6 +263,11 @@ class SQLiteManager:
                 if current_local_id != new_local_id:
                     to_insert.append((v_id, new_local_id))
 
+            final_mapping = dict(conn.execute("SELECT velide_id,local_id FROM DeliverymenMapping"))
+            final_mapping.update(mappings)
+            if len(set(incoming_ids)) != len(incoming_ids) or len(set(final_mapping.values())) != len(final_mapping):
+                raise ValueError("Courier mappings must be explicitly one-to-one")
+
             # 4. If nothing changed, return 0 immediately (Save DB write)
             if not to_insert:
                 self.logger.debug(
@@ -271,12 +276,11 @@ class SQLiteManager:
                 )
                 return 0
 
-            # 5. Execute INSERT OR REPLACE only on the real changes
-            # We use REPLACE to handle the 'Unique' constraint 
-            # on local_id automatically.
-            # (It will 'steal' the local_id from another user if necessary).
+            # Delete only explicitly edited keys, allowing an intentional swap
+            # without silently stealing another courier's local identity.
+            cursor.executemany("DELETE FROM DeliverymenMapping WHERE velide_id=?", [(entry[0],) for entry in to_insert])
             insert_query = (
-                "INSERT OR REPLACE INTO DeliverymenMapping (velide_id, local_id) "
+                "INSERT INTO DeliverymenMapping (velide_id, local_id) "
                 "VALUES (?, ?)"
             )
             

@@ -23,6 +23,7 @@ class DeliveryRowStatus(Enum):
     UNDEFINED = "Indefinido"
     ACKNOWLEDGE = "Reconhecido"
     SENDING = "Enviando..."
+    PROCESSING = "Processando no Velide"
     ADDED = "Adicionado"
     IN_PROGRESS = "Em Rota"
     MISSING = "Ausente"
@@ -36,6 +37,7 @@ STATUS_COLORS: Dict[DeliveryRowStatus, Optional[QBrush]] = {
     DeliveryRowStatus.UNDEFINED: None,
     DeliveryRowStatus.ACKNOWLEDGE: None,
     DeliveryRowStatus.SENDING: QBrush(QColor(0, 152, 210)),
+    DeliveryRowStatus.PROCESSING: QBrush(QColor(0, 152, 210)),
     DeliveryRowStatus.ADDED: QBrush(QColor(74, 160, 53)),
     DeliveryRowStatus.IN_PROGRESS: QBrush(QColor(5, 129, 206)),
     DeliveryRowStatus.DELIVERED: QBrush(QColor(13, 84, 43)),
@@ -53,7 +55,7 @@ DB_TO_UI_MAP: Dict[DeliveryStatus, DeliveryRowStatus] = {
     DeliveryStatus.ADDED: DeliveryRowStatus.ADDED,
     DeliveryStatus.IN_PROGRESS: DeliveryRowStatus.IN_PROGRESS,
     # Terminal States (Mapped for completeness/live updates)
-    DeliveryStatus.DELIVERED: DeliveryRowStatus.ADDED,
+    DeliveryStatus.DELIVERED: DeliveryRowStatus.DELIVERED,
     DeliveryStatus.CANCELLED: DeliveryRowStatus.CANCELLED,
     DeliveryStatus.MISSING: DeliveryRowStatus.MISSING,
     DeliveryStatus.FAILED: DeliveryRowStatus.ERROR,
@@ -108,6 +110,8 @@ class DeliveryTableModel(QAbstractTableModel):
     def data(self, index, role=Qt.DisplayRole) -> Any:
         if not index.isValid():
             return None
+        if role == Qt.UserRole:
+            return self._data[index.row()].id
 
         if role == Qt.ForegroundRole:
             return self._font_data(index)

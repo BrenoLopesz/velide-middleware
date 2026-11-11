@@ -33,7 +33,7 @@ class AccessToken:
         """
         try:
             response = requests.post(
-                self.url, headers=self.headers, data=self.data, verify=False, timeout=10
+                self.url, headers=self.headers, data=self.data, verify=True, timeout=10
             )
 
             # Check the response content first

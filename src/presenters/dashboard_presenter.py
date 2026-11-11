@@ -40,8 +40,11 @@ class DashboardPresenter(QObject):
 
         self._machine.logged_in_state.entered.connect(self.on_authenticate)
         self._machine.logged_in_state.dashboard_state.entered.connect(self.start)
+        self._machine.logged_in_state.exited.connect(self.stop)
 
         self._connect_signals()
+        self._dashboard_view.deliveries_table.retry_enabled = services.deliveries.supports_native_retry
+        self._dashboard_view.deliveries_table.retry_requested.connect(services.deliveries.retry_native_order)
 
     def start(self) -> None:
         """Called when the dashboard becomes active."""
@@ -79,6 +82,15 @@ class DashboardPresenter(QObject):
                 "Não foi possível configurar o aplicativo para rodar em segundo plano! "
                 "Caso feche essa janela, a integração irá desligar"
             )
+
+    def stop(self):
+        self._is_started = False
+        self._services.deliveries.stop_listening()
+        self._services.websockets.stop_service()
+        if hasattr(self._services.reconciliation, "stop_service"):
+            self._services.reconciliation.stop_service()
+        else:
+            self._services.reconciliation.timer.stop()
 
     def _connect_signals(self):
         ws_fsm = self._machine.websockets_state

@@ -28,7 +28,7 @@ class DeviceCode:
         """
         try:
             response = requests.post(
-                self.url, headers=self.headers, data=self.data, verify=False, timeout=15
+                self.url, headers=self.headers, data=self.data, verify=True, timeout=15
             )
 
             # Raise an exception for bad status codes (4xx or 5xx)

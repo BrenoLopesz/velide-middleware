@@ -1,6 +1,5 @@
 import json
 import sqlite3
-from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -82,6 +81,19 @@ def test_effects_retry_in_order_and_deduplicate(journal):
     assert journal.next_effect()["operation"] == "DONE"
 
 
+def test_late_departure_repairs_earlier_completion_obligation(journal):
+    journal.enqueue_effect("123", "route:DONE", "DONE", {"occurred_at": "13:00"})
+    completion = journal.next_effect()
+    journal.effect_result(completion["sequence"], "Source has not departed yet")
+    journal.enqueue_effect("123", "route:IN_ROUTE", "IN_ROUTE", {"occurred_at": "12:00"})
+    departure = journal.next_effect()
+    assert departure["operation"] == "IN_ROUTE"
+    journal.effect_result(departure["sequence"])
+    with SQLiteManager(journal.path) as db:
+        db._get_conn().execute("UPDATE SyncEffects SET retry_at=0")
+    assert journal.next_effect()["operation"] == "DONE"
+
+
 def test_existing_mappings_survive_upgrade_and_cleanup(journal):
     with SQLiteManager(journal.path) as db:
         db.add_mapping("courier", "5")
@@ -91,6 +103,19 @@ def test_existing_mappings_survive_upgrade_and_cleanup(journal):
     with SQLiteManager(journal.path) as db:
         assert db.get_all_mappings() == [("courier", "5")]
         assert db.prune_old_deliveries(0) == 0
+
+
+def test_courier_mapping_requires_explicit_one_to_one_changes(journal):
+    with SQLiteManager(journal.path) as db:
+        db.add_many_mappings([("first", "1"), ("second", "2")])
+    with pytest.raises(ValueError, match="one-to-one"):
+        with SQLiteManager(journal.path) as db:
+            db.add_many_mappings([("first", "2")])
+    with SQLiteManager(journal.path) as db:
+        assert dict(db.get_all_mappings()) == {"first": "1", "second": "2"}
+        db.add_many_mappings([("first", "2"), ("second", "1")])
+    with SQLiteManager(journal.path) as db:
+        assert dict(db.get_all_mappings()) == {"first": "2", "second": "1"}
 
 
 def test_commit_failure_does_not_emit_success(qtbot, monkeypatch):
@@ -114,6 +139,7 @@ def test_commit_failure_does_not_emit_success(qtbot, monkeypatch):
 def test_dispatcher_restarts_after_response_loss_with_same_key(journal, qtbot, monkeypatch):
     service = SyncJournalService(journal.path, journal.scope)
     gateway = MagicMock()
+    gateway.config.native = None
     gateway.get_client.return_value._build_variables_to_add_delivery.return_value.model_dump.return_value = {"idempotencyKey": "123"}
     workers = []
 
