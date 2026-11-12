@@ -130,6 +130,8 @@ Local verification covers Python 3.8.0, Qt, real SQLite, native HTTP fixtures, c
 
 The earlier **178-pass** result predates independent review and did not establish ERP correctness. Consult the independent-review report and subsequent PR checks for corrected verification results.
 
+The final corrective pass has **239 passing tests**, independently rerun by the reviewer together with **14 additional independent checks**. All acknowledged code findings were closed under the narrowed observer/native-sync contract. This is explicitly not approval of the removed automatic Farmax writer or of a live cutover.
+
 Run the suite with `QT_QPA_PLATFORM=offscreen`, `PYTHONDONTWRITEBYTECODE=1`, and `python -m pytest -q -p no:cacheprovider tests`. Setting `VELIDE_TEST_FIREBIRD=1` enables the disposable localhost Firebird test; `VELIDE_TEST_FIREBIRD_PASSWORD` selects the test service password. No customer database is used by that fixture.
 
 Still required before live cutover:
