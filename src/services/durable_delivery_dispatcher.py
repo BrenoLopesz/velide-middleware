@@ -86,7 +86,7 @@ class DurableDeliveryDispatcher(QObject):
         if not self._current(ticket):
             return
         for row in rows:
-            if row["payload"] and ((row["submission"] != "TERMINAL" and row["cancellation"] != "ACKNOWLEDGED") or row.get("last_error")):
+            if row["payload"] and ((row["submission"] != "TERMINAL" and row["cancellation"] != "ACKNOWLEDGED") or row.get("last_error") or row.get("source_review")):
                 order = Order.model_validate(json.loads(row["payload"]))
                 order.ui_status_hint = sync_row_status(row)
                 self.order_restored.emit(order, row["external_id"])

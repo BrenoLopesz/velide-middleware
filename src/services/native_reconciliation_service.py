@@ -153,7 +153,9 @@ class NativeReconciliationService(QObject):
                 if accepted != state:
                     continue  # SQLite rejected an older authoritative response.
                 state = dict(accepted, error=row["last_error"] or accepted.get("error"))
-            if row and row["payload"] and ((row["submission"] != "TERMINAL" and row["cancellation"] != "ACKNOWLEDGED") or row["last_error"]):
+            if row and row.get("source_review"):
+                state = dict(state, _sync_review=json.loads(row["source_review"]))
+            if row and row["payload"] and ((row["submission"] != "TERMINAL" and row["cancellation"] != "ACKNOWLEDGED") or row["last_error"] or row.get("source_review")):
                 order = Order.model_validate(json.loads(row["payload"]))
                 order.ui_status_hint = sync_row_status(row)
                 self.order_restored.emit(order, row["external_id"])

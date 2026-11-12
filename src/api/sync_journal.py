@@ -126,6 +126,11 @@ class SyncJournal:
             return self._rows(db._get_conn(), """SELECT internal_id FROM SyncOrders WHERE scope=?
                 AND (external_id IS NOT NULL OR (submission<>'TERMINAL' AND cancellation<>'ACKNOWLEDGED')) ORDER BY internal_id""")
 
+    def get_order(self, internal):
+        with self._db() as db:
+            rows = self._rows(db._get_conn(),"SELECT * FROM SyncOrders WHERE scope=? AND internal_id=?",(internal,))
+            return rows[0] if rows else None
+
     def bootstrap_status(self):
         with self._db() as db:
             row = db._get_conn().execute("SELECT payload FROM SyncSource WHERE scope=? AND source_id='native-bootstrap'", (self.scope,)).fetchone()
@@ -256,6 +261,8 @@ class SyncJournal:
                     error = self._accept_effect_authority(conn, row, state, cancellation, payload) or error
                 elif state.get("deliveryStatus") == "COMPLETED":
                     submission = "TERMINAL"
+                if row["source_review"]:
+                    error = json.loads(row["source_review"]).get("message") or "Source review is required"
                 if farmax and self._completion_observed(conn, internal):
                     submission = "TERMINAL"
                 conn.execute("""UPDATE SyncOrders SET submission=?,cancellation=?,external_id=COALESCE(?,external_id),
@@ -492,6 +499,8 @@ class SyncJournal:
             if not rows:
                 raise ValueError("Unknown local order")
             row = rows[0]
+            if row["source_review"]:
+                raise ValueError("Resolve the source review explicitly before retrying synchronization")
             if row["cancellation"] == "CONFLICT":
                 conn.execute("UPDATE SyncOrders SET cancellation='REQUESTED',retry_at=0 WHERE scope=? AND internal_id=?", (self.scope, internal_id))
                 row["retry_operation"] = "LOCAL"
@@ -506,3 +515,12 @@ class SyncJournal:
             else:
                 raise ValueError("Cancellation is unresolved")
             return row
+
+    def retry_is_current(self, internal, job_id, generation):
+        with self._db() as db:
+            rows = self._rows(db._get_conn(),"SELECT * FROM SyncOrders WHERE scope=? AND internal_id=?",(internal,))
+            if not rows:
+                return False
+            row = rows[0]
+            return (row["job_id"] == job_id and row["effect_generation"] == generation and row["source_review"] is None
+                    and row["cancellation"] == "NONE" and row["external_id"] is None and row["submission"] != "TERMINAL")

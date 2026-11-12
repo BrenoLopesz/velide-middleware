@@ -3,7 +3,8 @@ from typing import Optional
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
 
 from config import ApiConfig, TargetSystem
-from models.delivery_table_model import DeliveryRowStatus
+from models.delivery_table_model import DeliveryRowStatus, sync_row_status
+from api.velide_gateway import freeze_gateway
 from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_dispatcher import DeliveryDispatcher
 from services.durable_delivery_dispatcher import DurableDeliveryDispatcher
@@ -52,8 +53,7 @@ class DeliveriesService(QObject):
         self._dispatcher.task_failed.connect(self._on_delivery_request_failure)
         if journal:
             self._dispatcher.order_restored.connect(self._on_order_restored)
-            self._dispatcher.import_accepted.connect(
-                lambda internal_id, _: self.delivery_update.emit(internal_id, DeliveryRowStatus.PROCESSING))
+            self._dispatcher.import_accepted.connect(self._on_import_accepted)
             self._dispatcher.scope_ready.connect(lambda: self._active_strategy.on_scope_verified() if self._active_strategy else None)
             self._dispatcher.scope_invalidated.connect(lambda: self._active_strategy.on_scope_invalidated() if self._active_strategy else None)
 
@@ -238,6 +238,9 @@ class DeliveriesService(QObject):
 
     def on_native_state(self, state):
         internal_id = state["externalOrderId"]
+        if state.get("_sync_review"):
+            self._on_delivery_request_failure(internal_id,state["_sync_review"].get("message") or "Source review is required")
+            return
         if state.get("retainedOutcome") in ("COMPLETED", "CANCELLED"):
             if self.get_order(internal_id):
                 status = DeliveryRowStatus.DELIVERED if state["retainedOutcome"] == "COMPLETED" else DeliveryRowStatus.CANCELLED
@@ -277,17 +280,27 @@ class DeliveriesService(QObject):
         if not self.supports_native_retry or not self._journal:
             return
         from workers.native_api_worker import NativeApiWorker
+        ticket = self._dispatcher._ticket()
+        gateway = freeze_gateway(self._gateway)
         def prepared(row):
-            if row["retry_operation"] != "JOB":
+            if row["retry_operation"] != "JOB" or not self._dispatcher._current(ticket):
                 return
-            worker = NativeApiWorker(self._gateway, "retry_order", internal_id)
+            worker = NativeApiWorker(gateway, "retry_order", internal_id,
+                preflight=lambda: self._dispatcher._current(ticket) and self._journal.journal.retry_is_current(internal_id,row["job_id"],row["effect_generation"]))
             self._dispatcher.mutation_changed.emit()
             worker.signals.result.connect(lambda result: self._journal.submit("accepted_job", internal_id, result["jobId"],
-                success=lambda _: self.delivery_update.emit(internal_id, DeliveryRowStatus.PROCESSING)))
-            worker.signals.failed.connect(lambda error: self._on_delivery_request_failure(internal_id, error["message"]))
+                success=lambda _: self._on_import_accepted(internal_id,result["jobId"]) if self._dispatcher._current(ticket) else None))
+            worker.signals.failed.connect(lambda error: self._on_delivery_request_failure(internal_id, error["message"]) if self._dispatcher._current(ticket) else None)
             QThreadPool.globalInstance().start(worker)
         self._journal.submit("retry_work", internal_id, success=prepared,
                              failure=lambda error: self._on_delivery_request_failure(internal_id, error))
+
+    def _on_import_accepted(self, internal_id, job_id):
+        if not self._journal:
+            return
+        ticket = self._dispatcher._ticket()
+        self._journal.submit("get_order", internal_id,
+            success=lambda row: self.delivery_update.emit(internal_id,sync_row_status(row)) if row and self._dispatcher._current(ticket) else None)
 
     # =========================================================================
     # DISPATCHER CALLBACKS (Results from API)
@@ -313,6 +326,18 @@ class DeliveriesService(QObject):
 
     def _on_deletion_request_success(self, internal_id: str, external_id: str):
         """Called when Dispatcher successfully DELETEs from Velide."""
+        if self._journal:
+            session = freeze_gateway(self._gateway)
+            self._journal.submit("get_order", internal_id,
+                success=lambda row: self._apply_deletion_outcome(internal_id,external_id,row) if session.is_current() else None)
+            return
+        self._apply_deletion_outcome(internal_id,external_id,None)
+
+    def _apply_deletion_outcome(self, internal_id, external_id, row):
+        if row and row.get("source_review"):
+            import json
+            self._on_delivery_request_failure(internal_id,json.loads(row["source_review"]).get("message") or "Source review is required")
+            return
         self.logger.info(
             f"Entrega {internal_id} ({external_id}) cancelada no Velide com sucesso."
         )
