@@ -101,8 +101,8 @@ class FarmaxWorker(QRunnable):
             # 3. Emit the success signal with the result
             self.signals.success.emit(result)
 
-        except Exception:
-            error_msg = f"Falha ao executar '{self.method_name}' no Farmax."
+        except Exception as error:
+            error_msg = f"Falha ao executar '{self.method_name}' no Farmax: {error}"
             self.logger.exception(error_msg)
             self.signals.error.emit(error_msg)
 

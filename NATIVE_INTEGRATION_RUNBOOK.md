@@ -2,13 +2,15 @@
 
 Implementation handoff for the 2026-11-11 reliability/native migration plan.
 
+> **Independent-review correction:** the original automatic ERP write-back and cancellation assumptions were not justified by the retained native evidence. Farmax now runs as a read-only observer; legacy automatic dispatch is paused because authoritative store binding is unavailable. The detailed finding/disposition report is `MIDDLEWARE_INDEPENDENT_REVIEW.md` in the companion server PR. The automation described in the original plan is not yet a qualified Farmax workflow.
+
 ## Delivered implementation
 
 - Exact Farmax ID normalization, polling recovery, one WebSocket business-event path, and corrected departure reconciliation.
-- Sale-level cancellation classification. Individual C/D items do not cancel an otherwise active delivery; supported I/V pre-sale removals require corroborating delivery deletion and concluded-item evidence.
+- Sale-level discrepancy classification. Retained all-C and partial C/D states never authorize automatic delivery cancellation. Removed I/V and mixed S/C cases are review candidates; the branchless log cannot establish an unconditional identity/intent guarantee.
 - A versioned SQLite journal for source observations, original payloads, frozen requests, import acceptance, cancellation, remote state, and ordered ERP effects. Acknowledgements follow commit.
 - Restart recovery, hydration before Farmax monitoring, bounded log reads with overlap, and a periodic current-pending scan. A fixed overlap is not treated as a commit-order guarantee.
-- Farmax write-back retains C/D/I items, validates state and affected rows, uses original occurrence times, and retries failed or unmapped effects. Active-courier selection is branch-scoped; retained mappings can reconcile historical courier facts.
+- Farmax observation validates branch, multiplicity, original source provenance, dates, and retained courier mapping. It recognizes existing persisted fields and never writes departure, arrival, conclusion, sale status, or cashier fields. Unknown/custom schema objects are inspected, never installed or replaced at startup.
 - Native import jobs, exact source-state reconciliation, paginated reinstall recovery, source-scoped notification hints, explicit retry, and terminal/unknown identity retention.
 - CDS startup scans, move/modify handling, incomplete-file retry, deterministic identity, and durable acceptance.
 - TLS verification and timeouts for authentication, refresh-token rotation, scoped database binding, and stopped-session callback guards.
@@ -51,7 +53,7 @@ farmax:
 
 Merchant and source timezone must agree. Naive source order times are localized explicitly; ambiguous local times are rejected. Retries reuse the frozen request and original timestamp.
 
-Omitting `api.native` selects the deployed legacy API for the stabilization release. Each local database is bound to one endpoint/source scope. Switching to native requires the migration manifest, rather than just changing a URL. `VELIDE_CONFIG_PATH` can select a configuration file for rehearsal.
+Omitting `api.native` retains compatibility documents but **does not enable automatic legacy mutation**. The retained legacy API authenticates users internally yet exposes no authoritative store-ID operation to bind durable work; successful authentication, a location ID, or a client token claim is insufficient. Its deployed idempotency is not in doubt. Each local database is bound to one endpoint/source scope. Switching to native requires the migration manifest, rather than just changing a URL. `VELIDE_CONFIG_PATH` can select a configuration file for rehearsal.
 
 ## Operational behavior
 
@@ -59,7 +61,7 @@ Omitting `api.native` selects the deployed legacy API for the stabilization rele
 
 Job notifications only accelerate reconciliation. Periodic authoritative reads recover missed notifications and offline route completion. Scope recovery uses pages of at most 100 references; its progress is durable. Source references missing from the server remain unresolved.
 
-`SyncOrders` separates submission, cancellation, remote state, and mapping. `SyncEffects` retains Firebird obligations independently. A completed remote route can therefore remain locally pending until its ERP effects commit. Firebird replay checks existing state/time and avoids unnecessary trigger updates.
+`SyncOrders` separates submission, cancellation, remote state, and mapping. `SyncEffects` now records **read-only comparison obligations**, tied to authoritative revisions/generations. Cancellation, deletion, undo, or changed source evidence supersedes obsolete observations; late results cannot acknowledge a new generation. Completed native deliveries remain monitored for undo/redo. A remote completion remains unresolved until persisted Farmax delivery fields match or the discrepancy is reviewed. An existing matching V can satisfy both departure/completion observations without replaying a departure. This is not a cashier-settlement acknowledgement.
 
 ## Existing-installation migration
 
@@ -76,6 +78,8 @@ Finish legacy routes and reconcile all outstanding ERP work first. Stop Middlewa
 ```
 
 The source equivalent is `python src/native_migration.py ...`. Preparation upgrades the SQLite schema and retains existing mappings. Application creates a WAL-aware backup, checks outstanding effects/routes, applies mappings transactionally, and stores the full manifest audit. Repeating an already applied manifest is idempotent.
+
+Existing unbound work also requires a qualified `source_identity` configuration fingerprint and, for Farmax, `farmax_branch_id` during offline preparation. Calculate the fingerprint using `utils.source_identity.configured_source_identity` with the actual installation settings; it detects host/file/folder changes but does not prove database incarnation. Do not guess a branch or adopt data from an unverified source. A legacy order with attempts, a frozen request, a job, or cancellation uncertainty cannot be declared never submitted merely because its delivery mapping is missing.
 
 Example local manifest:
 
@@ -122,7 +126,7 @@ These become durable terminal source identities, preventing the new startup scan
 
 Local verification covers Python 3.8.0, Qt, real SQLite, native HTTP fixtures, cancellation/restart/response-loss scenarios, and a disposable Firebird **2.5** database with a delivery-log trigger. The Windows x64 cx_Freeze build and packaged `migrate-native.exe --help` were exercised. The build includes timezone and certificate data and a build-only workaround for Python 3.8.0 wildcard-path handling.
 
-Final local suite: **178 passed**, with the disposable Firebird check enabled. Focused Pyflakes checks on the new synchronization/migration modules also passed.
+The earlier **178-pass** result predates independent review and did not establish ERP correctness. Consult the independent-review report and subsequent PR checks for corrected verification results.
 
 Run the suite with `QT_QPA_PLATFORM=offscreen`, `PYTHONDONTWRITEBYTECODE=1`, and `python -m pytest -q -p no:cacheprovider tests`. Setting `VELIDE_TEST_FIREBIRD=1` enables the disposable localhost Firebird test; `VELIDE_TEST_FIREBIRD_PASSWORD` selects the test service password. No customer database is used by that fixture.
 

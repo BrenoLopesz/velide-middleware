@@ -25,6 +25,13 @@ class NativeReconciliationService(QObject):
         self._generation = 0
         self._bootstrap_after = ""
         self._bootstrapped = False
+        self._gateway_epoch = gateway.generation
+
+    def invalidate_pending_reads(self):
+        self._generation += 1
+        self._busy = False
+        if self._running:
+            QTimer.singleShot(0, self.trigger_reconciliation)
 
     def start_service(self):
         if self._running:
@@ -47,14 +54,19 @@ class NativeReconciliationService(QObject):
         self.timer.stop()
 
     def trigger_reconciliation(self):
+        if self.gateway.generation != self._gateway_epoch:
+            self._gateway_epoch = self.gateway.generation
+            self._generation += 1
+            self._busy = False
         if self._busy or not self._running or not self.gateway.is_ready():
             return
         self._busy = True
         if not self._bootstrapped:
             generation = self._generation
+            epoch = self.gateway.generation
             worker = NativeApiWorker(self.gateway, "list_orders", self._bootstrap_after)
-            worker.signals.result.connect(lambda states: self._bootstrap_received(states, generation))
-            worker.signals.failed.connect(lambda error: self._error(error["message"]) if generation == self._generation else None)
+            worker.signals.result.connect(lambda states: self._bootstrap_received(states, generation) if epoch == self.gateway.generation else self.invalidate_pending_reads())
+            worker.signals.failed.connect(lambda error: self._error(error["message"]) if generation == self._generation and epoch == self.gateway.generation else None)
             QThreadPool.globalInstance().start(worker)
         else:
             generation = self._generation
@@ -90,21 +102,20 @@ class NativeReconciliationService(QObject):
             self._busy = False
             return
         generation = self._generation
+        epoch = self.gateway.generation
         worker = NativeApiWorker(self.gateway, "order_states", self._batches.pop(0))
-        worker.signals.result.connect(lambda states: self._received(states, generation))
-        worker.signals.failed.connect(lambda error: self._error(error["message"]) if generation == self._generation else None)
+        worker.signals.result.connect(lambda states: self._received(states, generation) if epoch == self.gateway.generation else self.invalidate_pending_reads())
+        worker.signals.failed.connect(lambda error: self._error(error["message"]) if generation == self._generation and epoch == self.gateway.generation else None)
         QThreadPool.globalInstance().start(worker)
 
     def _received(self, states, generation):
         if generation != self._generation or not self._running:
-            self._busy = False
             return
         self.journal.submit("native_states", states, self.target == TargetSystem.FARMAX,
                             success=lambda rows: self._committed(states, rows, generation), failure=self._error)
 
     def _committed(self, states, rows, generation):
         if generation != self._generation or not self._running:
-            self._busy = False
             return
         self._publish(states, rows)
         self._next()
@@ -112,7 +123,12 @@ class NativeReconciliationService(QObject):
     def _publish(self, states, rows):
         for state in states:
             row = next((row for row in rows if row["internal_id"] == state["externalOrderId"]), None)
-            if row and row["payload"] and row["submission"] != "TERMINAL" and row["cancellation"] != "ACKNOWLEDGED":
+            if row and row["remote_state"]:
+                accepted = json.loads(row["remote_state"])
+                if accepted != state:
+                    continue  # SQLite rejected an older authoritative response.
+                state = dict(accepted, error=row["last_error"] or accepted.get("error"))
+            if row and row["payload"] and ((row["submission"] != "TERMINAL" and row["cancellation"] != "ACKNOWLEDGED") or row["last_error"]):
                 self.order_restored.emit(Order.model_validate(json.loads(row["payload"])), row["external_id"])
             self.order_state.emit(state)
 

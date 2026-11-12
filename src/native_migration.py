@@ -27,21 +27,41 @@ def prepare_legacy(path, manifest):
     """Upgrade local storage and record reviewed CDS history without starting I/O."""
     if not os.path.isfile(path) or manifest.get("version") != 1 or len(manifest["old_scope"].split("|")) != 2:
         raise ValueError("An existing legacy database and version-1 manifest are required")
+    validate_source_fingerprint(manifest)
     ids = processed_cds_ids(manifest)
     if ids and not manifest["old_scope"].endswith("|CDS"):
         raise ValueError("CDS file baseline requires a CDS source")
     journal = SyncJournal(path, manifest["old_scope"])
     journal.restore()
     with journal._db() as db:
+        if manifest.get("source_identity"):
+            previous = db._get_conn().execute("SELECT source_identity FROM SyncScope WHERE id=1").fetchone()[0]
+            if previous is not None and previous != manifest["source_identity"]:
+                raise ValueError("Source identity changed; restore/replace qualification is required")
+            db._get_conn().execute("UPDATE SyncScope SET source_identity=? WHERE id=1", (manifest["source_identity"],))
+        if manifest.get("farmax_branch_id") is not None:
+            from connectors.farmax.identity import normalize_farmax_id
+            branch = normalize_farmax_id(manifest["farmax_branch_id"])
+            previous = db._get_conn().execute("SELECT farmax_branch FROM SyncScope WHERE id=1").fetchone()[0]
+            if previous is not None and previous != branch:
+                raise ValueError("Qualified Farmax branch cannot be silently replaced")
+            db._get_conn().execute("UPDATE SyncScope SET farmax_branch=? WHERE id=1", (branch,))
         for internal in ids:
             db._get_conn().execute("INSERT OR IGNORE INTO SyncOrders(scope,internal_id,submission) VALUES(?,?,'TERMINAL')",
                                   (manifest["old_scope"], internal))
     return {"prepared": True, "processed_cds_files": len(ids), "scope": manifest["old_scope"]}
 
 
+def validate_source_fingerprint(manifest):
+    if manifest.get("source_identity") is not None and (not isinstance(manifest["source_identity"], str) or len(manifest["source_identity"]) != 64
+                                                       or any(c not in "0123456789abcdef" for c in manifest["source_identity"])):
+        raise ValueError("Invalid qualified source configuration fingerprint")
+
+
 def validate_manifest(conn, manifest):
     if manifest.get("version") != 1:
         raise ValueError("Unsupported migration manifest version")
+    validate_source_fingerprint(manifest)
     scope = manifest["new_scope"].split("|")
     if len(scope) != 4 or not scope[0].rstrip("/").endswith("/graphql") or scope[1] not in ("Farmax", "CDS"):
         raise ValueError("Invalid native scope")
@@ -76,10 +96,13 @@ def validate_manifest(conn, manifest):
             if entry.get(field):
                 uuid.UUID(entry[field])
         old = conn.execute("SELECT external_delivery_id FROM DeliveryMapping WHERE internal_delivery_id=?", (entry["internal_id"],)).fetchone()
+        work = conn.execute("SELECT submission,attempts,request,job_id,cancellation FROM SyncOrders WHERE internal_id=?", (entry["internal_id"],)).fetchone()
         if (old[0] if old else None) != entry.get("legacy_delivery_id"):
             raise ValueError("Legacy mapping differs from manifest")
-        if entry["state"] == "QUEUED" and old:
-            raise ValueError("Previously submitted orders cannot be blindly requeued")
+        if entry["state"] == "QUEUED" and (old or not work or work != ("QUEUED", 0, None, None, "NONE")):
+            raise ValueError("Only proven never-submitted work can be requeued; retain or resolve uncertain legacy submissions")
+        if entry["state"] == "ACCEPTED" and work and work[4] not in ("NONE", "ACKNOWLEDGED"):
+            raise ValueError("Resolve cancellation intent before migrating an accepted import")
         if entry["state"] == "IMPORTED" and not entry.get("native_delivery_id"):
             raise ValueError("Imported outcome requires a native delivery ID")
         if entry["state"] == "ACCEPTED" and not entry.get("native_job_id"):

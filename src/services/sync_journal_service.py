@@ -27,9 +27,9 @@ class _Work(QRunnable):
 class SyncJournalService(QObject):
     error = pyqtSignal(str)
 
-    def __init__(self, path, scope):
+    def __init__(self, path, scope, source_identity=None):
         super().__init__()
-        self.journal = SyncJournal(path, scope)
+        self.journal = SyncJournal(path, scope, source_identity)
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(1)
         self._callbacks = {}

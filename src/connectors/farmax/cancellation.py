@@ -12,21 +12,19 @@ class CancellationDecision(str, Enum):
     ACTIVE = "ACTIVE"
     CANCEL = "CANCEL"
     UNRESOLVED = "UNRESOLVED"
+    REMOVAL_CANDIDATE = "REMOVAL_CANDIDATE"
 
 
 def classify_cancellation(items: Sequence[FarmaxSale]) -> CancellationDecision:
-    if not items:
+    if not items or any(not item.evidence_complete or not isinstance(item.status, str) for item in items):
         return CancellationDecision.UNRESOLVED
     statuses = {item.status.strip().upper() for item in items}
-    # Whole-sale C is distinct from an individual C/D item among active items.
-    if statuses == {"C"}:
-        return CancellationDecision.CANCEL
     removed = all(item.delivery_exists is False and item.delivery_deleted for item in items)
-    concluded = all(item.concluded == "S" for item in items)
-    # Pre-sale I/V branches and the checkout mixed-state cancellation need
-    # independent logistics removal evidence. V by itself proves nothing.
-    if removed and concluded and statuses <= {"I", "V", "C"}:
-        return CancellationDecision.CANCEL
+    # S/C mixtures also occur after checkout's partial-apply anomaly. Physical
+    # removal is independent of financial status, but branchless logs cannot
+    # prove an incarnation or the user's intent: review, never auto-cancel.
+    if removed:
+        return CancellationDecision.REMOVAL_CANDIDATE
     if any(item.delivery_exists is False for item in items) or statuses.intersection({"C", "D", "I"}):
         return CancellationDecision.UNRESOLVED
-    return CancellationDecision.ACTIVE
+    return CancellationDecision.ACTIVE if statuses <= {"S", "V"} else CancellationDecision.UNRESOLVED

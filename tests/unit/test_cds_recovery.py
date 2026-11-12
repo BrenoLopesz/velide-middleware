@@ -37,5 +37,37 @@ def test_cds_partial_file_is_retried_and_preserves_provenance(tmp_path, qtbot, m
     received = []
     worker.signals.new_order.connect(received.append)
     worker._read_file(str(path))
-    assert received == [{"nome_cliente": "Fixture", "_source_file": "ent1.json"}]
+    assert received[0]["nome_cliente"] == "Fixture"
+    assert received[0]["_source_file"] == "ent1.json"
+    assert received[0]["_source_observation"][0] == str(path)
     worker.stop()  # stop-before-start is also valid
+
+
+def test_thousands_of_unchanged_files_do_not_delay_new_events(monkeypatch):
+    worker = CdsLogsListenerWorker("unused")
+    monkeypatch.setattr("workers.cds_logs_listener_worker.os.stat", lambda _: SimpleNamespace(st_size=10, st_mtime_ns=1))
+    for n in range(5000):
+        path = "ent{}.json".format(n)
+        worker.acknowledge((path,10,1))
+        worker.enqueue(path, priority=False)
+    assert worker._next_path() is None
+    for n in range(5000,10000):
+        worker.enqueue("ent{}.json".format(n), priority=False)
+    assert len(worker._scan) <= 1024
+    assert not worker._scan_has_capacity()
+    worker.enqueue("ent-new.json")
+    assert worker._next_path() == "ent-new.json"
+    worker.enqueue("ent0.json")  # A real modified event overrides an unchanged stat.
+    assert worker._next_path() == "ent0.json"
+
+
+def test_old_file_ack_does_not_hide_a_new_observation(monkeypatch):
+    worker = CdsLogsListenerWorker("unused")
+    monkeypatch.setattr("workers.cds_logs_listener_worker.os.stat", lambda _: SimpleNamespace(st_size=10,st_mtime_ns=1))
+    worker.enqueue("ent1.json")
+    worker._next_path()
+    old_ticket = worker._inflight["ent1.json"][2]
+    worker.enqueue("ent1.json")
+    worker._next_path()
+    worker.acknowledge(("ent1.json",10,1,old_ticket))
+    assert "ent1.json" not in worker._seen

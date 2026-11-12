@@ -54,6 +54,8 @@ class DeliveriesService(QObject):
             self._dispatcher.order_restored.connect(self._on_order_restored)
             self._dispatcher.import_accepted.connect(
                 lambda internal_id, _: self.delivery_update.emit(internal_id, DeliveryRowStatus.PROCESSING))
+            self._dispatcher.scope_ready.connect(lambda: self._active_strategy.on_scope_verified() if self._active_strategy else None)
+            self._dispatcher.scope_invalidated.connect(lambda: self._active_strategy.on_scope_invalidated() if self._active_strategy else None)
 
     def get_order(self, order_id: str) -> Optional[Order]:
         """Facade for the repository."""
@@ -130,12 +132,14 @@ class DeliveriesService(QObject):
         self._sanitize_order_id(normalized_order)
 
         internal_id = normalized_order.internal_id
+        already_visible = self._repository.get_by_internal(internal_id) is not None
 
         # 1. Update Repository
         self._repository.add(normalized_order)
 
         # 2. Acknowledge to UI
-        self.delivery_acknowledged.emit(internal_id, normalized_order)
+        if not already_visible:
+            self.delivery_acknowledged.emit(internal_id, normalized_order)
 
         if not self._journal and not self._gateway.is_ready():
             self.logger.error(
@@ -237,14 +241,14 @@ class DeliveriesService(QObject):
                 status = DeliveryRowStatus.DELIVERED if state["retainedOutcome"] == "COMPLETED" else DeliveryRowStatus.CANCELLED
                 self.delivery_update.emit(internal_id, status)
             return
-        if not self.get_order(internal_id) and (state.get("deliveryStatus") in ("CANCELLED", "COMPLETED") or state.get("cancellation") == "ACKNOWLEDGED"):
+        if not state.get("error") and not self.get_order(internal_id) and (state.get("deliveryStatus") in ("CANCELLED", "COMPLETED") or state.get("cancellation") == "ACKNOWLEDGED"):
             return
         if not state["found"]:
             self.on_reconciliation_misses_delivery(internal_id)
             return
         if state.get("deliveryId"):
             self._on_add_delivery_request_success(internal_id, state["deliveryId"])
-        if state["cancellation"] == "ACKNOWLEDGED" or state.get("deliveryStatus") == "CANCELLED" or state["deleted"]:
+        if state.get("deliveryStatus") == "CANCELLED" or state["deleted"] or (state["cancellation"] == "ACKNOWLEDGED" and not state.get("deliveryId")):
             self._on_deletion_request_success(internal_id, state.get("deliveryId") or "")
         elif state.get("error") or state.get("code") == "UNRESOLVED_HISTORY":
             self._on_delivery_request_failure(internal_id, state.get("error") or state["code"])
@@ -260,6 +264,8 @@ class DeliveriesService(QObject):
             self._dispatcher.stop()
         if self._active_strategy:
             self._active_strategy.stop_listening()
+        if hasattr(self._gateway, "invalidate_session"):
+            self._gateway.invalidate_session()
 
     @property
     def supports_native_retry(self):
@@ -273,6 +279,7 @@ class DeliveriesService(QObject):
             if row["retry_operation"] != "JOB":
                 return
             worker = NativeApiWorker(self._gateway, "retry_order", internal_id)
+            self._dispatcher.mutation_changed.emit()
             worker.signals.result.connect(lambda result: self._journal.submit("accepted_job", internal_id, result["jobId"],
                 success=lambda _: self.delivery_update.emit(internal_id, DeliveryRowStatus.PROCESSING)))
             worker.signals.failed.connect(lambda error: self._on_delivery_request_failure(internal_id, error["message"]))

@@ -40,6 +40,8 @@ class FarmaxStatusTracker(QObject):
         str, object
     )  # Emits internal_id (str), External ID (or None)
     error_occurred = pyqtSignal(str)
+    review_required = pyqtSignal(str, str, object)
+    source_active = pyqtSignal(str)
 
     def __init__(
         self,
@@ -57,6 +59,7 @@ class FarmaxStatusTracker(QObject):
         self._is_running = False
         self._is_processing = False  # Semaphore to prevent overlapping poll cycles
         self._pending_workers = 0
+        self._generation = 0
 
         # Timer
         self._poll_timer = QTimer(self)
@@ -71,6 +74,8 @@ class FarmaxStatusTracker(QObject):
             return
 
         self._is_running = True
+        self._generation += 1
+        self._is_processing = False
         self._logger.debug("Iniciando o Rastreador de Status Farmax...")
 
         # Run immediately, then schedule
@@ -81,6 +86,7 @@ class FarmaxStatusTracker(QObject):
         """Stops the monitoring timer."""
         self._logger.info("Parando o Rastreador de Status Farmax...")
         self._is_running = False
+        self._generation += 1
         self._poll_timer.stop()
 
     # --- Polling Logic ---
@@ -102,6 +108,7 @@ class FarmaxStatusTracker(QObject):
 
         try:
             self._is_processing = True
+            self._generation += 1
 
             # 1. Get IDs that the system thinks are "Active" (Not Delivered/Cancelled)
             active_ids = self._persistence.get_active_monitored_ids()
@@ -136,8 +143,9 @@ class FarmaxStatusTracker(QObject):
             self._repository, cd_vendas=tuple(batch_ids)
         )
 
-        worker.signals.success.connect(self._on_statuses_retrieved)
-        worker.signals.error.connect(self._on_worker_error)
+        generation = self._generation
+        worker.signals.success.connect(lambda rows: self._on_statuses_retrieved(rows) if generation == self._generation else None)
+        worker.signals.error.connect(lambda error: self._on_worker_error(error) if generation == self._generation else None)
 
         # We perform cleanup of the semaphore when the LAST worker finishes?
         # For simplicity in this non-blocking UI context, 
@@ -145,7 +153,7 @@ class FarmaxStatusTracker(QObject):
         # Ideally, we should track active workers count, 
         # but a simple release on success is usually fine
         # for low-frequency polling.
-        worker.signals.finished.connect(lambda: self._set_processing_finished())
+        worker.signals.finished.connect(lambda: self._set_processing_finished() if generation == self._generation else None)
 
         self._thread_pool.start(worker)
 
@@ -172,14 +180,17 @@ class FarmaxStatusTracker(QObject):
                 by_sale[normalize_farmax_id(item.id)].append(item)
             for internal_id, items in by_sale.items():
                 decision = classify_cancellation(items)
-                if decision == CancellationDecision.CANCEL:
-                    external_id = self._persistence.get_external_id(internal_id)
-                    self.order_cancelled.emit(internal_id, external_id)
-                elif decision == CancellationDecision.UNRESOLVED:
+                if decision != CancellationDecision.ACTIVE:
+                    message = ("Source delivery removal candidate; verify identity and cancel in Velide if appropriate"
+                               if decision == CancellationDecision.REMOVAL_CANDIDATE else
+                               "Retained delivery or incomplete/exceptional sale evidence requires review")
+                    self.review_required.emit(internal_id, message, [item.model_dump(mode="json") for item in items])
                     self._logger.warning(
                         "Pedido %s com alteração parcial ou evidência incompleta; "
                         "aguardando nova consulta.", internal_id
                     )
+                else:
+                    self.source_active.emit(internal_id)
 
         except Exception as e:
             self._logger.exception(
@@ -195,17 +206,9 @@ class FarmaxStatusTracker(QObject):
     # --- Business Logic Helpers ---
 
     def _is_cancelled(self, status: str) -> bool:
-        """
-        Determines if a Farmax status code represents a cancellation.
-        """
-        if not status:
-            return False
-        # Item-return status D is not a whole-delivery cancellation.
-        return status.strip().upper() == "C"
+        """Compatibility helper: a sale status alone never authorizes removal."""
+        return False
 
     def _is_finished(self, status: str) -> bool:
-        """Determines if the order is done and needs no further monitoring."""
-        if not status:
-            return False
-        # 'F' = Finalizado, 'E' = Entregue
-        return status.strip().upper() in ["F", "E", "FINALIZADO", "ENTREGUE"]
+        """Compatibility helper: matching source projection needs full evidence."""
+        return False

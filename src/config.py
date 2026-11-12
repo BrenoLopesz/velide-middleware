@@ -130,6 +130,7 @@ class NativeApiConfig(BaseModel):
 
 class ApiConfig(BaseModel):
     native: Optional[NativeApiConfig] = None
+    source_timezone: Optional[str] = None
     velide_server: str = Field(description="API URL to make requests to.")
     use_neighbourhood: bool = Field(
         default=False, description="Enables sending neighbourhood details."

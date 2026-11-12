@@ -38,6 +38,15 @@ class VelideGateway:
         self.config = api_config
         self.target = target_system
         self._reconciliation_config = reconciliation_config
+        self.generation = 0
+        self._configured_scope = self._scope()
+
+    def _scope(self):
+        native = self.config.native
+        return (self.config.velide_server, self.target,
+                native.merchant_id if native else None,
+                native.connection_id if native else None,
+                native.timezone if native else self.config.source_timezone)
 
     def update_token(self, access_token: str) -> None:
         """
@@ -50,7 +59,19 @@ class VelideGateway:
             access_token: The new Bearer token string.
         """
         with self._lock:
+            if access_token != self._access_token:
+                self.generation += 1
             self._access_token = access_token
+
+    def invalidate_session(self):
+        with self._lock:
+            self.generation += 1
+            self._access_token = None
+
+    def snapshot(self):
+        with self._lock:
+            return FrozenGateway(self, self.generation, self._access_token,
+                                 self.config.model_copy(deep=True), self.target, self._reconciliation_config)
 
     def get_client(self) -> Optional[Velide]:
         """
@@ -61,7 +82,7 @@ class VelideGateway:
             None: If the gateway has not yet received a valid access token.
         """
         with self._lock:
-            if not self._access_token:
+            if not self._access_token or self._scope() != self._configured_scope:
                 return None
             
             # FACTORY PATTERN:
@@ -87,4 +108,30 @@ class VelideGateway:
             bool: True if an access token is present, False otherwise.
         """
         with self._lock:
-            return self._access_token is not None
+            return self._access_token is not None and self._scope() == self._configured_scope
+
+
+class FrozenGateway:
+    """Queued operations never acquire credentials from a replacement session."""
+    def __init__(self, owner, generation, token, config, target, reconciliation):
+        self.owner, self.generation, self.token = owner, generation, token
+        self.config, self.target, self.reconciliation = config, target, reconciliation
+
+    def is_current(self):
+        return self.owner.generation == self.generation and self.owner._scope() == self.owner._configured_scope
+
+    def is_ready(self):
+        return bool(self.token) and self.is_current()
+
+    def get_client(self):
+        if not self.is_ready():
+            return None
+        client_type = Velide
+        if self.config.native:
+            from api.native_velide import NativeVelide
+            client_type = NativeVelide
+        return client_type(self.token, self.config, self.target, self.reconciliation)
+
+
+def freeze_gateway(gateway):
+    return gateway.snapshot() if isinstance(gateway, VelideGateway) else gateway

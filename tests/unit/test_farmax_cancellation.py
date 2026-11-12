@@ -7,16 +7,18 @@ from models.farmax_models import FarmaxSale
 
 
 @pytest.mark.parametrize("statuses,exists,deleted,concluded,expected", [
-    (["C", "C"], True, False, "S", "CANCEL"),
+    (["C", "C"], True, False, "S", "UNRESOLVED"),
     (["C", "V"], True, False, "S", "UNRESOLVED"),
     (["D", "V"], True, False, "S", "UNRESOLVED"),
     (["D"], True, False, "S", "UNRESOLVED"),
     (["V", "V"], True, False, "S", "ACTIVE"),
-    (["I", "I"], False, True, "S", "CANCEL"),
-    (["V", "V"], False, True, "S", "CANCEL"),
-    (["C", "V"], False, True, "S", "CANCEL"),
+    (["I", "I"], False, True, "S", "REMOVAL_CANDIDATE"),
+    (["V", "V"], False, True, "S", "REMOVAL_CANDIDATE"),
+    (["C", "V"], False, True, "S", "REMOVAL_CANDIDATE"),
+    (["S", "C"], False, True, "S", "REMOVAL_CANDIDATE"),
+    (["S", "V", "C"], False, True, "S", "REMOVAL_CANDIDATE"),
     (["I"], False, False, "S", "UNRESOLVED"),
-    (["V"], False, True, "N", "UNRESOLVED"),
+    (["V"], False, True, "N", "REMOVAL_CANDIDATE"),
     ([], False, True, "S", "UNRESOLVED"),
 ])
 def test_sale_level_evidence(statuses, exists, deleted, concluded, expected):
@@ -39,7 +41,7 @@ def test_tracker_groups_items_and_only_requests_cancellation(qtbot):
         FarmaxSale(cd_venda=124, status="C"),
         FarmaxSale(cd_venda=124, status="C"),
     ])
-    assert received == [("124", "remote")]
+    assert received == []  # All-C is not authorization to remove a delivery.
     persistence.mark_as_cancelled.assert_not_called()
 
 

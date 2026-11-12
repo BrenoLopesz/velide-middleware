@@ -48,6 +48,7 @@ class FarmaxStrategy(IConnectableStrategy):
         self._deliverymen_retriever = deliverymen_retriever
         self._thread_pool = None  # Initialized by globalInstance usually, or in workers
         self._listening = False
+        self._scope_verified = False
 
         # --- Initialize Sub-Services ---
 
@@ -91,6 +92,9 @@ class FarmaxStrategy(IConnectableStrategy):
         # When Tracker finds cancellations -> Emit to System
         self._status_tracker.order_cancelled.connect(self.order_cancelled.emit)
         self._status_tracker.error_occurred.connect(self._on_service_error)
+        self._status_tracker.review_required.connect(self._source_review)
+        # A normal-looking later snapshot cannot prove that a removed/recreated
+        # order is the same episode. Review holds are deliberately latched.
 
         # Listen for when the SQLite DB is fully loaded
         self._persistence.hydrated.connect(self._on_persistence_hydrated)
@@ -108,7 +112,8 @@ class FarmaxStrategy(IConnectableStrategy):
             return
         self._ingestor.start()
         self._status_tracker.start()
-        self._updater.start()
+        if self._scope_verified:
+            self._updater.start()
 
         # Get IDs of everything currently being tracked/monitored
         tracked_ids = self._persistence.get_tracked_ids()
@@ -171,8 +176,25 @@ class FarmaxStrategy(IConnectableStrategy):
 
     def _start_remote_services(self):
         if self._listening:
+            if not self._websockets.api_config.native:
+                self._on_service_error("Legacy synchronization is paused until an authoritative store binding is available")
+                return
             self._reconciliation.start_service()
             self._websockets.start_service()
+
+    def on_scope_verified(self):
+        self._scope_verified = True
+        if self._listening:
+            self._updater.start()
+
+    def on_scope_invalidated(self):
+        self._scope_verified = False
+        self._updater.stop()
+
+    def _source_review(self, internal_id, message, evidence):
+        if self._persistence.journal:
+            self._persistence.journal.submit("source_review", internal_id, {"message": message, "evidence": evidence})
+        self.synchronization_failed.emit(internal_id, message)
 
     def stop_listening(self):
         """Stops all polling services."""

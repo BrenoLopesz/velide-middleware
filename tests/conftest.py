@@ -43,3 +43,34 @@ def persistence_stack(tmp_path, qtbot):
     sqlite_service.thread_pool.waitForDone()
     from PyQt5.QtWidgets import QApplication
     QApplication.processEvents()
+
+
+@pytest.fixture
+def farmax_stack():
+    import sqlite3
+    from datetime import time
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import StaticPool
+    from connectors.farmax.farmax_repository import FarmaxRepository
+    sqlite3.register_adapter(time, lambda value: value.isoformat())
+    engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
+    sql = (Path(__file__).parent / "fixtures" / "farmax_observer.sql").read_text(encoding="utf-8")
+    with engine.begin() as conn:
+        for statement in sql.split(";"):
+            if statement.strip():
+                conn.execute(text(statement))
+    repo = FarmaxRepository(engine)
+    yield repo, engine
+    engine.dispose()
+
+
+@pytest.fixture
+def remote_state():
+    def make(status="COMPLETED", revision="1", route="route", **changes):
+        state = dict(externalOrderId="123", found=True, revision=revision, jobId="job", importStatus="COMPLETED",
+                     deliveryId="remote", deliveryStatus=status, deleted=False, cancellation="NONE",
+                     execution=dict(id=route, courierId="courier", startedAt="2026-11-11T15:00:00Z",
+                                    completedAt="2026-11-11T16:00:00Z" if status == "COMPLETED" else None))
+        state.update(changes)
+        return state
+    return make

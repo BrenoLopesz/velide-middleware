@@ -5,15 +5,39 @@ import sqlite3
 
 def migrate_sync_schema(conn, path):
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version > 2:
+    if version > 3:
         raise RuntimeError("Synchronization database is newer than this application")
+    if version == 3:
+        return
     if version == 2:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute("ALTER TABLE SyncSource ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE SyncSource ADD COLUMN retry_at REAL NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE SyncOrders ADD COLUMN effect_generation INTEGER NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE SyncOrders ADD COLUMN effect_authority TEXT")
+            conn.execute("ALTER TABLE SyncOrders ADD COLUMN remote_revision TEXT")
+            conn.execute("ALTER TABLE SyncOrders ADD COLUMN source_review TEXT")
+            conn.execute("ALTER TABLE SyncOrders ADD COLUMN authority_conflict_revision TEXT")
+            conn.execute("ALTER TABLE SyncEffects ADD COLUMN generation INTEGER NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE SyncEffects ADD COLUMN observation TEXT")
+            conn.execute("ALTER TABLE SyncEffects ADD COLUMN observed_at TEXT")
+            conn.execute("ALTER TABLE SyncScope ADD COLUMN legacy_store_id TEXT")
+            conn.execute("ALTER TABLE SyncScope ADD COLUMN source_identity TEXT")
+            conn.execute("ALTER TABLE SyncScope ADD COLUMN farmax_branch TEXT")
+            conn.execute("UPDATE SyncEffects SET state='SUPERSEDED',last_error='Fresh authoritative observation required after upgrade' WHERE state='PENDING'")
+            conn.execute("PRAGMA user_version=3")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         return
     if version == 1:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute("CREATE TABLE IF NOT EXISTS SyncScope (id INTEGER PRIMARY KEY CHECK(id=1), scope TEXT NOT NULL)")
         conn.execute("PRAGMA user_version=2")
         conn.commit()
+        migrate_sync_schema(conn, path)
         return
     # Back up an existing installation using SQLite's WAL-aware backup API.
     if path != ":memory:" and conn.execute("SELECT 1 FROM DeliveryMapping UNION ALL SELECT 1 FROM DeliverymenMapping LIMIT 1").fetchone():

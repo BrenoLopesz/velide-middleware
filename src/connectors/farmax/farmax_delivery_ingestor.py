@@ -98,6 +98,8 @@ class FarmaxDeliveryIngestor(QObject):
         self._cursor = _CursorState()
         self._thread_pool = QThreadPool.globalInstance()
         self._is_running = False
+        self._generation = 0
+        self._cycle = 0
 
         # Retry State
         self._retry_count = 0
@@ -126,6 +128,7 @@ class FarmaxDeliveryIngestor(QObject):
             return
 
         self._is_running = True
+        self._generation += 1
         self._is_processing_cycle = False  # Reset state on fresh start
         self._cursor.set_initial_time(self._get_midnight_timestamp())
 
@@ -137,6 +140,7 @@ class FarmaxDeliveryIngestor(QObject):
         """Stops polling and pending retries."""
         self._logger.info("Parando o ingestor de entregas Farmax...")
         self._is_running = False
+        self._generation += 1
         self._poll_timer.stop()
         self._retry_timer.stop()
         self._watchdog_timer.stop()
@@ -146,6 +150,13 @@ class FarmaxDeliveryIngestor(QObject):
             pass  # No connection existed
 
     # --- Step 1: Polling the Log ---
+
+    def _guard(self, callback):
+        generation, cycle = self._generation, self._cycle
+        def current(*args, **kwargs):
+            if self._is_running and generation == self._generation and cycle == self._cycle:
+                return callback(*args, **kwargs)
+        return current
 
     def _execute_poll_cycle(self) -> None:
         """Initiates the worker to check the logs."""
@@ -158,13 +169,14 @@ class FarmaxDeliveryIngestor(QObject):
             return
 
         self._is_processing_cycle = True
+        self._cycle += 1
 
         # Start emergency watchdog (2 minutes timeout)
         self._watchdog_timer.start(120000)
 
         if self._journal:
-            self._journal.submit("source_state", success=self._on_source_state,
-                                 failure=self._on_poll_error)
+            self._journal.submit("source_state", success=self._guard(self._on_source_state),
+                                 failure=self._guard(self._on_poll_error))
         else:
             self._poll_logs()
 
@@ -178,8 +190,8 @@ class FarmaxDeliveryIngestor(QObject):
         self._poll_count += 1
         if self._scan_cursor or self._poll_count % 10 == 1:
             worker = FarmaxWorker(self._repository, "fetch_pending_ids", after_id=self._scan_cursor)
-            worker.signals.success.connect(self._on_pending_scan)
-            worker.signals.error.connect(self._on_poll_error)
+            worker.signals.success.connect(self._guard(self._on_pending_scan))
+            worker.signals.error.connect(self._guard(self._on_poll_error))
             self._thread_pool.start(worker)
         else:
             self._poll_logs()
@@ -190,8 +202,8 @@ class FarmaxDeliveryIngestor(QObject):
         self._pending_sale_ids = sorted(set(self._pending_sale_ids + unknown))
         observations = [("farmax:" + normalize_farmax_id(sale_id),
                          {"sale_id": normalize_farmax_id(sale_id)}) for sale_id in unknown]
-        self._journal.submit("observe_source", observations, success=lambda _: self._poll_logs(),
-                             failure=self._on_poll_error)
+        self._journal.submit("observe_source", observations, success=self._guard(lambda _: self._poll_logs()),
+                             failure=self._guard(self._on_poll_error))
 
     def _poll_logs(self):
         if not self._is_running:
@@ -218,8 +230,8 @@ class FarmaxDeliveryIngestor(QObject):
                 self._repository, last_check_time=check_time
             )
 
-        worker.signals.success.connect(self._on_logs_retrieved)
-        worker.signals.error.connect(self._on_poll_error)
+        worker.signals.success.connect(self._guard(self._on_logs_retrieved))
+        worker.signals.error.connect(self._guard(self._on_poll_error))
 
         # Check if thread pool is valid (Optional safety)
         if self._thread_pool:
@@ -228,6 +240,14 @@ class FarmaxDeliveryIngestor(QObject):
             self._logger.critical("ThreadPool não inicializado!")
 
     def _on_logs_retrieved(self, logs: List[DeliveryLog]) -> None:
+        try:
+            self._process_logs(logs)
+        except Exception as error:
+            self._logger.exception("Falha ao processar lote de logs Farmax")
+            self._cursor.rollback()
+            self._on_poll_error(str(error))
+
+    def _process_logs(self, logs: List[DeliveryLog]) -> None:
         """
         Callback for Step 1.
         Filters logs and decides if we need to fetch details.
@@ -259,10 +279,10 @@ class FarmaxDeliveryIngestor(QObject):
             observations = [("farmax:" + normalize_farmax_id(sale_id),
                              {"sale_id": normalize_farmax_id(sale_id)})
                             for sale_id in ids_to_fetch]
-            ids = tuple(sorted(set(ids_to_fetch + self._pending_sale_ids)))
+            ids = tuple(sorted(set(ids_to_fetch).union(self._pending_sale_ids)))
             self._journal.submit("observe_source", observations, max(log.id for log in logs),
-                                 success=lambda _: self._source_recorded(ids),
-                                 failure=self._on_poll_error)
+                                 success=self._guard(lambda _: self._source_recorded(ids)),
+                                 failure=self._guard(self._on_poll_error))
             return
 
         # 3. Branching logic
@@ -299,10 +319,10 @@ class FarmaxDeliveryIngestor(QObject):
             self._repository, cd_vendas=sale_ids
         )
 
-        worker.signals.success.connect(self._on_details_retrieved)
+        worker.signals.success.connect(self._guard(self._on_details_retrieved))
         # Use partial to pass the payload to the error handler for retry context
         worker.signals.error.connect(
-            partial(self._on_fetch_details_error, payload=sale_ids)
+            self._guard(partial(self._on_fetch_details_error, payload=sale_ids))
         )
 
         if self._thread_pool:
@@ -437,7 +457,7 @@ class FarmaxDeliveryIngestor(QObject):
                 if self._persistence.reserve_id(order.internal_id):
                     self.orders_received.emit([order])
             self._journal.submit("resolve_source", "farmax:" + order.internal_id,
-                                 success=lambda _: finished(), failure=failed)
+                                 success=self._guard(lambda _: finished()), failure=self._guard(failed))
 
         def failed(error):
             self.error_occurred.emit(error)
@@ -448,7 +468,7 @@ class FarmaxDeliveryIngestor(QObject):
             payload = order.model_dump(mode="json", by_alias=True)
             payload["internal_id"] = order.internal_id
             self._journal.submit("accept", order.internal_id, payload,
-                                 success=lambda row, order=order: accepted(order, row), failure=failed)
+                                 success=self._guard(lambda row, order=order: accepted(order, row)), failure=self._guard(failed))
 
     def _finish_cycle(self):
         self._is_processing_cycle = False
@@ -480,3 +500,7 @@ class FarmaxDeliveryIngestor(QObject):
                 "Liberando lock de processamento preso."
             )
             self._is_processing_cycle = False
+            self._cycle += 1
+            self._retry_timer.stop()
+            if self._is_running and not self._poll_timer.isActive():
+                self._poll_timer.start(self._config.poll_interval_ms)

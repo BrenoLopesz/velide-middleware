@@ -74,6 +74,12 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):  # type: ignore[mi
         """Called only after a queued-only or remotely confirmed cancellation."""
         pass
 
+    def on_scope_verified(self):
+        pass
+
+    def on_scope_invalidated(self):
+        pass
+
     def on_delivery_route_started_on_velide(
         self, order: Order, deliveryman_external_id: str
     ):

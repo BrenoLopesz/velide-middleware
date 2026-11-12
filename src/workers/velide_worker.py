@@ -4,7 +4,7 @@ import httpx
 from PyQt5.QtCore import QObject, pyqtSignal, QRunnable
 from pydantic import ValidationError
 
-from api.velide_gateway import VelideGateway
+from api.velide_gateway import VelideGateway, freeze_gateway
 
 # Importing all necessary models and exceptions from both original files
 from models.velide_delivery_models import (
@@ -52,7 +52,7 @@ class VelideWorker(QRunnable):
         """
         super().__init__()
         self.signals = VelideWorkerSignals()
-        self._gateway = gateway
+        self._gateway = freeze_gateway(gateway)
         self._operation = operation  # 'add_delivery' or 'get_deliverymen'
         self._kwargs = kwargs  # Stores 'order' if required
         self.logger = logging.getLogger(__name__)
@@ -164,6 +164,8 @@ class VelideWorker(QRunnable):
             raise RuntimeError(
                 "API do Velide não foi inicializada! Verifique as credenciais."
             )
+        if self._operation in ("add_delivery", "delete_delivery"):
+            raise RuntimeError("Legacy mutations are paused: the API does not expose an authoritative store binding")
 
         async with client:
             if self._operation == "add_delivery":

@@ -18,10 +18,10 @@ class NativeRequest(BaseModel):
     input: dict
 
 
-STATE_FIELDS = """externalOrderId found jobId importStatus deliveryId deliveryStatus
+STATE_FIELDS = """externalOrderId found revision jobId importStatus deliveryId deliveryStatus
     deleted cancellation retainedOutcome code retryable error
     execution { id courierId status startedAt completedAt abortedAt }
-    source { connectionId externalOrderId customerName customerContact }
+    source { connectionId externalOrderId customerName customerContact sourceContext }
     request { rawAddress rawComplemento rawNeighbourhood rawReference createdAtIntent }"""
 
 
@@ -85,6 +85,7 @@ class NativeVelide:
             "createdAtIntent": created.isoformat(), "integration": {
                 "connectionId": self.native.connection_id, "externalOrderId": order.internal_id,
                 "customerName": order.customer_name, "customerContact": order.customer_contact,
+                "sourceContext": order.source_context,
             },
         })
 

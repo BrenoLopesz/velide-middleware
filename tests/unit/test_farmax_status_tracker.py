@@ -197,8 +197,8 @@ def test_on_statuses_retrieved_handles_cancellation(tracker, mock_persistence):
     tracker._on_statuses_retrieved([sale_cancelled])
 
     # Assert
-    mock_persistence.get_external_id.assert_called_with("123")
-    tracker.order_cancelled.emit.assert_called_with("123", "EXT_REF_001")
+    mock_persistence.get_external_id.assert_not_called()
+    tracker.order_cancelled.emit.assert_not_called()
     mock_persistence.mark_as_cancelled.assert_not_called()
 
 
@@ -266,8 +266,8 @@ def test_set_processing_finished(tracker):
 @pytest.mark.parametrize(
     "status_code, expected_result",
     [
-        ("C", True),
-        ("c", True),  # Case insensitive
+        ("C", False),
+        ("c", False),
         ("D", False),  # Item return is not whole-delivery cancellation
         ("A", False),
         ("F", False),
@@ -282,11 +282,11 @@ def test_is_cancelled_logic(tracker, status_code, expected_result):
 @pytest.mark.parametrize(
     "status_code, expected_result",
     [
-        ("F", True),
-        ("E", True),
-        ("ENTREGUE", True),
-        ("FINALIZADO", True),
-        ("finalizado", True),  # Case insensitive
+        ("F", False),
+        ("E", False),
+        ("ENTREGUE", False),
+        ("FINALIZADO", False),
+        ("finalizado", False),
         ("C", False),
         ("A", False),
         (None, False),

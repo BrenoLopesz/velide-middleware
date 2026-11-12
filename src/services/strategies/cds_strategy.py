@@ -18,7 +18,6 @@ class CdsStrategy(IConnectableStrategy):
         self._api_config = api_config
         self._folder_to_watch = folder_to_watch
         self._journal = journal
-        self._accepted_files = {}
         self._running = False
 
         # These workers will be created and moved to threads later
@@ -31,8 +30,9 @@ class CdsStrategy(IConnectableStrategy):
             return
         self._running = True
         self._file_listener_worker = CdsLogsListenerWorker(self._folder_to_watch)
-        self._file_listener_worker.signals.new_order.connect(self._on_new_file_found)
-        self._file_listener_worker.signals.error.connect(lambda error: self.synchronization_failed.emit("", error))
+        worker = self._file_listener_worker
+        worker.signals.new_order.connect(lambda data: self._on_new_file_found(data, worker))
+        worker.signals.error.connect(lambda error: self.synchronization_failed.emit("", error) if worker is self._file_listener_worker and self._running else None)
         self._thread_pool.start(self._file_listener_worker)
 
     def stop_listening(self):
@@ -50,17 +50,20 @@ class CdsStrategy(IConnectableStrategy):
     def on_delivery_failed(self, internal_id: Optional[float]):
         return  # Just ignore it.
 
-    def _on_new_file_found(self, delivery_data: dict):
+    def _on_new_file_found(self, delivery_data: dict, origin=None):
+        if origin is not None and origin is not self._file_listener_worker:
+            return
         try:
             cds_order: CdsOrder = CdsOrder.model_validate(delivery_data)
             normalized_order = self._transform(cds_order, delivery_data["_source_file"])
-            if not self._running or self._accepted_files.get(normalized_order.internal_id) == normalized_order.model_dump_json():
+            if not self._running:
                 return
+            observation = delivery_data.get("_source_observation")
             if self._journal:
                 payload = normalized_order.model_dump(mode="json", by_alias=True)
                 payload["internal_id"] = normalized_order.internal_id
                 self._journal.submit("accept", normalized_order.internal_id, payload,
-                    success=lambda row: self._accepted(normalized_order, row),
+                    success=lambda row: self._accepted(normalized_order, row, observation, origin),
                     failure=lambda error: self.synchronization_failed.emit(normalized_order.internal_id, error))
             else:
                 self.order_normalized.emit(normalized_order)
@@ -76,8 +79,14 @@ class CdsStrategy(IConnectableStrategy):
             )
             return
 
-    def _accepted(self, order, row):
-        self._accepted_files[order.internal_id] = order.model_dump_json()
+    def _acknowledge_file(self, observation):
+        if observation and self._file_listener_worker:
+            self._file_listener_worker.acknowledge(observation)
+
+    def _accepted(self, order, row, observation=None, origin=None):
+        if origin is not None and origin is not self._file_listener_worker:
+            return
+        self._acknowledge_file(observation)
         if self._running and row["submission"] != "TERMINAL" and row["cancellation"] != "ACKNOWLEDGED":
             self.order_normalized.emit(order)
 

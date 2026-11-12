@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from api.native_velide import NativeVelide, NativeApiError
+from api.sqlite_manager import SQLiteManager
 from api.sync_journal import SyncJournal
 from config import ApiConfig, NativeApiConfig, TargetSystem
 from models.velide_delivery_models import Order
@@ -55,17 +56,20 @@ async def test_native_partial_lookup_and_graphql_error_are_not_success():
 
 def test_offline_start_and_complete_produces_ordered_durable_effects(tmp_path):
     journal = SyncJournal(str(tmp_path / "native.db"), "native")
+    with SQLiteManager(journal.path) as db:
+        db.add_mapping("courier","5")
     journal.accept("123", {"internal_id": "123"})
     state = {"externalOrderId": "123", "found": True, "jobId": "job", "importStatus": "COMPLETED",
+             "revision": "1",
              "deliveryId": "remote", "deliveryStatus": "COMPLETED", "deleted": False, "cancellation": "NONE",
              "execution": {"id": "route", "courierId": "courier", "startedAt": "2026-01-01T15:00:00Z", "completedAt": "2026-01-01T16:00:00Z"}}
     journal.native_states([state])
     first = journal.next_effect()
     assert first["operation"] == "IN_ROUTE"
-    journal.effect_result(first["sequence"])
+    journal.effect_result(first["sequence"], generation=first["generation"], observation="DEPARTURE_FIELDS_MATCH")
     second = journal.next_effect()
     assert json.loads(second["payload"])["occurred_at"] == state["execution"]["completedAt"]
-    journal.effect_result(second["sequence"])
+    journal.effect_result(second["sequence"], generation=second["generation"], observation="COMPLETED_FIELDS_MATCH")
     journal.native_states([state])
     assert journal.next_effect() is None
     assert journal.restore()[0]["submission"] == "TERMINAL"

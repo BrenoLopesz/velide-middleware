@@ -31,3 +31,30 @@ def test_failed_token_storage_does_not_publish_success(qtbot, monkeypatch):
     worker.signals.error.connect(errors.append)
     worker.run()
     assert not success and len(errors) == 1
+
+
+def test_superseded_authentication_cannot_store_or_activate_old_tokens(qtbot, monkeypatch):
+    from services.auth_service import AuthService
+    from api.velide_gateway import VelideGateway
+    from config import ApiConfig, TargetSystem
+    gateway = VelideGateway(ApiConfig(velide_server="https://api.invalid/",velide_websockets_server="wss://api.invalid/"),TargetSystem.FARMAX)
+    service = AuthService(AuthenticationConfig(domain="auth.invalid",client_id="test",scope="openid",audience="test"),gateway)
+    store = MagicMock()
+    monkeypatch.setattr("services.auth_service.store_token_at_file",store)
+    old = service._session_generation
+    service.invalidate_session()
+    service._on_access_token_received("new-access","new-refresh",service._session_generation)
+    assert service._commit_token(old,{"access_token":"old-access"}) is False
+    service._on_access_token_received("old-access","old-refresh",old)
+    store.assert_not_called()
+    assert gateway.snapshot().token == "new-access"
+    assert service._current_refresh_token == "new-refresh"
+    service.invalidate_session()
+
+
+def test_cancelled_queued_refresh_does_not_contact_auth_server(qtbot, monkeypatch):
+    post = MagicMock()
+    monkeypatch.setattr("workers.refresh_token_worker.requests.post",post)
+    worker = RefreshTokenWorker("old", AuthenticationConfig(domain="auth.invalid",client_id="test",scope="openid",audience="test"), is_current=lambda: False)
+    worker.run()
+    post.assert_not_called()

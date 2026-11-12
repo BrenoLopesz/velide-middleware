@@ -10,7 +10,7 @@ from models.velide_delivery_models import Order
 from services.sync_journal_service import SyncJournalService
 from services.durable_delivery_dispatcher import DurableDeliveryDispatcher
 from workers.sqlite_worker import SQLiteWorker, SQLiteWorkerSignals
-from workers.velide_worker import VelideWorkerSignals
+from workers.native_api_worker import NativeSignals
 
 
 def payload(internal_id="123"):
@@ -69,29 +69,24 @@ def test_source_progress_commits_with_unresolved_obligation(journal):
     assert not journal.source_state()["pending"]
 
 
-def test_effects_retry_in_order_and_deduplicate(journal):
-    journal.enqueue_effect("123", "route:start", "IN_ROUTE", {"time": "12:00"})
-    journal.enqueue_effect("123", "route:done", "DONE", {"time": "13:00"})
-    journal.enqueue_effect("123", "route:start", "IN_ROUTE", {"time": "14:00"})
-    first = journal.next_effect()
-    assert json.loads(first["payload"])["time"] == "12:00"
-    journal.effect_result(first["sequence"], "Firebird offline")
-    assert journal.next_effect() is None  # completion cannot overtake departure
-    journal.effect_result(first["sequence"])
-    assert journal.next_effect()["operation"] == "DONE"
-
-
-def test_late_departure_repairs_earlier_completion_obligation(journal):
-    journal.enqueue_effect("123", "route:DONE", "DONE", {"occurred_at": "13:00"})
-    completion = journal.next_effect()
-    journal.effect_result(completion["sequence"], "Source has not departed yet")
-    journal.enqueue_effect("123", "route:IN_ROUTE", "IN_ROUTE", {"occurred_at": "12:00"})
-    departure = journal.next_effect()
-    assert departure["operation"] == "IN_ROUTE"
-    journal.effect_result(departure["sequence"])
+def test_effects_retry_in_order_and_deduplicate(journal, remote_state):
     with SQLiteManager(journal.path) as db:
-        db._get_conn().execute("UPDATE SyncEffects SET retry_at=0")
+        db.add_mapping("courier","5")
+    journal.native_states([remote_state()])
+    first = journal.next_effect()
+    assert json.loads(first["payload"])["started_at"] == "2026-11-11T15:00:00Z"
+    journal.effect_result(first["sequence"], "Firebird offline", first["generation"])
+    assert journal.next_effect() is None  # completion cannot overtake departure
+    journal.effect_result(first["sequence"], generation=first["generation"], observation="DEPARTURE_FIELDS_MATCH")
     assert journal.next_effect()["operation"] == "DONE"
+
+
+def test_unversioned_event_never_authorizes_source_work(journal, remote_state):
+    journal.native_states([remote_state()])
+    journal.enqueue_effect("123", "old:IN_ROUTE", "IN_ROUTE", {"occurred_at": "2026-11-10T15:00Z"})
+    assert journal.next_effect() is None
+    journal.native_states([remote_state()])
+    assert journal.next_effect()["effect_key"] == "route:IN_ROUTE"
 
 
 def test_existing_mappings_survive_upgrade_and_cleanup(journal):
@@ -139,61 +134,60 @@ def test_commit_failure_does_not_emit_success(qtbot, monkeypatch):
 def test_dispatcher_restarts_after_response_loss_with_same_key(journal, qtbot, monkeypatch):
     service = SyncJournalService(journal.path, journal.scope)
     gateway = MagicMock()
-    gateway.config.native = None
-    gateway.get_client.return_value._build_variables_to_add_delivery.return_value.model_dump.return_value = {"idempotencyKey": "123"}
+    gateway.config.native = True
+    gateway.generation = 1
+    gateway.get_client.return_value._build_variables_to_add_delivery.return_value.model_dump.return_value = {"input": {"idempotencyKey": "123"}}
     workers = []
 
-    def make_worker(gateway, order):
-        worker = MagicMock(signals=VelideWorkerSignals(), order=order)
+    def make_worker(gateway, operation, *args, **kwargs):
+        worker = MagicMock(signals=NativeSignals(), operation=operation, arguments=args)
         workers.append(worker)
         return worker
 
-    monkeypatch.setattr("services.durable_delivery_dispatcher.VelideWorker.for_add_delivery", make_worker)
+    monkeypatch.setattr("services.durable_delivery_dispatcher.NativeApiWorker", make_worker)
     monkeypatch.setattr("services.durable_delivery_dispatcher.QThreadPool.globalInstance", lambda: MagicMock())
     first = DurableDeliveryDispatcher(gateway, service)
     first.queue_add("123", Order.model_validate(payload()))
     first.start()
-    qtbot.waitUntil(lambda: len(workers) == 1)
+    workers[0].signals.result.emit({"id": "merchant"})
+    qtbot.waitUntil(lambda: len(workers) == 2)
     first.stop()  # no result received, SUBMITTING is durable
     second = DurableDeliveryDispatcher(gateway, service)
     outcomes = []
-    second.delivery_success.connect(lambda *args: outcomes.append(args))
+    second.import_accepted.connect(lambda *args: outcomes.append(args))
     second.start()
-    qtbot.waitUntil(lambda: len(workers) == 2)
-    assert workers[0].order.request_variables == workers[1].order.request_variables
-    workers[1].signals.delivery_added.emit({"id": "remote"})
-    qtbot.waitUntil(lambda: outcomes == [("123", "remote")])
+    workers[2].signals.result.emit({"id": "merchant"})
+    qtbot.waitUntil(lambda: len(workers) == 4)
+    assert workers[1].arguments == workers[3].arguments
+    workers[3].signals.result.emit({"jobId": "job"})
+    qtbot.waitUntil(lambda: outcomes == [("123", "job")])
+    workers[1].signals.result.emit({"jobId": "stale-job"})
     second.stop()
     service.pool.waitForDone()
+    assert service.journal.restore()[0]["job_id"] == "job"
     with SQLiteManager(journal.path) as db:
-        assert db.get_delivery_by_internal_id("123")[0] == "remote"
+        assert db.get_delivery_by_internal_id("123") is None
 
 
-def test_erp_retry_preserves_occurrence_time_and_waits_for_ack(journal, qtbot, monkeypatch):
+def test_erp_observation_retries_without_mutating_source(journal, qtbot, farmax_stack, remote_state):
     from connectors.farmax.farmax_delivery_updater import FarmaxDeliveryUpdater
     service = SyncJournalService(journal.path, journal.scope)
-    mappings = MagicMock()
-    mappings.get_deliveryman_by_external_id.return_value = None
-    updater = FarmaxDeliveryUpdater(MagicMock(), mappings, service, "America/Sao_Paulo")
-    order = Order.model_validate(payload())
-    order.effect_context = {"execution_id": "route", "occurred_at": "2026-11-11T15:30:00+00:00"}
+    repo, _ = farmax_stack
+    data = dict(payload(), source_context=repo.fetch_deliveries_by_id((123,), pending_only=False)[0].source_context)
+    journal.accept("123", data)
+    journal.native_states([remote_state("IN_TRANSIT")])
+    updater = FarmaxDeliveryUpdater(repo, MagicMock(), service, "America/Sao_Paulo")
     errors, successes = [], []
     updater.update_failed.connect(lambda *args: errors.append(args))
     updater.update_success.connect(lambda *args: successes.append(args))
     updater.start()
-    updater.mark_as_in_route(order, "courier")
     qtbot.waitUntil(lambda: bool(errors))
     assert not successes
     assert journal.next_effect() is None  # in backoff, not acknowledged
     with SQLiteManager(journal.path) as db:
+        db.add_mapping("courier", "5")
         db._get_conn().execute("UPDATE SyncEffects SET retry_at=0")
-    mappings.get_deliveryman_by_external_id.return_value = MagicMock(id="5")
-    workers = []
-    monkeypatch.setattr(updater._thread_pool, "start", workers.append)
     updater._pump()
-    qtbot.waitUntil(lambda: len(workers) == 1)
-    assert str(workers[0].kwargs["left_at"]) == "12:30:00"
-    workers[0].signals.success.emit(None)
     qtbot.waitUntil(lambda: successes == [("123", "IN_ROUTE")])
     updater.stop()
     service.pool.waitForDone()

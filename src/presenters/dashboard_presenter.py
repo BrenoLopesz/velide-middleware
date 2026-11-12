@@ -85,6 +85,7 @@ class DashboardPresenter(QObject):
 
     def stop(self):
         self._is_started = False
+        self._services.auth.invalidate_session()
         self._services.deliveries.stop_listening()
         self._services.websockets.stop_service()
         if hasattr(self._services.reconciliation, "stop_service"):

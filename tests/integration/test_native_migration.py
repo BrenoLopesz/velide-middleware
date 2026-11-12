@@ -27,10 +27,10 @@ def test_manifest_upgrade_preserves_mappings_payloads_and_is_idempotent(tmp_path
         assert db.get_all_mappings()[0][0].endswith("0004")
 
 
-def test_manifest_cannot_discard_unresolved_erp_effects(tmp_path):
+def test_manifest_cannot_discard_unresolved_erp_effects(tmp_path, remote_state):
     path = str(tmp_path / "local.db")
     journal = SyncJournal(path, "legacy|Farmax")
-    journal.enqueue_effect("123", "route:DONE", "DONE", {})
+    journal.native_states([remote_state()])
     with pytest.raises(ValueError, match="outstanding"):
         migrate(path, {"version": 1, "old_scope": "legacy|Farmax", "new_scope": "https://api.invalid/graphql|Farmax|00000000-0000-0000-0000-000000000001|00000000-0000-0000-0000-000000000002", "deliveries": [], "couriers": []})
 

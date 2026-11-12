@@ -203,9 +203,10 @@ def create_strategy(
             pool_pre_ping=True,
         )
         farmax_setup = FarmaxSetup(engine)
-        farmax_setup.initial_setup()
+        capabilities = farmax_setup.initial_setup()
         farmax_repository = FarmaxRepository(
-            engine, journal=tracking_persistence_service.journal.journal
+            engine, journal=tracking_persistence_service.journal.journal,
+            log_available=capabilities["log_available"],
         )
         return FarmaxStrategy(
             farmax_config=app_config.farmax,
@@ -223,6 +224,8 @@ def create_strategy(
 
 def build_services(app_config: Settings) -> Services:
     """Creates and wires together all core application services."""
+    if app_config.farmax and not app_config.api.source_timezone:
+        app_config.api.source_timezone = app_config.farmax.timezone
     velide_gateway = VelideGateway(
         app_config.api,
         app_config.target_system,
@@ -236,7 +239,8 @@ def build_services(app_config: Settings) -> Services:
     scope = app_config.api.velide_server + "|" + app_config.target_system.value
     if app_config.api.native:
         scope += "|" + app_config.api.native.merchant_id + "|" + app_config.api.native.connection_id
-    journal = SyncJournalService(db_path, scope)
+    from utils.source_identity import configured_source_identity
+    journal = SyncJournalService(db_path, scope, configured_source_identity(app_config))
     deliveries_service = DeliveriesService(
         gateway=velide_gateway,
         api_config=app_config.api,
@@ -266,6 +270,7 @@ def build_services(app_config: Settings) -> Services:
     if app_config.api.native:
         websockets_service.refresh_requested.connect(reconciliation_service.trigger_reconciliation)
         deliveries_service._dispatcher.import_accepted.connect(lambda *_: reconciliation_service.trigger_reconciliation())
+        deliveries_service._dispatcher.mutation_changed.connect(reconciliation_service.invalidate_pending_reads)
         if app_config.target_system == TargetSystem.CDS:
             deliveries_service.listening_started.connect(reconciliation_service.start_service)
             deliveries_service.listening_started.connect(websockets_service.start_service)

@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
+import pytz
 from httpx import TimeoutException
 
 from models.velide_delivery_models import (
@@ -36,6 +37,7 @@ class Velide:
             $neighbourhood: String,
             $reference: String,
             $offset: Int,
+            $timestamp: Date,
             $idempotencyKey: String
         ) {
             addDeliveryFromIntegration(
@@ -45,6 +47,7 @@ class Velide:
                 neighbourhood: $neighbourhood
                 reference: $reference
                 offset: $offset
+                timestamp: $timestamp
                 idempotencyKey: $idempotencyKey
             ) {
                 id
@@ -333,9 +336,14 @@ class Velide:
             GraphQLVariables: Validated variables for the mutation
         """
         if order.request_variables is not None:
+            if order.request_variables.get("timestamp") is None:
+                raise ValueError("Legacy frozen request has no absolute timestamp; reconcile its outcome before upgrading it")
             return AddDeliveryVariables.model_validate(order.request_variables)
-        # Calculate time offset
-        offset = self._calculate_offset(order.created_at)
+        created_at = order.created_at
+        if created_at.tzinfo is None:
+            if not self._api_config.source_timezone:
+                raise ValueError("Configure the source timezone before submitting a naive ERP timestamp")
+            created_at = pytz.timezone(self._api_config.source_timezone).localize(created_at, is_dst=None)
 
         # Build metadata
         metadata = MetadataInput(
@@ -348,7 +356,8 @@ class Velide:
         variables_dict = {
             "metadata": metadata.model_dump(exclude_none=True, by_alias=True),
             "address": order.address,
-            "offset": offset if offset > 60000 else 0,
+            "offset": 0,
+            "timestamp": round(created_at.timestamp() * 1000),
         }
 
         # Add optional fields
@@ -388,7 +397,9 @@ class Velide:
         if created_at_time.tzinfo is None:
             # .astimezone() without args assumes the datetime is in the
             # local system timezone and makes it aware.
-            created_at_time = created_at_time.astimezone()
+            if not self._api_config.source_timezone:
+                raise ValueError("Source timezone is required")
+            created_at_time = pytz.timezone(self._api_config.source_timezone).localize(created_at_time, is_dst=None)
 
         # 3. Calculate difference (Now both are Aware)
         time_difference = now_utc - created_at_time

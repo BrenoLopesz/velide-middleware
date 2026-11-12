@@ -47,6 +47,7 @@ class FarmaxMapper:
             # Metadata
             createdAt=delivery.created_at,
             internal_id=str(delivery.sale_id),
+            source_context=delivery.source_context,
         )
 
     @staticmethod

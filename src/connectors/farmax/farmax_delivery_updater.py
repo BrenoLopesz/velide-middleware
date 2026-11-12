@@ -1,8 +1,5 @@
 import json
 import logging
-from datetime import datetime
-
-import pytz
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool, QTimer
 
 from connectors.farmax.farmax_worker import FarmaxWorker
@@ -10,7 +7,7 @@ from connectors.farmax.identity import normalize_farmax_id
 
 
 class FarmaxDeliveryUpdater(QObject):
-    """At-least-once, ordered Farmax effects acknowledged after Firebird commit."""
+    """Recognize persisted delivery fields. Never write ERP business state."""
     update_success = pyqtSignal(str, str)
     update_failed = pyqtSignal(str, str, str)
 
@@ -22,19 +19,22 @@ class FarmaxDeliveryUpdater(QObject):
         self._thread_pool = QThreadPool.globalInstance()
         self._deliverymen_retriever = deliverymen_retriever
         self._journal = journal
-        self._timezone = pytz.timezone(source_timezone)
+        self._timezone = source_timezone
         self._busy = False
         self._running = False
+        self._generation = 0
         self._timer = QTimer(self)
         self._timer.setInterval(5000)
         self._timer.timeout.connect(self._pump)
 
     def start(self):
+        self._generation += 1
         self._running = True
         self._timer.start()
         self._pump()
 
     def stop(self):
+        self._generation += 1
         self._running = False
         self._timer.stop()
 
@@ -53,8 +53,7 @@ class FarmaxDeliveryUpdater(QObject):
         internal_id = normalize_farmax_id(order.internal_id)
         key = payload["execution_id"] + ":" + operation
         if not self._journal:
-            self._execute({"internal_id": internal_id, "operation": operation,
-                           "payload": json.dumps(payload), "sequence": None})
+            self._on_error(internal_id, operation, "Durable authoritative observation is required")
             return
         self._journal.submit("enqueue_effect", internal_id, key, operation, payload, payload,
                              success=lambda _: self._pump(),
@@ -73,43 +72,35 @@ class FarmaxDeliveryUpdater(QObject):
         self._execute(effect)
 
     def _execute(self, effect):
-        internal_id, operation = effect["internal_id"], effect["operation"]
+        ticket = self._generation
         try:
-            payload = json.loads(effect["payload"])
-            occurred = datetime.fromisoformat(payload["occurred_at"].replace("Z", "+00:00"))
-            if occurred.tzinfo is None:
-                raise ValueError("Horário remoto precisa incluir fuso horário")
-            local_time = occurred.astimezone(self._timezone).time()
-            if operation == "IN_ROUTE":
-                driver = self._deliverymen_retriever.get_deliveryman_by_external_id(payload["courier"])
-                driver_id = driver.id if driver else self._deliverymen_retriever.get_mapped_local_id(payload["courier"])
-                if not isinstance(driver_id, (str, int, float)):
-                    raise ValueError("Entregador não foi encontrado")
-                worker = FarmaxWorker.for_update_delivery_as_in_route(
-                    self._repository, sale_id=int(internal_id),
-                    driver_id=int(normalize_farmax_id(driver_id)), left_at=local_time, historical=True)
-            else:
-                worker = FarmaxWorker.for_update_delivery_as_done(
-                    self._repository, sale_id=int(internal_id), ended_at=local_time)
-            worker.signals.success.connect(lambda _: self._result(effect))
-            worker.signals.error.connect(lambda error: self._result(effect, error))
+            request = _ObservationRequest(self._journal.journal, self._repository, effect, self._timezone,
+                                          lambda: self._running and ticket == self._generation)
+            worker = FarmaxWorker(request, "observe")
+            worker.signals.success.connect(lambda match: self._result(effect, ticket, observation=match))
+            worker.signals.error.connect(lambda error: self._result(effect, ticket, error=error))
             self._thread_pool.start(worker)
         except Exception as error:
-            self._result(effect, str(error))
+            self._result(effect, ticket, error=str(error))
 
-    def _result(self, effect, error=None):
-        def acknowledged(_=None):
+    def _result(self, effect, ticket, error=None, observation=None):
+        if ticket != self._generation or not self._running or (error is None and observation is None):
             self._busy = False
+            return
+        def acknowledged(accepted):
+            self._busy = False
+            if not accepted or ticket != self._generation or not self._running:
+                return
             if error:
                 self._on_error(effect["internal_id"], effect["operation"], error)
             else:
-                self.update_success.emit(effect["internal_id"], effect["operation"])
+                self.update_success.emit(effect["internal_id"], "DONE" if observation == "COMPLETED_FIELDS_MATCH" else effect["operation"])
             self._pump()
         if self._journal and effect["sequence"] is not None:
-            self._journal.submit("effect_result", effect["sequence"], error,
+            self._journal.submit("effect_result", effect["sequence"], error, effect["generation"], observation,
                                  success=acknowledged, failure=self._storage_error)
         else:
-            acknowledged()
+            acknowledged(False)
 
     def _storage_error(self, error):
         self.stop()
@@ -119,3 +110,17 @@ class FarmaxDeliveryUpdater(QObject):
     def _on_error(self, internal_id, operation, error):
         self._logger.error("Farmax %s %s: %s", internal_id, operation, error)
         self.update_failed.emit(internal_id, operation, error)
+
+
+class _ObservationRequest:
+    def __init__(self, journal, repository, effect, timezone, current):
+        self.journal, self.repository, self.effect = journal, repository, effect
+        self.timezone, self.current = timezone, current
+
+    def observe(self):
+        if not self.current():
+            return None
+        effect = self.journal.prepare_effect(self.effect["sequence"], self.effect["generation"])
+        if not effect or not self.current():
+            return None
+        return self.repository.observe_delivery_effect(int(effect["internal_id"]), json.loads(effect["payload"]), self.timezone)

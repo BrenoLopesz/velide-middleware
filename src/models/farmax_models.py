@@ -21,13 +21,17 @@ class FarmaxDeliveryman(BaseLocalDeliveryman):
 
 class FarmaxSale(BaseModel):
     id: float = Field(alias="cd_venda")  # Firebird uses DOUBLE PRECISION
-    status: str = Field(alias="status")
+    status: Optional[str] = Field(default=None, alias="status")
+    sale_type: Optional[str] = Field(default=None, alias="tipo_venda")
+    evidence_complete: bool = True
+    removal_evidence: list = Field(default_factory=list)
     concluded: Optional[str] = Field(default=None, alias="concluido")
     delivery_exists: Optional[bool] = None
     delivery_deleted: bool = False
 
 
 class FarmaxDelivery(BaseModel):
+    source_context: Optional[dict] = None
     # We use aliases to map the database's uppercase names
     # to clean, Pythonic lowercase names.
     sale_id: float = Field(..., alias="cd_venda")

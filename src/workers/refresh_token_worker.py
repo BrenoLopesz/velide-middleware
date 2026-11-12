@@ -46,7 +46,7 @@ class RefreshTokenWorker(QRunnable):
     Results are communicated via a separate 'signals' object.
     """
 
-    def __init__(self, refresh_token: str, auth_config: AuthenticationConfig):
+    def __init__(self, refresh_token: str, auth_config: AuthenticationConfig, commit_token=None, is_current=None):
         """
         Initializes the runnable worker.
 
@@ -60,6 +60,8 @@ class RefreshTokenWorker(QRunnable):
 
         # Store dependencies
         self._refresh_token = refresh_token
+        self._commit_token = commit_token
+        self._is_current = is_current or (lambda: True)
         self.signals = RefreshTokenSignals()
 
         # Prepare request details
@@ -82,6 +84,8 @@ class RefreshTokenWorker(QRunnable):
         when the task is complete.
         """
         try:
+            if not self._is_current():
+                return
             response = requests.post(
                 self.url, headers=self.headers, data=self.data, verify=True, timeout=15
             )
@@ -111,7 +115,11 @@ class RefreshTokenWorker(QRunnable):
             access_token = jsonResponse["access_token"]
 
             # Store the new token bundle
-            store_token_at_file(jsonResponse)
+            if self._commit_token is not None:
+                if not self._commit_token(jsonResponse):
+                    return
+            else:
+                store_token_at_file(jsonResponse)
             self.signals.token.emit(access_token, jsonResponse["refresh_token"])
         except requests.HTTPError:
             self.signals.error.emit("Servidor recusou a renovação do token.")
