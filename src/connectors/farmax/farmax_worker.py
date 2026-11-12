@@ -26,6 +26,7 @@ class FarmaxWorkerSignals(QObject):
 
     finished = pyqtSignal()
     error = pyqtSignal(str)
+    failure = pyqtSignal(dict)
     success = pyqtSignal(object)
 
 
@@ -105,6 +106,7 @@ class FarmaxWorker(QRunnable):
             error_msg = f"Falha ao executar '{self.method_name}' no Farmax: {error}"
             self.logger.exception(error_msg)
             self.signals.error.emit(error_msg)
+            self.signals.failure.emit({"message": error_msg, "kind": getattr(error, "kind", "TRANSIENT")})
 
         finally:
             # 4. Always emit finished

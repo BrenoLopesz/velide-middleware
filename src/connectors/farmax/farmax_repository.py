@@ -13,11 +13,8 @@ from pydantic import ValidationError
 from sqlalchemy import text
 
 from connectors.farmax.identity import normalize_farmax_id
+from connectors.farmax.errors import FarmaxEvidenceError, FarmaxWaitingError, FarmaxMappingMissing
 from models.farmax_models import DeliveryLog, FarmaxDelivery, FarmaxDeliveryman, FarmaxSale
-
-
-class FarmaxEvidenceError(ValueError):
-    pass
 
 
 def _record(row):
@@ -107,6 +104,14 @@ class FarmaxRepository:
         raise FarmaxEvidenceError("Automatic Farmax completion is disabled: native return/cashier handoff is not qualified")
 
     def observe_delivery_effect(self, sale_id, payload, source_timezone):
+        try:
+            return self._observe_delivery_effect(sale_id, payload, source_timezone)
+        except FarmaxEvidenceError:
+            raise
+        except (ValueError, TypeError, KeyError) as error:
+            raise FarmaxEvidenceError("Invalid source provenance: " + str(error)) from error
+
+    def _observe_delivery_effect(self, sale_id, payload, source_timezone):
         """Compare a complete execution with existing source fields; execute no DML."""
         expected = payload.get("source_context")
         if not expected:
@@ -129,9 +134,9 @@ class FarmaxRepository:
             if context["sale_date"] != context["delivery_date"] or started.date().isoformat() != context["delivery_date"] or (completed and completed.date() != started.date()):
                 raise FarmaxEvidenceError("Cross-day or scheduled-delivery correlation requires review")
             if delivery["status"] == "S":
-                raise FarmaxEvidenceError("Awaiting Farmax-side departure; automatic dispatch is not qualified")
+                raise FarmaxWaitingError("Awaiting Farmax-side departure; automatic dispatch is not qualified")
             if not payload.get("courier_local_id"):
-                raise FarmaxEvidenceError("Verified historical courier mapping is missing")
+                raise FarmaxMappingMissing("Verified historical courier mapping is missing")
             if normalize_farmax_id(delivery["cd_entregador"]) != normalize_farmax_id(payload["courier_local_id"]):
                 raise FarmaxEvidenceError("Existing source courier conflicts with the retained execution mapping")
             if delivery["hora_saida"] is None or _clock(delivery["hora_saida"]) != started.time():
@@ -143,7 +148,7 @@ class FarmaxRepository:
             if delivery["status"] == "R" and delivery["hora_chegada"] is None:
                 if payload["operation"] == "IN_ROUTE":
                     return "DEPARTURE_FIELDS_MATCH"
-                raise FarmaxEvidenceError("Awaiting Farmax-side return; integration does not finalize it")
+                raise FarmaxWaitingError("Awaiting Farmax-side return; integration does not finalize it")
             raise FarmaxEvidenceError("Source lifecycle conflicts with the observed remote execution")
 
     def fetch_sales_statuses_by_id(self, cd_vendas: Tuple[float, ...]) -> List[FarmaxSale]:

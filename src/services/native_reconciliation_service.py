@@ -3,6 +3,7 @@ from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool, QTimer
 from config import TargetSystem
 from workers.native_api_worker import NativeApiWorker
 from models.velide_delivery_models import Order
+from models.delivery_table_model import sync_row_status
 
 
 class NativeReconciliationService(QObject):
@@ -26,6 +27,9 @@ class NativeReconciliationService(QObject):
         self._bootstrap_after = ""
         self._bootstrapped = False
         self._gateway_epoch = gateway.generation
+        self._lifecycle = 0
+        self._initialized = False
+        self._initializing = False
 
     def invalidate_pending_reads(self):
         self._generation += 1
@@ -38,22 +42,43 @@ class NativeReconciliationService(QObject):
             return
         self._running = True
         self._generation += 1
-        generation = self._generation
-        self.journal.submit("bootstrap_status", success=lambda state: self._bootstrap_loaded(state, generation), failure=self._error)
+        self._lifecycle += 1
+        self._initialized = self._initializing = False
+        # Periodic recovery is owned by the running service, not a read callback.
+        self.timer.start()
+        self._load_bootstrap()
 
-    def _bootstrap_loaded(self, state, generation):
-        if generation == self._generation and self._running:
+    def _load_bootstrap(self):
+        if self._initializing or not self._running:
+            return
+        self._initializing = True
+        lifecycle = self._lifecycle
+        self.journal.submit("bootstrap_status", success=lambda state: self._bootstrap_loaded(state, lifecycle),
+                            failure=lambda error: self._bootstrap_failed(error,lifecycle))
+
+    def _bootstrap_failed(self,error,lifecycle):
+        if lifecycle == self._lifecycle and self._running:
+            self._initializing = False
+            self._error(error)
+
+    def _bootstrap_loaded(self, state, lifecycle):
+        if lifecycle == self._lifecycle and self._running:
+            self._initializing = False
+            self._initialized = True
             self._bootstrap_after, self._bootstrapped = state["after"], state["complete"]
-            self.timer.start()
             self.trigger_reconciliation()
 
     def stop_service(self):
         self._running = False
+        self._lifecycle += 1
         self._generation += 1
         self._busy = False
         self.timer.stop()
 
     def trigger_reconciliation(self):
+        if self._running and not self._initialized:
+            self._load_bootstrap()
+            return
         if self.gateway.generation != self._gateway_epoch:
             self._gateway_epoch = self.gateway.generation
             self._generation += 1
@@ -129,7 +154,9 @@ class NativeReconciliationService(QObject):
                     continue  # SQLite rejected an older authoritative response.
                 state = dict(accepted, error=row["last_error"] or accepted.get("error"))
             if row and row["payload"] and ((row["submission"] != "TERMINAL" and row["cancellation"] != "ACKNOWLEDGED") or row["last_error"]):
-                self.order_restored.emit(Order.model_validate(json.loads(row["payload"])), row["external_id"])
+                order = Order.model_validate(json.loads(row["payload"]))
+                order.ui_status_hint = sync_row_status(row)
+                self.order_restored.emit(order, row["external_id"])
             self.order_state.emit(state)
 
     def _error(self, error):

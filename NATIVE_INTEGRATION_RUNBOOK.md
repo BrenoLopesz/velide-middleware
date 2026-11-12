@@ -81,6 +81,8 @@ The source equivalent is `python src/native_migration.py ...`. Preparation upgra
 
 Existing unbound work also requires a qualified `source_identity` configuration fingerprint and, for Farmax, `farmax_branch_id` during offline preparation. Calculate the fingerprint using `utils.source_identity.configured_source_identity` with the actual installation settings; it detects host/file/folder changes but does not prove database incarnation. Do not guess a branch or adopt data from an unverified source. A legacy order with attempts, a frozen request, a job, or cancellation uncertainty cannot be declared never submitted merely because its delivery mapping is missing.
 
+SQLite v4 also persists the original `source_timezone`. Qualify that timezone when adopting older naive timestamps; `--prepare` accepts it in the manifest. Payload comparison uses canonical UTC instants and retains raw local receipt evidence separately. The CDS identity key still uses the original file receipt representation, so upgrading/recovering does not regenerate order IDs. A conflicting immutable payload commits a review hold before reporting the error, preventing the old queued payload from being dispatched.
+
 Example local manifest:
 
 ```json

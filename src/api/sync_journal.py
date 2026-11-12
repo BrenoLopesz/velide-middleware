@@ -5,6 +5,8 @@ from contextlib import contextmanager
 
 from api.sqlite_manager import SQLiteManager, DeliveryStatus
 from connectors.farmax.identity import normalize_farmax_id
+from api.source_payload import canonical_payload, comparable_payload
+from connectors.farmax.errors import FarmaxEvidenceError, FarmaxMappingMissing
 
 
 def encode(value):
@@ -12,9 +14,10 @@ def encode(value):
 
 
 class SyncJournal:
-    def __init__(self, path, scope, source_identity=None):
+    def __init__(self, path, scope, source_identity=None, source_timezone=None):
         self.path, self.scope = path, scope
         self.source_identity = source_identity
+        self.source_timezone = source_timezone
 
     @contextmanager
     def _db(self):
@@ -33,6 +36,13 @@ class SyncJournal:
             bound = conn.execute("SELECT scope FROM SyncScope WHERE id=1").fetchone()[0]
             if bound != self.scope:
                 raise ValueError("Database belongs to another endpoint/source; apply a migration manifest first")
+            if self.source_timezone:
+                import pytz
+                pytz.timezone(self.source_timezone)
+                previous_zone = conn.execute("SELECT source_timezone FROM SyncScope WHERE id=1").fetchone()[0]
+                if previous_zone is not None and previous_zone != self.source_timezone:
+                    raise ValueError("Bound source timezone changed; qualify original receipts offline")
+                conn.execute("UPDATE SyncScope SET source_timezone=? WHERE id=1", (self.source_timezone,))
             if self.source_identity:
                 previous = conn.execute("SELECT source_identity FROM SyncScope WHERE id=1").fetchone()[0]
                 if previous != self.source_identity:
@@ -79,20 +89,35 @@ class SyncJournal:
             return self._rows(conn, "SELECT * FROM SyncOrders WHERE scope=?")
 
     def accept(self, internal_id, payload):
+        conflict = False
         with self._db() as db:
             conn = db._get_conn()
-            conn.execute("""INSERT OR IGNORE INTO SyncOrders(scope,internal_id,payload)
-                VALUES(?,?,?)""", (self.scope, internal_id, encode(payload)))
+            zone = conn.execute("SELECT source_timezone FROM SyncScope WHERE id=1").fetchone()[0]
+            raw_receipt = payload.get("createdAt")
+            normalized = canonical_payload(payload, zone)
+            conn.execute("""INSERT OR IGNORE INTO SyncOrders(scope,internal_id,payload,source_receipt_raw)
+                VALUES(?,?,?,?)""", (self.scope, internal_id, encode(normalized), raw_receipt))
             # Restoration may supply the missing source snapshot, but never change
             # an already accepted payload or reset a tombstone.
             conn.execute("""UPDATE SyncOrders SET payload=? WHERE scope=? AND internal_id=?
-                AND payload IS NULL""", (encode(payload), self.scope, internal_id))
+                AND payload IS NULL""", (encode(normalized), self.scope, internal_id))
             row = self._rows(conn, "SELECT * FROM SyncOrders WHERE scope=? AND internal_id=?", (internal_id,))[0]
-            before = {key: value for key, value in json.loads(row["payload"]).items() if value is not None}
-            after = {key: value for key, value in payload.items() if value is not None}
+            original = json.loads(row["payload"])
+            before = comparable_payload(original, zone)
+            after = comparable_payload(normalized, zone)
             if before != after:
-                raise ValueError("Source payload conflicts with an already accepted order")
-            return row
+                conflict = True
+                self._latch_source_review(conn, internal_id, {"kind": "SOURCE_CONFLICT",
+                    "message": "Source payload conflicts with an already accepted order", "observed_payload": normalized})
+            else:
+                conn.execute("UPDATE SyncOrders SET payload=?,source_receipt_raw=COALESCE(source_receipt_raw,?) WHERE scope=? AND internal_id=?",
+                    (encode(canonical_payload(original, zone)), raw_receipt, self.scope, internal_id))
+                row = self._rows(conn, "SELECT * FROM SyncOrders WHERE scope=? AND internal_id=?", (internal_id,))[0]
+        # The hold must commit before the caller receives the conflict. Raising
+        # inside the transaction would roll back the very protection required.
+        if conflict:
+            raise ValueError("Source payload conflicts with an already accepted order; durable review hold recorded")
+        return row
 
     def active_orders(self):
         with self._db() as db:
@@ -197,11 +222,11 @@ class SyncJournal:
                 source, request = state.get("source"), state.get("request")
                 payload = None
                 if source and request:
-                    payload = encode({"internal_id": internal, "customerName": source["customerName"],
+                    payload = encode(canonical_payload({"internal_id": internal, "customerName": source["customerName"],
                         "customerContact": source.get("customerContact"), "address": request["rawAddress"],
                         "address2": request.get("rawComplemento"), "reference": request.get("rawReference"),
                         "neighbourhood": request.get("rawNeighbourhood"), "createdAt": request["createdAtIntent"],
-                        "source_context": source.get("sourceContext")})
+                        "source_context": source.get("sourceContext")}))
                 conn.execute("INSERT OR IGNORE INTO SyncOrders(scope,internal_id,payload,submission) VALUES(?,?,?,'ACCEPTED')",
                              (self.scope, internal, payload))
                 row = self._rows(conn, "SELECT * FROM SyncOrders WHERE scope=? AND internal_id=?", (internal,))[0]
@@ -252,12 +277,15 @@ class SyncJournal:
     def source_review(self, internal, evidence):
         with self._db() as db:
             conn = db._get_conn()
-            row = conn.execute("SELECT source_review FROM SyncOrders WHERE scope=? AND internal_id=?", (self.scope, internal)).fetchone()
-            value = encode(evidence) if evidence else None
-            if row and row[0] != value:
-                self._invalidate_effects(conn, internal)
-                conn.execute("UPDATE SyncOrders SET source_review=?,last_error=? WHERE scope=? AND internal_id=?",
-                             (value, evidence.get("message") if evidence else None, self.scope, internal))
+            self._latch_source_review(conn, internal, evidence)
+
+    def _latch_source_review(self, conn, internal, evidence):
+        row = conn.execute("SELECT source_review FROM SyncOrders WHERE scope=? AND internal_id=?", (self.scope, internal)).fetchone()
+        value = encode(evidence) if evidence else None
+        if row and row[0] != value:
+            self._invalidate_effects(conn, internal)
+            conn.execute("UPDATE SyncOrders SET source_review=?,last_error=? WHERE scope=? AND internal_id=?",
+                         (value, evidence.get("message") if evidence else None, self.scope, internal))
 
     def _accept_effect_authority(self, conn, row, state, cancellation, restored_payload):
         internal, route = row["internal_id"], state.get("execution")
@@ -409,11 +437,13 @@ class SyncJournal:
                 payload["courier_local_id"] = normalize_farmax_id(mapping[0])
                 effect["payload"] = encode(payload)
                 conn.execute("UPDATE SyncEffects SET payload=? WHERE scope=? AND sequence=?", (effect["payload"], self.scope, sequence))
-            if not mapping or normalize_farmax_id(payload.get("courier_local_id")) != normalize_farmax_id(mapping[0]):
-                raise ValueError("Historical courier mapping is missing or changed; verify it before recognizing source fields")
+            if not mapping:
+                raise FarmaxMappingMissing("Historical courier mapping is missing; verify it before recognizing source fields")
+            if normalize_farmax_id(payload.get("courier_local_id")) != normalize_farmax_id(mapping[0]):
+                raise FarmaxEvidenceError("Historical courier mapping changed; review its provenance")
             return effect
 
-    def effect_result(self, sequence, error=None, generation=None, observation=None):
+    def effect_result(self, sequence, error=None, generation=None, observation=None, error_kind="TRANSIENT"):
         with self._db() as db:
             conn = db._get_conn()
             row = conn.execute("""SELECT E.internal_id,E.generation,O.effect_generation,O.cancellation,O.source_review,E.state,E.payload,E.operation,O.effect_authority
@@ -421,6 +451,10 @@ class SyncJournal:
                 WHERE E.scope=? AND E.sequence=?""", (self.scope, sequence)).fetchone()
             if not row or generation is None or row[1] != generation or row[2] != generation or row[3] != "NONE" or row[4] is not None or row[5] != "PENDING":
                 return False
+            if error is not None and error_kind == "SOURCE_CONFLICT":
+                self._latch_source_review(conn, row[0], {"kind": error_kind, "message": error, "effect_sequence": sequence})
+                conn.execute("UPDATE SyncEffects SET last_error=? WHERE scope=? AND sequence=?", (error, self.scope, sequence))
+                return True
             if error is None and observation not in ("COMPLETED_FIELDS_MATCH", "DEPARTURE_FIELDS_MATCH"):
                 raise ValueError("A persisted-field observation is required for acknowledgement")
             if error is None:
@@ -432,7 +466,7 @@ class SyncJournal:
                     return False
                 mapping = conn.execute("SELECT local_id FROM DeliverymenMapping WHERE velide_id=?", (payload.get("courier"),)).fetchone()
                 if not mapping or payload.get("courier_local_id") is None or normalize_farmax_id(mapping[0]) != normalize_farmax_id(payload["courier_local_id"]):
-                    conn.execute("UPDATE SyncEffects SET last_error=?,retry_at=? WHERE scope=? AND sequence=?", ("Courier mapping changed during observation", time.time()+30, self.scope, sequence))
+                    self._latch_source_review(conn,row[0],{"kind":"SOURCE_CONFLICT","message":"Courier mapping changed during observation"})
                     return False
             conn.execute("""UPDATE SyncEffects SET state=?,last_error=?, attempts=attempts+1,retry_at=?
                 WHERE scope=? AND sequence=?""",

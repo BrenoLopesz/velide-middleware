@@ -33,7 +33,7 @@ def test_f1_real_journal_pipeline_accepts_set_ids_and_resumes_polling(farmax_sta
     with engine.begin() as conn:
         conn.execute(text("UPDATE ENTREGAS SET STATUS='S',CD_ENTREGADOR=NULL,HORA_SAIDA=NULL"))
         conn.execute(text("INSERT INTO DELIVERYLOG VALUES(1,123,'INSERT',:now)"), {"now": datetime.now()})
-    journal = SyncJournalService(str(tmp_path / "intake.db"), "test")
+    journal = SyncJournalService(str(tmp_path / "intake.db"), "test", source_timezone="America/Sao_Paulo")
     known = set()
     def reserve(value):
         key = normalize_farmax_id(value)

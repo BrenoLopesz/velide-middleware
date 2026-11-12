@@ -34,6 +34,11 @@ def prepare_legacy(path, manifest):
     journal = SyncJournal(path, manifest["old_scope"])
     journal.restore()
     with journal._db() as db:
+        if manifest.get("source_timezone"):
+            previous = db._get_conn().execute("SELECT source_timezone FROM SyncScope WHERE id=1").fetchone()[0]
+            if previous is not None and previous != manifest["source_timezone"]:
+                raise ValueError("Bound source timezone cannot be silently replaced")
+            db._get_conn().execute("UPDATE SyncScope SET source_timezone=? WHERE id=1", (manifest["source_timezone"],))
         if manifest.get("source_identity"):
             previous = db._get_conn().execute("SELECT source_identity FROM SyncScope WHERE id=1").fetchone()[0]
             if previous is not None and previous != manifest["source_identity"]:
@@ -53,6 +58,9 @@ def prepare_legacy(path, manifest):
 
 
 def validate_source_fingerprint(manifest):
+    if manifest.get("source_timezone"):
+        import pytz
+        pytz.timezone(manifest["source_timezone"])
     if manifest.get("source_identity") is not None and (not isinstance(manifest["source_identity"], str) or len(manifest["source_identity"]) != 64
                                                        or any(c not in "0123456789abcdef" for c in manifest["source_identity"])):
         raise ValueError("Invalid qualified source configuration fingerprint")

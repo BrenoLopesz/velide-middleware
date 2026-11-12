@@ -55,7 +55,9 @@ def test_same_identity_never_changes_accepted_payload(journal):
     changed = dict(payload(), address="Changed")
     with pytest.raises(ValueError, match="conflicts"):
         journal.accept("123", changed)
-    assert json.loads(journal.restore()[0]["payload"]) == payload()
+    assert json.loads(journal.restore()[0]["payload"])["address"] == payload()["address"]
+    assert json.loads(journal.restore()[0]["payload"])["createdAt"] == "2026-11-11T15:00:00+00:00"
+    assert journal.restore()[0]["source_review"] is not None
 
 
 def test_source_progress_commits_with_unresolved_obligation(journal):

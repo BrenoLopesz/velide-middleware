@@ -35,6 +35,7 @@ class Order(BaseModel):
     request_variables: Optional[dict] = Field(None, exclude=True)
     effect_context: Optional[dict] = Field(None, exclude=True)
     source_context: Optional[dict] = None
+    display_timezone: Optional[str] = Field(None, exclude=True)
 
     @field_validator("customer_name", "address")
     @classmethod

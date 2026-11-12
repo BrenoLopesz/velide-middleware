@@ -36,6 +36,8 @@ class AuthService(QObject):
         self._refresh_token_worker = None
         self._current_refresh_token = None
         self._session_generation = 0
+        self._credential_revision = 0
+        self._bundle_access_token = None
         self._session_lock = RLock()
         self._interactive_flow = False
         self._refreshing = False
@@ -46,6 +48,8 @@ class AuthService(QObject):
     def invalidate_session(self):
         with self._session_lock:
             self._session_generation += 1
+            self._credential_revision += 1
+            self._bundle_access_token = None
             self._current_refresh_token = None
             self._refreshing = False
             self._refresh_timer.stop()
@@ -53,11 +57,13 @@ class AuthService(QObject):
                 self._authorization_flow_worker.stop()
             self._gateway.invalidate_session()
 
-    def _commit_token(self, generation, bundle):
+    def _commit_token(self, generation, bundle, credential_revision=None):
         with self._session_lock:
-            if generation != self._session_generation:
+            if generation != self._session_generation or (credential_revision is not None and credential_revision != self._credential_revision):
                 return False
             store_token_at_file(bundle)
+            # Fence already-running disk readers before queuing publication to Qt.
+            self._credential_revision += 1
             return True
 
     def request_device_code_screen(self):
@@ -70,11 +76,12 @@ class AuthService(QObject):
         self.invalidate_session()
         self._interactive_flow = True
         generation = self._session_generation
-        worker = AuthorizationFlowWorker(self._auth_config, commit_token=lambda bundle: self._commit_token(generation, bundle))
+        revision = self._credential_revision
+        worker = AuthorizationFlowWorker(self._auth_config, commit_token=lambda bundle: self._commit_token(generation, bundle, revision))
         self._authorization_flow_worker = worker
         worker.signals.device_code.connect(lambda code: self.device_code.emit(code) if generation == self._session_generation else None)
         # Connect to internal handler, not directly to signal
-        worker.signals.authenticated.connect(lambda access, refresh: self._on_access_token_received(access, refresh, generation))
+        worker.signals.authenticated.connect(lambda access, refresh: self._on_access_token_received(access, refresh, generation, revision+1))
         worker.signals.error.connect(lambda title, error: self.error.emit(title, error) if generation == self._session_generation else None)
         self._thread_pool.start(worker)
 
@@ -85,13 +92,14 @@ class AuthService(QObject):
             self.error.emit("Autenticação em andamento", "Aguardando a nova sessão")
             return
         generation = self._session_generation
+        revision = self._credential_revision
         worker = StoredTokenRetrieverWorker()
         # If stored token is expired, try to refresh it immediately
-        worker.signals.expired.connect(lambda token: self._manual_refresh_token(token) if generation == self._session_generation else None)
-        worker.signals.token.connect(lambda access, refresh: self._on_access_token_received(access, refresh, generation))
+        worker.signals.expired.connect(lambda token: self._manual_refresh_token(token) if generation == self._session_generation and revision == self._credential_revision else None)
+        worker.signals.token.connect(lambda access, refresh: self._on_access_token_received(access, refresh, generation, revision))
         # The AsyncTokenProvider is listening to this!
         worker.signals.error.connect(
-            lambda msg: self.error.emit("Erro ao buscar token armazenado", msg) if generation == self._session_generation else None
+            lambda msg: self.error.emit("Erro ao buscar token armazenado", msg) if generation == self._session_generation and revision == self._credential_revision else None
         )
         self._thread_pool.start(worker)
 
@@ -102,21 +110,24 @@ class AuthService(QObject):
         access_token: str, 
         refresh_token: Optional[str] = None,
         generation=None,
+        credential_revision=None,
     ):
         """
         THE CENTRAL HUB.
         Called whenever we get a valid token (from Login, Storage, or Refresh).
         """
-        if generation is not None and generation != self._session_generation:
-            return
-        self._interactive_flow = False
-        # 1. Update the Gateway immediately
-        # All services (Reconciliation, etc.) now see the new token instantly.
-        self._gateway.update_token(access_token)
-
-        # 2. Update our specific Refresh Token (if a new one came in)
-        if refresh_token:
-            self._current_refresh_token = refresh_token
+        with self._session_lock:
+            if generation is not None and generation != self._session_generation:
+                return
+            if credential_revision is not None and credential_revision != self._credential_revision:
+                return
+            self._interactive_flow = False
+            if access_token != self._bundle_access_token or (refresh_token and refresh_token != self._current_refresh_token):
+                self._credential_revision += 1
+            self._bundle_access_token = access_token
+            self._gateway.update_token(access_token)
+            if refresh_token:
+                self._current_refresh_token = refresh_token
 
         # 3. Schedule the NEXT refresh automatically
         self._schedule_next_refresh(access_token)
@@ -172,12 +183,13 @@ class AuthService(QObject):
             return
         self._refreshing = True
         generation = self._session_generation
+        revision = self._credential_revision
         worker = RefreshTokenWorker(refresh_token, self._auth_config,
-                                    commit_token=lambda bundle: self._commit_token(generation, bundle),
-                                    is_current=lambda: generation == self._session_generation)
+                                    commit_token=lambda bundle: self._commit_token(generation, bundle, revision),
+                                    is_current=lambda: generation == self._session_generation and revision == self._credential_revision)
         
         # CHANGED: Success loops back to _on_access_token_received
-        worker.signals.token.connect(lambda access, refresh: self._on_access_token_received(access, refresh, generation))
+        worker.signals.token.connect(lambda access, refresh: self._on_access_token_received(access, refresh, generation, revision+1))
         worker.signals.finished.connect(lambda: setattr(self, "_refreshing", False) if generation == self._session_generation else None)
         
         # TODO: 'error' signal is unused. Fix it.

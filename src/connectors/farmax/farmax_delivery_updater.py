@@ -78,12 +78,12 @@ class FarmaxDeliveryUpdater(QObject):
                                           lambda: self._running and ticket == self._generation)
             worker = FarmaxWorker(request, "observe")
             worker.signals.success.connect(lambda match: self._result(effect, ticket, observation=match))
-            worker.signals.error.connect(lambda error: self._result(effect, ticket, error=error))
+            worker.signals.failure.connect(lambda failure: self._result(effect, ticket, error=failure["message"], error_kind=failure["kind"]))
             self._thread_pool.start(worker)
         except Exception as error:
-            self._result(effect, ticket, error=str(error))
+            self._result(effect, ticket, error=str(error), error_kind=getattr(error,"kind","TRANSIENT"))
 
-    def _result(self, effect, ticket, error=None, observation=None):
+    def _result(self, effect, ticket, error=None, observation=None, error_kind="TRANSIENT"):
         if ticket != self._generation or not self._running or (error is None and observation is None):
             self._busy = False
             return
@@ -97,7 +97,7 @@ class FarmaxDeliveryUpdater(QObject):
                 self.update_success.emit(effect["internal_id"], "DONE" if observation == "COMPLETED_FIELDS_MATCH" else effect["operation"])
             self._pump()
         if self._journal and effect["sequence"] is not None:
-            self._journal.submit("effect_result", effect["sequence"], error, effect["generation"], observation,
+            self._journal.submit("effect_result", effect["sequence"], error, effect["generation"], observation, error_kind,
                                  success=acknowledged, failure=self._storage_error)
         else:
             acknowledged(False)

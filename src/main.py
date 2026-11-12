@@ -240,7 +240,8 @@ def build_services(app_config: Settings) -> Services:
     if app_config.api.native:
         scope += "|" + app_config.api.native.merchant_id + "|" + app_config.api.native.connection_id
     from utils.source_identity import configured_source_identity
-    journal = SyncJournalService(db_path, scope, configured_source_identity(app_config))
+    journal = SyncJournalService(db_path, scope, configured_source_identity(app_config),
+                                 app_config.api.native.timezone if app_config.api.native else app_config.api.source_timezone)
     deliveries_service = DeliveriesService(
         gateway=velide_gateway,
         api_config=app_config.api,

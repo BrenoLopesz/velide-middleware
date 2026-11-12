@@ -3,6 +3,7 @@ import json
 from PyQt5.QtCore import QObject, QTimer, QThreadPool, pyqtSignal
 from api.velide_gateway import freeze_gateway
 from models.velide_delivery_models import Order
+from models.delivery_table_model import sync_row_status
 from workers.native_api_worker import NativeApiWorker
 
 
@@ -85,8 +86,10 @@ class DurableDeliveryDispatcher(QObject):
         if not self._current(ticket):
             return
         for row in rows:
-            if row["payload"] and row["submission"] != "TERMINAL" and row["cancellation"] != "ACKNOWLEDGED":
-                self.order_restored.emit(Order.model_validate(json.loads(row["payload"])), row["external_id"])
+            if row["payload"] and ((row["submission"] != "TERMINAL" and row["cancellation"] != "ACKNOWLEDGED") or row.get("last_error")):
+                order = Order.model_validate(json.loads(row["payload"]))
+                order.ui_status_hint = sync_row_status(row)
+                self.order_restored.emit(order, row["external_id"])
         self._pump()
 
     def queue_add(self, internal_id, order):

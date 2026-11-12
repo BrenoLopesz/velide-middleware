@@ -100,6 +100,7 @@ class DeliveriesService(QObject):
         """
         # Sanitize ID before anything else
         self._sanitize_order_id(restored_order)
+        restored_order.display_timezone = self._api_config.native.timezone if self._api_config.native else self._api_config.source_timezone
 
         internal_id = restored_order.internal_id
         already_visible = self._repository.get_by_internal(internal_id) is not None
@@ -115,9 +116,9 @@ class DeliveriesService(QObject):
             self.delivery_acknowledged.emit(internal_id, restored_order)
 
         # Use actual status
-        order_status = getattr(
-            restored_order, "ui_status_hint", DeliveryRowStatus.ADDED
-        )
+        order_status = restored_order.ui_status_hint
+        if not isinstance(order_status, DeliveryRowStatus):
+            order_status = DeliveryRowStatus.ADDED if external_id else DeliveryRowStatus.ACKNOWLEDGE
 
         self.delivery_update.emit(internal_id, order_status)
 
@@ -130,6 +131,7 @@ class DeliveriesService(QObject):
         """
         # Sanitize ID before anything else
         self._sanitize_order_id(normalized_order)
+        normalized_order.display_timezone = self._api_config.native.timezone if self._api_config.native else self._api_config.source_timezone
 
         internal_id = normalized_order.internal_id
         already_visible = self._repository.get_by_internal(internal_id) is not None

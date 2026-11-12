@@ -2,6 +2,7 @@ import sqlite3
 import logging
 from typing import Optional, List, Tuple
 from enum import Enum
+from threading import RLock
 from api.sync_schema import migrate_sync_schema
 
 
@@ -44,6 +45,8 @@ class SQLiteManager:
     )
     """
 
+    _schema_lock = RLock()
+
     def __init__(self, db_path: str):
         """
         Initializes the database manager.
@@ -62,6 +65,11 @@ class SQLiteManager:
         self.conn: Optional[sqlite3.Connection] = None
 
     def __enter__(self) -> "SQLiteManager":
+        # Also serialize connection-level WAL setup for concurrent first opens.
+        with self._schema_lock:
+            return self._open()
+
+    def _open(self) -> "SQLiteManager":
         """
         Opens the database connection and creates the tables if they don't exist.
 
