@@ -109,7 +109,9 @@ The package is bound to installation/config/source identity and the retained-wor
 | Installer checks | Actual CMD/robocopy and small Inno compile passed |
 | Final x64 cx_Freeze | Main application and update installer built successfully |
 | Frozen migration CLI | `--help`, automatic original-installation adoption/native cutover/repeat, and inventory export passed (2 executable-level tests) |
-| Pending release checks | Full PR CI after commits, full signed installer release/upgrade, x86 and live pilot |
+| Frozen application startup | Disposable offline CDS installation reached automatic database adoption and remained running |
+| Companion server CI | [Full CI passed at `6dc4b2a`](https://github.com/BrenoLopesz/velide-server/actions/runs/43605095759) |
+| Pending release checks | Full signed installer release/upgrade, x86 and live pilot |
 
 Middleware suite command: set `QT_QPA_PLATFORM=offscreen`, `PYTHONDONTWRITEBYTECODE=1`, then run `python -m pytest -q -p no:cacheprovider tests`. `VELIDE_TEST_FIREBIRD=1` enables the disposable localhost Firebird fixture; `VELIDE_TEST_FIREBIRD_PASSWORD` selects its service password. No customer database is used by that fixture.
 

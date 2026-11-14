@@ -333,17 +333,15 @@ is needed. If normal work resumed after export, regenerate the inventory/package
 instead of bypassing the state-digest check. This pause is for planned cutover,
 not an ordinary application-update prerequisite.
 
-## Remaining integration dependencies
+## Integrated behavior and rollout inputs
 
-- Main/journal startup, branch-adoption, baseline and CDS filename hooks are now
-  wired and covered by composed tests. One independently reproduced main issue
-  remains: `build_services` must only infer a timezone from `farmax` when the
-  active target is Farmax. An unused Farmax configuration currently changes CDS
-  naive-time interpretation. The regression is active, not skipped or weakened.
-- Cached-auth context validation remains the main/auth owner's work. At review,
-  `AuthService.load_stored_token()` still constructed the cache reader without
-  passing the effective auth context; publication and refresh both need the
-  planned issuer/audience/client/scope fingerprint gate after native auth changes.
+- Main/journal startup, branch-adoption, baseline and CDS filename hooks are
+  wired and covered by composed tests. Farmax timezone inference now applies
+  only to the active Farmax connector; unused settings cannot reinterpret CDS receipts.
+- Cached access and refresh tokens are checked against effective auth settings.
+  Before cutover, the actual `{bundle_dir}/resources/token.txt` cache is bound
+  to the old issuer/audience/client/scope, including when config is external.
+  Ordinary updates preserve compatible original JWTs without requiring reauthentication.
 - Inventory export and server package production are implemented. The planned
   centralized conversion must still populate authoritative native identities and
   emit its courier map; missing migration evidence is reported rather than guessed.
@@ -358,11 +356,24 @@ not an ordinary application-update prerequisite.
 
 ## Verification performed
 
-### Independent wired-startup and installer check
+### Final restoration verification
 
-- Full Python 3.8/offscreen suite: **417 passed, 13 skipped, 1 failed**. The only
-  failure was `test_main_cds_keeps_naive_time_policy_when_unused_farmax_settings_exist`
-  in `tests/integration/test_upgrade_composed.py`, pointing to `main.build_services`.
+- Full Middleware suite: **478 passed**, including disposable Firebird 2.5.
+- Main application and update-installer x64 freezes completed successfully.
+- Frozen CLI checks passed for automatic adoption, native cutover, repeat invocation,
+  and inventory export. The built GUI started with offline disposable CDS settings,
+  created its upgraded database, and remained running.
+- Real CMD/robocopy first-hop checks confirm that Inno directly installs the corrected
+  batch before the old updater invokes it. Both independent reviewers approved their
+  scopes after all reported defects were corrected.
+- Companion server typecheck and 229 selected tests passed. Full server PR CI passed
+  at `6dc4b2a`: https://github.com/BrenoLopesz/velide-server/actions/runs/43605095759.
+- Signed release/installer execution, x86, and live-store rollout are not claimed.
+
+### Historical wired-startup and installer check
+
+- An intermediate run exposed `test_main_cds_keeps_naive_time_policy_when_unused_farmax_settings_exist`.
+  That defect was corrected and the regression passes in the final suite above.
 - Composed tests use production pre-boot setup (including the Windows 3.8 asyncio
   policy), automatic adoption, effective-settings installation, `build_services`,
   `setup_strategy`, the real CDS watcher/journal/dispatcher, and a real localhost
@@ -406,10 +417,8 @@ not an ordinary application-update prerequisite.
   Server `bun run typecheck` passed.
 - Full x64 cx_Freeze build using the existing `installer/src/cli/setup.py` and
   retained `qt_compat` completed for the preceding automatic-consumer change.
-- A fresh frozen build including the new inventory switch was blocked by
-  `No space left on device`; incomplete temporary build outputs were removed.
-  The new inventory CLI is verified through the Python 3.8 entry point, not a
-  newly completed frozen executable.
+- An intermediate build ran out of disk space. After space was made available,
+  both final freezes and the frozen inventory CLI checks completed successfully.
 - Frozen `migrate-native.exe --help`, original-schema automatic adoption,
   provisioned native cutover, and repeated invocation passed. The CLI test can
   target a built executable through `VELIDE_UPGRADE_EXE`.
