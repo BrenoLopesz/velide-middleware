@@ -165,10 +165,10 @@ class DeliverymenMappingPresenter(QObject):
                 )
 
         # 5. Send the correct ID-to-ID list to the database
+        self._services.deliverymen_retriever.invalidate_mapping_cache()
         self._services.sqlite.request_add_many_mappings(mappings_tuple_list)
 
         # Also update the running service memory!
-        self._services.deliverymen_retriever.update_mapping_cache(mappings_tuple_list)
 
     def on_mapping_success(self):
         deliverymen_mapping_workflow = (

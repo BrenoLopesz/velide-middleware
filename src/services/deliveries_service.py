@@ -3,18 +3,23 @@ from typing import Optional
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
 
 from config import ApiConfig, TargetSystem
-from models.delivery_table_model import DeliveryRowStatus
+from models.delivery_table_model import DeliveryRowStatus, sync_row_status
+from api.velide_gateway import freeze_gateway
 from repositories.deliveries_repository import DeliveryRepository
 from services.deliveries_dispatcher import DeliveryDispatcher
+from services.durable_delivery_dispatcher import DurableDeliveryDispatcher
 from services.strategies.connectable_strategy import IConnectableStrategy
 from models.velide_delivery_models import Order
 from api.velide_gateway import VelideGateway
+from connectors.farmax.identity import normalize_farmax_id
+from utils.log_messages import log_operation, log_sync_error
 
 
 class DeliveriesService(QObject):
     delivery_acknowledged = pyqtSignal(str, Order)
     delivery_update = pyqtSignal(str, DeliveryRowStatus)
     delivery_failed = pyqtSignal(str, str)  # Order ID, error message
+    listening_started = pyqtSignal()
 
     def __init__(
         self,
@@ -22,6 +27,7 @@ class DeliveriesService(QObject):
         api_config: ApiConfig,
         target_system: TargetSystem,
         delivery_repository: DeliveryRepository,
+        journal=None,
     ):
         super().__init__()
         self.logger = logging.getLogger(__name__)
@@ -29,7 +35,8 @@ class DeliveriesService(QObject):
 
         # 1. DEPENDENCY INJECTION / COMPOSITION
         self._repository = delivery_repository
-        self._dispatcher = DeliveryDispatcher(
+        self._journal = journal
+        self._dispatcher = DurableDeliveryDispatcher(gateway, journal) if journal else DeliveryDispatcher(
             gateway,
             QThreadPool.globalInstance()
         )
@@ -38,12 +45,18 @@ class DeliveriesService(QObject):
         self._api_config = api_config
         self._target_system = target_system
         self._active_strategy: Optional[IConnectableStrategy] = None
+        self._cancellation_intents = set()
 
         # 3. CONNECT INTERNAL DISPATCHER SIGNALS
         # This bridges the gap between the Worker -> Dispatcher -> Service
         self._dispatcher.delivery_success.connect(self._on_add_delivery_request_success)
         self._dispatcher.deletion_success.connect(self._on_deletion_request_success)
         self._dispatcher.task_failed.connect(self._on_delivery_request_failure)
+        if journal:
+            self._dispatcher.order_restored.connect(self._on_order_restored)
+            self._dispatcher.import_accepted.connect(self._on_import_accepted)
+            self._dispatcher.scope_ready.connect(lambda: self._active_strategy.on_scope_verified() if self._active_strategy else None)
+            self._dispatcher.scope_invalidated.connect(lambda: self._active_strategy.on_scope_invalidated() if self._active_strategy else None)
 
     def get_order(self, order_id: str) -> Optional[Order]:
         """Facade for the repository."""
@@ -64,6 +77,7 @@ class DeliveriesService(QObject):
         self._active_strategy.order_normalized.connect(self._on_order_normalized)
         self._active_strategy.order_cancelled.connect(self._on_internal_order_cancelled)
         self._active_strategy.order_restored.connect(self._on_order_restored)
+        self._active_strategy.synchronization_failed.connect(self._on_delivery_request_failure)
 
     def start_listening(self):
         if self._active_strategy is None:
@@ -71,7 +85,10 @@ class DeliveriesService(QObject):
                 "Nenhum sistema conectado! Entregas não serão processadas."
             )
             return
+        if self._journal:
+            self._dispatcher.start()
         self._active_strategy.start_listening()
+        self.listening_started.emit()
 
     # =========================================================================
     # CORE EVENT HANDLERS (Refactored Logic)
@@ -84,8 +101,10 @@ class DeliveriesService(QObject):
         """
         # Sanitize ID before anything else
         self._sanitize_order_id(restored_order)
+        restored_order.display_timezone = self._api_config.native.timezone if self._api_config.native else self._api_config.source_timezone
 
         internal_id = restored_order.internal_id
+        already_visible = self._repository.get_by_internal(internal_id) is not None
 
         # 1. Update Repository
         self._repository.add(restored_order)
@@ -94,12 +113,13 @@ class DeliveriesService(QObject):
             self._repository.link_ids(internal_id, external_id)
 
         # 2. Acknowledge to UI
-        self.delivery_acknowledged.emit(internal_id, restored_order)
+        if not already_visible:
+            self.delivery_acknowledged.emit(internal_id, restored_order)
 
         # Use actual status
-        order_status = getattr(
-            restored_order, "ui_status_hint", DeliveryRowStatus.ADDED
-        )
+        order_status = restored_order.ui_status_hint
+        if not isinstance(order_status, DeliveryRowStatus):
+            order_status = DeliveryRowStatus.ADDED if external_id else DeliveryRowStatus.ACKNOWLEDGE
 
         self.delivery_update.emit(internal_id, order_status)
 
@@ -112,16 +132,19 @@ class DeliveriesService(QObject):
         """
         # Sanitize ID before anything else
         self._sanitize_order_id(normalized_order)
+        normalized_order.display_timezone = self._api_config.native.timezone if self._api_config.native else self._api_config.source_timezone
 
         internal_id = normalized_order.internal_id
+        already_visible = self._repository.get_by_internal(internal_id) is not None
 
         # 1. Update Repository
         self._repository.add(normalized_order)
 
         # 2. Acknowledge to UI
-        self.delivery_acknowledged.emit(internal_id, normalized_order)
+        if not already_visible:
+            self.delivery_acknowledged.emit(internal_id, normalized_order)
 
-        if not self._gateway.is_ready():
+        if not self._journal and not self._gateway.is_ready():
             self.logger.error(
                 "Não é possível enviar entrega antes de " \
                 "efetuar autenticação! Aguardando..."
@@ -148,6 +171,16 @@ class DeliveriesService(QObject):
         Handles cancellation requests.
         Logic: Check Queue (Optimization) -> OR -> Send Delete Task.
         """
+        if self._target_system == TargetSystem.FARMAX:
+            internal_id = normalize_farmax_id(internal_id)
+        if self._journal:
+            if internal_id not in self._cancellation_intents:
+                self._cancellation_intents.add(internal_id)
+                log_operation(self.logger, "cancellation_requested", internal_id)
+            self._dispatcher.request_cancel(internal_id, external_id)
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.DELETING)
+            return
+        self._cancellation_intents.add(internal_id)
         self.logger.debug(
             "Solicitação de cancelamento recebida. "
             f"Interno: {internal_id}, Externo: {external_id}"
@@ -165,6 +198,7 @@ class DeliveriesService(QObject):
             self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
             # We won't care about this order anymore. We can cleanup from memory.
             self._repository.remove(internal_id)
+            self._acknowledge_cancellation(internal_id)
             return
 
         # 2. If not pending, we must delete via API if we have an External ID
@@ -177,8 +211,8 @@ class DeliveriesService(QObject):
                 f"Pedido {internal_id} cancelado localmente "
                 "(nenhum ID externo encontrado)."
             )
-            self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
-            self._repository.remove(internal_id)
+            # A missing mapping can mean a submission is still in flight.
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.DELETING)
 
     # =========================================================================
     # RECONCILIATION CALLBACKS
@@ -200,6 +234,86 @@ class DeliveriesService(QObject):
     def on_reconciliation_misses_delivery(self, internal_id: str):
         self.delivery_update.emit(internal_id, DeliveryRowStatus.MISSING)
 
+    def on_reconciliation_route_fact(self, internal_id, courier_id, facts):
+        order = self.get_order(internal_id)
+        if order:
+            order.effect_context = facts
+            self.on_delivery_route_started_in_velide(order, courier_id)
+
+    def on_native_state(self, state):
+        internal_id = state["externalOrderId"]
+        if state.get("_sync_review"):
+            self._on_delivery_request_failure(internal_id,state["_sync_review"].get("message") or "Source review is required")
+            return
+        if state.get("retainedOutcome") in ("COMPLETED", "CANCELLED"):
+            if self.get_order(internal_id):
+                status = DeliveryRowStatus.DELIVERED if state["retainedOutcome"] == "COMPLETED" else DeliveryRowStatus.CANCELLED
+                self.delivery_update.emit(internal_id, status)
+            return
+        if not state.get("error") and not self.get_order(internal_id) and (state.get("deliveryStatus") in ("CANCELLED", "COMPLETED") or state.get("cancellation") == "ACKNOWLEDGED"):
+            return
+        if not state["found"]:
+            self.on_reconciliation_misses_delivery(internal_id)
+            return
+        if state.get("deliveryId"):
+            self._on_add_delivery_request_success(internal_id, state["deliveryId"])
+        if state.get("deliveryStatus") == "CANCELLED" or state["deleted"] or (state["cancellation"] == "ACKNOWLEDGED" and not state.get("deliveryId")):
+            self._on_deletion_request_success(internal_id, state.get("deliveryId") or "")
+        elif state.get("error") or state.get("code") == "UNRESOLVED_HISTORY":
+            self._on_delivery_request_failure(internal_id, state.get("error") or state["code"])
+        elif state.get("deliveryStatus") == "IN_TRANSIT":
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.IN_PROGRESS)
+        elif state.get("deliveryStatus") == "COMPLETED":
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.DELIVERED)
+        elif not state.get("deliveryId"):
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.PROCESSING)
+
+    def stop_listening(self):
+        if self._journal:
+            self._dispatcher.stop()
+        if self._active_strategy:
+            self._active_strategy.stop_listening()
+        if hasattr(self._gateway, "invalidate_session"):
+            self._gateway.invalidate_session()
+
+    @property
+    def supports_native_retry(self):
+        return self._api_config.native is not None
+
+    @property
+    def supports_retry(self):
+        return self._journal is not None
+
+    def retry_native_order(self, internal_id):
+        if not self._journal:
+            return
+        from workers.native_api_worker import NativeApiWorker
+        ticket = self._dispatcher._ticket()
+        gateway = freeze_gateway(self._gateway)
+        def prepared(row):
+            if not self._dispatcher._current(ticket):
+                return
+            log_operation(self.logger, "retry_scheduled", internal_id)
+            if row["retry_operation"] != "JOB":
+                self._dispatcher._pump()
+                return
+            worker = NativeApiWorker(gateway, "retry_order", internal_id,
+                preflight=lambda: self._dispatcher._current(ticket) and self._journal.journal.retry_is_current(internal_id,row["job_id"],row["effect_generation"]))
+            self._dispatcher.mutation_changed.emit()
+            worker.signals.result.connect(lambda result: self._journal.submit("accepted_job", internal_id, result["jobId"],
+                success=lambda _: self._on_import_accepted(internal_id,result["jobId"]) if self._dispatcher._current(ticket) else None))
+            worker.signals.failed.connect(lambda error: self._on_delivery_request_failure(internal_id, error["message"]) if self._dispatcher._current(ticket) else None)
+            QThreadPool.globalInstance().start(worker)
+        self._journal.submit("retry_work", internal_id, success=prepared,
+                             failure=lambda error: self._on_delivery_request_failure(internal_id, error))
+
+    def _on_import_accepted(self, internal_id, job_id):
+        if not self._journal:
+            return
+        ticket = self._dispatcher._ticket()
+        self._journal.submit("get_order", internal_id,
+            success=lambda row: self.delivery_update.emit(internal_id,sync_row_status(row)) if row and self._dispatcher._current(ticket) else None)
+
     # =========================================================================
     # DISPATCHER CALLBACKS (Results from API)
     # =========================================================================
@@ -218,17 +332,37 @@ class DeliveriesService(QObject):
 
         # 3. Update UI
         self.delivery_update.emit(internal_id, DeliveryRowStatus.ADDED)
+        if internal_id in self._cancellation_intents:
+            self._dispatcher.queue_delete(internal_id, external_id)
+            self.delivery_update.emit(internal_id, DeliveryRowStatus.DELETING)
 
     def _on_deletion_request_success(self, internal_id: str, external_id: str):
         """Called when Dispatcher successfully DELETEs from Velide."""
-        self.logger.info(
-            f"Entrega {internal_id} ({external_id}) cancelada no Velide com sucesso."
-        )
+        if self._journal:
+            session = freeze_gateway(self._gateway)
+            self._journal.submit("get_order", internal_id,
+                success=lambda row: self._apply_deletion_outcome(internal_id,external_id,row) if session.is_current() else None)
+            return
+        self._apply_deletion_outcome(internal_id,external_id,None)
+
+    def _apply_deletion_outcome(self, internal_id, external_id, row):
+        if row and row.get("source_review"):
+            import json
+            self._on_delivery_request_failure(internal_id,json.loads(row["source_review"]).get("message") or "Source review is required")
+            return
+        log_operation(self.logger, "cancellation_confirmed", internal_id)
         self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
         self._repository.remove(internal_id)
+        self._acknowledge_cancellation(internal_id)
+
+    def _acknowledge_cancellation(self, internal_id):
+        self._cancellation_intents.discard(internal_id)
+        if self._active_strategy:
+            self._active_strategy.on_cancellation_acknowledged(internal_id)
 
     def _on_delivery_request_failure(self, internal_id: str, error_msg: str):
         """Called when Dispatcher encounters an error."""
+        log_sync_error(self.logger, error_msg, internal_id)
         self.delivery_failed.emit(internal_id, error_msg)
         self.delivery_update.emit(internal_id, DeliveryRowStatus.ERROR)
         # Original code removed it on failure. Depending on 
@@ -278,14 +412,6 @@ class DeliveriesService(QObject):
         self.delivery_update.emit(order.internal_id, DeliveryRowStatus.DELIVERED)
 
     def _sanitize_order_id(self, order: Order):
-        """
-        Force the internal_id to be a clean string integer (no decimals).
-        Fixes mismatch between Strategy (Float) and Persistence (Int/Str).
-        """
-        try:
-            # "650257.0" -> 650257 -> "650257"
-            clean_id = str(int(float(order.internal_id)))
-            order.internal_id = clean_id
-        except (ValueError, TypeError):
-            # Fallback if it's alphanumeric like "ORD-A1"
-            order.internal_id = str(order.internal_id)
+        """Numeric normalization belongs only to the Farmax connector."""
+        if self._target_system == TargetSystem.FARMAX:
+            order.internal_id = normalize_farmax_id(order.internal_id)

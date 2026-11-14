@@ -5,6 +5,37 @@ from utils.token_storage import read_token_from_file
 import logging
 
 
+def auth_context(config):
+    return {name: getattr(config, name) for name in ("domain", "client_id", "audience", "scope")}
+
+
+def stored_session_matches(bundle, config):
+    """Cache eligibility only. The API still verifies token signatures/ownership."""
+    if bundle.get("middleware_auth") is not None:
+        return bundle["middleware_auth"] == auth_context(config)
+    try:
+        token = bundle["access_token"]
+        if token.startswith("Bearer "):
+            token = token[7:]
+        claims = jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
+        issuer = config.domain if "://" in config.domain else "https://" + config.domain
+        audiences = claims.get("aud", [])
+        if isinstance(audiences, str):
+            audiences = [audiences]
+        scope = bundle.get("scope") or claims.get("scope")
+        if isinstance(scope, str):
+            requested = set(config.scope.split())
+            granted = set(scope.split())
+            if bundle.get("refresh_token"):
+                granted.add("offline_access")
+            if not requested.issubset(granted):
+                return False
+        return (claims.get("iss", "").rstrip("/") == issuer.rstrip("/")
+                and config.audience in audiences and claims.get("azp") == config.client_id)
+    except (jwt.InvalidTokenError, KeyError, TypeError, AttributeError):
+        return False
+
+
 class StoredTokenRetrieverSignals(QObject):
     """
     Defines the signals available from the StoredTokenRetrieverRunnable.
@@ -41,13 +72,14 @@ class StoredTokenRetrieverWorker(QRunnable):
     Results are communicated via a separate 'signals' object.
     """
 
-    def __init__(self):
+    def __init__(self, auth_config=None):
         """
         Initializes the runnable worker.
         """
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.signals = StoredTokenRetrieverSignals()
+        self.auth_config = auth_config
 
     def _is_token_expired(self, access_token: str) -> bool:
         """
@@ -90,6 +122,10 @@ class StoredTokenRetrieverWorker(QRunnable):
 
             access_token = token["access_token"]
             refresh_token = token["refresh_token"]
+
+            if self.auth_config is not None and not stored_session_matches(token, self.auth_config):
+                self.signals.error.emit("A conexão foi atualizada. Entre novamente para continuar usando o Velide.")
+                return
 
             if self._is_token_expired(access_token):
                 # Token is expired, emit signal with refresh token

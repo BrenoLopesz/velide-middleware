@@ -1,4 +1,5 @@
 from enum import Enum
+from copy import deepcopy
 import os
 from pathlib import Path
 from typing import Optional, Type, TypeVar
@@ -105,9 +106,32 @@ class FarmaxConfig(BaseModel):
     file: str = Field(..., description="Firebird database file.")
     user: str = Field(..., description="Firebird user.")
     password: str = Field(..., description="Firebird password.")
+    timezone: str = Field(default="America/Sao_Paulo", description="IANA timezone used by this Farmax database.")
+
+
+class NativeApiConfig(BaseModel):
+    merchant_id: str
+    connection_id: str
+    timezone: str
+    reconcile_interval_ms: int = Field(default=15000, ge=1000)
+
+    @field_validator("merchant_id", "connection_id")
+    @classmethod
+    def valid_uuid(cls, value):
+        import uuid
+        return str(uuid.UUID(value))
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value):
+        import pytz
+        pytz.timezone(value)
+        return value
 
 
 class ApiConfig(BaseModel):
+    native: Optional[NativeApiConfig] = None
+    source_timezone: Optional[str] = None
     velide_server: str = Field(description="API URL to make requests to.")
     use_neighbourhood: bool = Field(
         default=False, description="Enables sending neighbourhood details."
@@ -141,6 +165,12 @@ class ApiConfig(BaseModel):
     velide_websockets_server: str = Field(
         description="Websockets server to receive updates from."
     )
+
+    @model_validator(mode="after")
+    def native_endpoint(self):
+        if self.native and not self.velide_server.rstrip("/").endswith("/graphql"):
+            raise ValueError("Native API endpoint must end in /graphql")
+        return self
 
 
 class AuthenticationConfig(BaseModel):
@@ -201,6 +231,12 @@ class Settings(BaseModel):
         default=None, description="Used to listen for new files when using CDS."
     )
 
+    @model_validator(mode="after")
+    def matching_source_timezone(self):
+        if self.target_system == TargetSystem.FARMAX and self.api.native and self.farmax and self.farmax.timezone != self.api.native.timezone:
+            raise ValueError("Farmax and native merchant timezones must agree")
+        return self
+
     @classmethod
     def from_yaml(cls: Type[T], path: str) -> T:
         """
@@ -228,5 +264,41 @@ class Settings(BaseModel):
             return cls(**config_data)
 
 
-config_path = os.path.join(BUNDLE_DIR, "resources", "config.yml")
+def install_effective_settings(current, effective):
+    """Refresh pre-imported config references before constructing any services/UI."""
+    for name in Settings.model_fields:
+        setattr(current, name, deepcopy(getattr(effective, name)))
+    return current
+
+
+def native_upgrade_document(document, patch, sqlite_path):
+    """Apply only server-owned cutover settings to the original YAML document.
+
+    Do not round-trip through model_dump(): that drops unknown installation
+    settings and materializes defaults over the operator's original choices.
+    The caller publishes the returned document only after migrating a DB copy.
+    """
+    if not isinstance(patch, dict) or set(patch) - {"api", "auth"}:
+        raise ValueError("Cutover may change only native API/auth configuration")
+    api = patch.get("api", {})
+    allowed = {"native", "velide_server", "velide_websockets_server", "source_timezone"}
+    if not isinstance(api, dict) or set(api) - allowed:
+        raise ValueError("Cutover cannot override local API preferences or retries")
+    if not all(api.get(key) for key in ("native", "velide_server", "velide_websockets_server")):
+        raise ValueError("Authoritative native endpoints and merchant/connection settings are required")
+    result = deepcopy(document)
+    result["api"].update(deepcopy(api))
+    if "auth" in patch:
+        # An omitted auth section retains the installed issuer/client/audience.
+        # A changed one must be complete, never filled from example deployment values.
+        AuthenticationConfig.model_validate(patch["auth"])
+        result["auth"] = deepcopy(patch["auth"])
+    result["sqlite_path"] = str(sqlite_path)
+    Settings.model_validate(result)
+    return result
+
+
+config_path = os.environ.get(
+    "VELIDE_CONFIG_PATH", os.path.join(BUNDLE_DIR, "resources", "config.yml")
+)
 config = Settings.from_yaml(config_path)

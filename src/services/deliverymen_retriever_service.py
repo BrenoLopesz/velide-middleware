@@ -141,7 +141,14 @@ class DeliverymenRetrieverService(QObject):
         """Called by the Presenter to update memory after a succesful save."""
         # Convert list of tuples back to dict and merge/overwrite
         updated_dict = dict(new_mappings)
-        self._mapping_ids.update(updated_dict)
+        self._mapping_ids = updated_dict
+
+    def invalidate_mapping_cache(self):
+        self._mapping_ids = {}
+
+    def get_mapped_local_id(self, external_id):
+        """Retained identity can outlive the active-courier selection list."""
+        return self._mapping_ids.get(external_id)
 
     def _on_receive_velide_deliverymen(self, deliverymen: list) -> None:
         self._velide_deliverymen = deliverymen

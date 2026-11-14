@@ -4,9 +4,11 @@ from typing import Optional
 
 import jwt
 import time
+from threading import RLock
+from utils.token_storage import store_token_at_file
 
 from workers.authorization_flow_worker import AuthorizationFlowWorker
-from workers.stored_token_retriever_worker import StoredTokenRetrieverWorker
+from workers.stored_token_retriever_worker import StoredTokenRetrieverWorker, auth_context
 from workers.refresh_token_worker import RefreshTokenWorker
 
 from api.velide_gateway import VelideGateway
@@ -32,11 +34,37 @@ class AuthService(QObject):
         self._authorization_flow_worker = None
         self._stored_token_retriever_worker = None
         self._refresh_token_worker = None
-
-        # The Timer that will trigger the refresh automatically
+        self._current_refresh_token = None
+        self._session_generation = 0
+        self._credential_revision = 0
+        self._bundle_access_token = None
+        self._session_lock = RLock()
+        self._interactive_flow = False
+        self._refreshing = False
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.timeout.connect(self._on_refresh_timer_triggered)
+
+    def invalidate_session(self):
+        with self._session_lock:
+            self._session_generation += 1
+            self._credential_revision += 1
+            self._bundle_access_token = None
+            self._current_refresh_token = None
+            self._refreshing = False
+            self._refresh_timer.stop()
+            if self._authorization_flow_worker:
+                self._authorization_flow_worker.stop()
+            self._gateway.invalidate_session()
+
+    def _commit_token(self, generation, bundle, credential_revision=None):
+        with self._session_lock:
+            if generation != self._session_generation or (credential_revision is not None and credential_revision != self._credential_revision):
+                return False
+            store_token_at_file(dict(bundle, middleware_auth=auth_context(self._auth_config)))
+            # Fence already-running disk readers before queuing publication to Qt.
+            self._credential_revision += 1
+            return True
 
     def request_device_code_screen(self):
         """ Emits a signal to start the auth flow. """
@@ -45,23 +73,33 @@ class AuthService(QObject):
     def load_device_flow(self):
         """Creates and connects the authorization worker."""
         self.loading.emit()
-        worker = AuthorizationFlowWorker(self._auth_config)
-        worker.signals.device_code.connect(self.device_code)
+        self.invalidate_session()
+        self._interactive_flow = True
+        generation = self._session_generation
+        revision = self._credential_revision
+        worker = AuthorizationFlowWorker(self._auth_config, commit_token=lambda bundle: self._commit_token(generation, bundle, revision))
+        self._authorization_flow_worker = worker
+        worker.signals.device_code.connect(lambda code: self.device_code.emit(code) if generation == self._session_generation else None)
         # Connect to internal handler, not directly to signal
-        worker.signals.authenticated.connect(self._on_access_token_received)
-        worker.signals.error.connect(self.error)
+        worker.signals.authenticated.connect(lambda access, refresh: self._on_access_token_received(access, refresh, generation, revision+1))
+        worker.signals.error.connect(lambda title, error: self.error.emit(title, error) if generation == self._session_generation else None)
         self._thread_pool.start(worker)
 
     @pyqtSlot()
     def load_stored_token(self):
         """Creates and connects the token retriever worker."""
-        worker = StoredTokenRetrieverWorker()
+        if self._interactive_flow:
+            self.error.emit("Autenticação em andamento", "Aguardando a nova sessão")
+            return
+        generation = self._session_generation
+        revision = self._credential_revision
+        worker = StoredTokenRetrieverWorker(self._auth_config)
         # If stored token is expired, try to refresh it immediately
-        worker.signals.expired.connect(self._manual_refresh_token)
-        worker.signals.token.connect(self._on_access_token_received)
+        worker.signals.expired.connect(lambda token: self._manual_refresh_token(token) if generation == self._session_generation and revision == self._credential_revision else None)
+        worker.signals.token.connect(lambda access, refresh: self._on_access_token_received(access, refresh, generation, revision))
         # The AsyncTokenProvider is listening to this!
         worker.signals.error.connect(
-            lambda msg: self.error.emit("Erro ao buscar token armazenado", msg)
+            lambda msg: self.error.emit("Erro ao buscar token armazenado", msg) if generation == self._session_generation and revision == self._credential_revision else None
         )
         self._thread_pool.start(worker)
 
@@ -70,19 +108,26 @@ class AuthService(QObject):
     def _on_access_token_received(
         self, 
         access_token: str, 
-        refresh_token: Optional[str] = None
+        refresh_token: Optional[str] = None,
+        generation=None,
+        credential_revision=None,
     ):
         """
         THE CENTRAL HUB.
         Called whenever we get a valid token (from Login, Storage, or Refresh).
         """
-        # 1. Update the Gateway immediately
-        # All services (Reconciliation, etc.) now see the new token instantly.
-        self._gateway.update_token(access_token)
-
-        # 2. Update our specific Refresh Token (if a new one came in)
-        if refresh_token:
-            self._current_refresh_token = refresh_token
+        with self._session_lock:
+            if generation is not None and generation != self._session_generation:
+                return
+            if credential_revision is not None and credential_revision != self._credential_revision:
+                return
+            self._interactive_flow = False
+            if access_token != self._bundle_access_token or (refresh_token and refresh_token != self._current_refresh_token):
+                self._credential_revision += 1
+            self._bundle_access_token = access_token
+            self._gateway.update_token(access_token)
+            if refresh_token:
+                self._current_refresh_token = refresh_token
 
         # 3. Schedule the NEXT refresh automatically
         self._schedule_next_refresh(access_token)
@@ -134,14 +179,22 @@ class AuthService(QObject):
         Performs the refresh. 
         Previously named '_refresh_token', renamed to be more explicit.
         """
-        worker = RefreshTokenWorker(refresh_token, self._auth_config)
+        if self._interactive_flow or self._refreshing:
+            return
+        self._refreshing = True
+        generation = self._session_generation
+        revision = self._credential_revision
+        worker = RefreshTokenWorker(refresh_token, self._auth_config,
+                                    commit_token=lambda bundle: self._commit_token(generation, bundle, revision),
+                                    is_current=lambda: generation == self._session_generation and revision == self._credential_revision)
         
         # CHANGED: Success loops back to _on_access_token_received
-        worker.signals.token.connect(self._on_access_token_received)
+        worker.signals.token.connect(lambda access, refresh: self._on_access_token_received(access, refresh, generation, revision+1))
+        worker.signals.finished.connect(lambda: setattr(self, "_refreshing", False) if generation == self._session_generation else None)
         
         # TODO: 'error' signal is unused. Fix it.
         worker.signals.error.connect(
             # If refresh fails, we might need to logout.
-            lambda msg: self.error.emit("Sessão expirada. Faça login novamente.", msg)
+            lambda msg: self.error.emit("Sessão expirada. Faça login novamente.", msg) if generation == self._session_generation else None
         )
         self._thread_pool.start(worker)

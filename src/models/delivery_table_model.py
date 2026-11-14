@@ -1,6 +1,8 @@
 # models/delivery_table_model.py
 
 from enum import Enum
+import json
+import pytz
 from typing import Any, Dict, List, Optional
 from PyQt5.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PyQt5.QtGui import QColor, QBrush
@@ -23,6 +25,7 @@ class DeliveryRowStatus(Enum):
     UNDEFINED = "Indefinido"
     ACKNOWLEDGE = "Reconhecido"
     SENDING = "Enviando..."
+    PROCESSING = "Processando no Velide"
     ADDED = "Adicionado"
     IN_PROGRESS = "Em Rota"
     MISSING = "Ausente"
@@ -36,6 +39,7 @@ STATUS_COLORS: Dict[DeliveryRowStatus, Optional[QBrush]] = {
     DeliveryRowStatus.UNDEFINED: None,
     DeliveryRowStatus.ACKNOWLEDGE: None,
     DeliveryRowStatus.SENDING: QBrush(QColor(0, 152, 210)),
+    DeliveryRowStatus.PROCESSING: QBrush(QColor(0, 152, 210)),
     DeliveryRowStatus.ADDED: QBrush(QColor(74, 160, 53)),
     DeliveryRowStatus.IN_PROGRESS: QBrush(QColor(5, 129, 206)),
     DeliveryRowStatus.DELIVERED: QBrush(QColor(13, 84, 43)),
@@ -53,7 +57,7 @@ DB_TO_UI_MAP: Dict[DeliveryStatus, DeliveryRowStatus] = {
     DeliveryStatus.ADDED: DeliveryRowStatus.ADDED,
     DeliveryStatus.IN_PROGRESS: DeliveryRowStatus.IN_PROGRESS,
     # Terminal States (Mapped for completeness/live updates)
-    DeliveryStatus.DELIVERED: DeliveryRowStatus.ADDED,
+    DeliveryStatus.DELIVERED: DeliveryRowStatus.DELIVERED,
     DeliveryStatus.CANCELLED: DeliveryRowStatus.CANCELLED,
     DeliveryStatus.MISSING: DeliveryRowStatus.MISSING,
     DeliveryStatus.FAILED: DeliveryRowStatus.ERROR,
@@ -65,6 +69,23 @@ def map_db_status_to_ui(db_status: DeliveryStatus) -> DeliveryRowStatus:
     return DB_TO_UI_MAP.get(db_status, DeliveryRowStatus.UNDEFINED)
 
 
+def sync_row_status(row) -> DeliveryRowStatus:
+    if row.get("last_error") or row.get("source_review") or row.get("submission") in ("NEEDS_REVIEW","UNKNOWN"):
+        return DeliveryRowStatus.ERROR
+    if row.get("cancellation") == "REQUESTED":
+        return DeliveryRowStatus.DELETING
+    if row.get("cancellation") == "ACKNOWLEDGED":
+        return DeliveryRowStatus.CANCELLED
+    if row.get("submission") in ("QUEUED","SUBMITTING","RETRY"):
+        return DeliveryRowStatus.SENDING
+    if row.get("submission") == "ACCEPTED":
+        return DeliveryRowStatus.PROCESSING
+    remote = json.loads(row.get("remote_state") or "{}")
+    return {"IN_TRANSIT":DeliveryRowStatus.IN_PROGRESS,"COMPLETED":DeliveryRowStatus.DELIVERED,
+            "CANCELLED":DeliveryRowStatus.CANCELLED}.get(remote.get("deliveryStatus"),
+            DeliveryRowStatus.ADDED if row.get("external_id") else DeliveryRowStatus.ACKNOWLEDGE)
+
+
 class DeliveryRowModel(BaseModel):
     id: str = Field(..., description="Unique ID related to this delivery.")
     status: DeliveryRowStatus = Field(
@@ -73,7 +94,10 @@ class DeliveryRowModel(BaseModel):
     order: Order = Field(..., description="Original order details.")
 
     def get_formatted_created_at(self) -> str:
-        return self.order.created_at.strftime("%d/%m %H:%M:%S")
+        instant = self.order.created_at
+        if instant.tzinfo is not None and self.order.display_timezone:
+            instant = instant.astimezone(pytz.timezone(self.order.display_timezone))
+        return instant.strftime("%d/%m %H:%M:%S")
 
 
 class DeliveryTableModel(QAbstractTableModel):
@@ -108,6 +132,8 @@ class DeliveryTableModel(QAbstractTableModel):
     def data(self, index, role=Qt.DisplayRole) -> Any:
         if not index.isValid():
             return None
+        if role == Qt.UserRole:
+            return self._data[index.row()].id
 
         if role == Qt.ForegroundRole:
             return self._font_data(index)

@@ -27,6 +27,7 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):  # type: ignore[mi
     order_normalized = pyqtSignal(Order)
     order_restored = pyqtSignal(Order, object)  # Order and external ID (optional)
     order_cancelled = pyqtSignal(str, object)  # Internal ID, (optional) external ID
+    synchronization_failed = pyqtSignal(str, str)
     # normalization_failed = pyqtSignal(dict, str) # raw_data, error_message
 
     @property
@@ -67,6 +68,16 @@ class IConnectableStrategy(QObject, ABC, metaclass=QABCMeta):  # type: ignore[mi
     def on_delivery_deleted_on_velide(self, order: Order):
         """Optional callback function called when a deleted 
         deliver is detected through Websockets."""
+        pass
+
+    def on_cancellation_acknowledged(self, internal_id: str):
+        """Called only after a queued-only or remotely confirmed cancellation."""
+        pass
+
+    def on_scope_verified(self):
+        pass
+
+    def on_scope_invalidated(self):
         pass
 
     def on_delivery_route_started_on_velide(

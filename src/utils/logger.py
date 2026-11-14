@@ -27,6 +27,17 @@ def setup_logging(log_handler: QLogHandler):
     # Get the root logger
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)  # Set the lowest level to capture everything
+    # Reconnecting/rebuilding a view must not multiply dashboard rows or file
+    # records. Leave handlers installed by the host or test harness alone.
+    for handler in list(logger.handlers):
+        if getattr(handler, "_velide_handler", False):
+            logger.removeHandler(handler)
+            if handler is not log_handler:
+                handler.close()
+
+    def attach(handler):
+        handler._velide_handler = True
+        logger.addHandler(handler)
 
     # Create formatters
     default_formatter = logging.Formatter(
@@ -43,10 +54,10 @@ def setup_logging(log_handler: QLogHandler):
     console_handler.setFormatter(
         default_formatter
     )  # Use the standard default formatter
-    logger.addHandler(console_handler)
+    attach(console_handler)
 
     log_handler.setLevel(logging.INFO)
-    logger.addHandler(log_handler)
+    attach(log_handler)
 
     # 2. Timed Rotating File Handler for general logs (INFO and above)
     # This will create a new log file every day at midnight.
@@ -59,7 +70,7 @@ def setup_logging(log_handler: QLogHandler):
     info_handler.setFormatter(
         app_log_formatter
     )  # Use the custom, level-based formatter
-    logger.addHandler(info_handler)
+    attach(info_handler)
 
     # 3. Timed Rotating File Handler for error logs (ERROR and above)
     # This also rotates daily and keeps 7 days of history.
@@ -69,6 +80,6 @@ def setup_logging(log_handler: QLogHandler):
     )
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(default_formatter)  # Use the standard default formatter
-    logger.addHandler(error_handler)
+    attach(error_handler)
 
     logging.debug("Setup do logging está completo.")

@@ -4,7 +4,7 @@ import httpx
 from PyQt5.QtCore import QObject, pyqtSignal, QRunnable
 from pydantic import ValidationError
 
-from api.velide_gateway import VelideGateway
+from api.velide_gateway import VelideGateway, freeze_gateway
 
 # Importing all necessary models and exceptions from both original files
 from models.velide_delivery_models import (
@@ -52,7 +52,7 @@ class VelideWorker(QRunnable):
         """
         super().__init__()
         self.signals = VelideWorkerSignals()
-        self._gateway = gateway
+        self._gateway = freeze_gateway(gateway)
         self._operation = operation  # 'add_delivery' or 'get_deliverymen'
         self._kwargs = kwargs  # Stores 'order' if required
         self.logger = logging.getLogger(__name__)
@@ -161,12 +161,12 @@ class VelideWorker(QRunnable):
 
         client = self._gateway.get_client()
         if not client:
-            self.logger.error(
+            raise RuntimeError(
                 "API do Velide não foi inicializada! Verifique as credenciais."
             )
-            return
-
         async with client:
+            if not self._gateway.is_ready():
+                raise RuntimeError("A sessão mudou antes do envio. Conecte novamente para continuar.")
             if self._operation == "add_delivery":
                 order = self._kwargs.get("order")
                 if not order:
@@ -176,7 +176,7 @@ class VelideWorker(QRunnable):
 
                 response = await client.add_delivery(order)
                 self.logger.info(
-                    f"Nova entrega adicionada: {response.location.properties.name}"
+                    f"Nova entrega adicionada: {response.id}"
                 )
                 self.signals.delivery_added.emit(response.model_dump())
 

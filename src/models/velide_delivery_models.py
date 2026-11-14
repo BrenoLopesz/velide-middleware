@@ -32,6 +32,10 @@ class Order(BaseModel):
         ..., description="Internal ERP ID used for tracking.", exclude=True
     )
     ui_status_hint: Optional[Any] = Field(None, exclude=True)
+    request_variables: Optional[dict] = Field(None, exclude=True)
+    effect_context: Optional[dict] = Field(None, exclude=True)
+    source_context: Optional[dict] = None
+    display_timezone: Optional[str] = Field(None, exclude=True)
 
     @field_validator("customer_name", "address")
     @classmethod
@@ -55,6 +59,7 @@ class AddDeliveryVariables(BaseModel):
     metadata: MetadataInput
     address: str = Field(..., min_length=1)
     offset: int = Field(0, ge=0, description="Offset in milliseconds")
+    timestamp: Optional[int] = None
 
     address2: Optional[str] = None
     neighbourhood: Optional[str] = None
@@ -122,6 +127,8 @@ class RouteResponse(BaseModel):
     """Route info nested inside deliveryman"""
 
     id: str
+    started_at: Optional[datetime] = Field(None, alias="startedAt")
+    ended_at: Optional[datetime] = Field(None, alias="endAt")
     deliveries: List[DeliveryResponse] = Field(default_factory=list)
 
 

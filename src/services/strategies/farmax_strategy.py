@@ -19,6 +19,7 @@ from services.strategies.connectable_strategy import ERPFeature, IConnectableStr
 from services.tracking_persistence_service import TrackingPersistenceService
 from api.sqlite_manager import DeliveryStatus
 from services.velide_websockets_service import VelideWebsocketsService
+from utils.log_messages import log_operation, log_sync_error
 
 
 class FarmaxStrategy(IConnectableStrategy):
@@ -47,6 +48,8 @@ class FarmaxStrategy(IConnectableStrategy):
         self._reconciliation = reconciliation_service
         self._deliverymen_retriever = deliverymen_retriever
         self._thread_pool = None  # Initialized by globalInstance usually, or in workers
+        self._listening = False
+        self._scope_verified = False
 
         # --- Initialize Sub-Services ---
 
@@ -65,6 +68,8 @@ class FarmaxStrategy(IConnectableStrategy):
         self._updater = FarmaxDeliveryUpdater(
             repository=self._repository,
             deliverymen_retriever=self._deliverymen_retriever,
+            journal=self._persistence.journal,
+            source_timezone=farmax_config.timezone,
         )
 
         # --- Wire Signals ---
@@ -86,38 +91,54 @@ class FarmaxStrategy(IConnectableStrategy):
         self._ingestor.error_occurred.connect(self._on_service_error)
 
         # When Tracker finds cancellations -> Emit to System
-        self._status_tracker.order_cancelled.connect(self.order_cancelled.emit)
+        if self._persistence.journal:
+            self._status_tracker.cancellation_progress.connect(self._source_progress)
+        else:
+            self._status_tracker.order_cancelled.connect(self.order_cancelled.emit)
         self._status_tracker.error_occurred.connect(self._on_service_error)
+        self._status_tracker.review_required.connect(self._source_review)
+        # A normal-looking later snapshot cannot prove that a removed/recreated
+        # order is the same episode. Review holds are deliberately latched.
 
         # Listen for when the SQLite DB is fully loaded
         self._persistence.hydrated.connect(self._on_persistence_hydrated)
+        self._updater.update_failed.connect(
+            lambda internal_id, operation, error: self.synchronization_failed.emit(internal_id, error)
+        )
+        self._updater.update_success.connect(self._on_erp_acknowledged)
 
     def _on_persistence_hydrated(self):
         """
         Triggered when TrackingPersistenceService finishes loading from SQLite.
         We must fetch the details of these deliveries to show them in the UI.
         """
-        # Starts reconciliation job
-        self._reconciliation.start_service()
+        if not self._listening:
+            return
+        self._ingestor.start()
+        self._status_tracker.start()
+        if self._scope_verified:
+            self._updater.start()
 
         # Get IDs of everything currently being tracked/monitored
         tracked_ids = self._persistence.get_tracked_ids()
 
         if not tracked_ids:
+            self._start_remote_services()
             return
 
         self._logger.debug(f"Restaurando {len(tracked_ids)} entregas para a UI...")
 
         # 2. Reuse your existing Worker logic to fetch details from Farmax
         # We use the same worker as the Ingestor, but connect to a different slot
-        worker = FarmaxWorker.for_fetch_deliveries_by_id(
-            self._repository, cd_vendas=tuple(tracked_ids)
+        worker = FarmaxWorker(
+            self._repository, "fetch_deliveries_by_id", cd_vendas=tuple(tracked_ids), pending_only=False
         )
 
         worker.signals.success.connect(self._on_restoration_details_fetched)
         worker.signals.error.connect(
             lambda err: self._logger.error(f"Erro ao restaurar entregas: {err}")
         )
+        worker.signals.finished.connect(self._start_remote_services)
 
         # Use the strategy's thread pool (or global)
         QThreadPool.globalInstance().start(worker)
@@ -153,24 +174,48 @@ class FarmaxStrategy(IConnectableStrategy):
         """Starts the polling services."""
         self._logger.debug("Iniciando o rastreamento Farmax...")
 
+        self._listening = True
         # Ensure persistence is ready before starting workers
         self._persistence.initialize()
 
-        # We start the sub-services.
-        # Note: Ideally, these wait for persistence.hydrated if strictly necessary,
-        # but handled here for simplicity.
-        self._ingestor.start()
-        self._status_tracker.start()
+    def _start_remote_services(self):
+        if self._listening:
+            self._reconciliation.start_service()
+            self._websockets.start_service()
 
-        # Subscribes to Velide Websockets
-        self._websockets.start_service()
+    def on_scope_verified(self):
+        self._scope_verified = True
+        if self._listening:
+            self._updater.start()
+
+    def on_scope_invalidated(self):
+        self._scope_verified = False
+        self._updater.stop()
+
+    def _source_review(self, internal_id, message, evidence):
+        # Incomplete source polls are retried. Partial-item changes must never
+        # create a permanent hold on an otherwise active delivery.
+        self._logger.debug("Pedido %s: %s", internal_id, message)
+
+    def _source_progress(self, internal_id, progress):
+        def committed(result):
+            if not self._listening or not result.get("request_cancel"):
+                return
+            self.order_cancelled.emit(internal_id, result.get("external_id"))
+        self._persistence.journal.submit("record_farmax_progress", internal_id, progress,
+            success=committed, failure=lambda error: log_sync_error(self._logger, error, internal_id))
 
     def stop_listening(self):
         """Stops all polling services."""
         self._logger.info("Parando o rastreamento Farmax...")
+        self._listening = False
         self._ingestor.stop()
         self._status_tracker.stop()
-        # TODO: Stop reconciliation job
+        self._updater.stop()
+        self._reconciliation.timer.stop()
+        if hasattr(self._reconciliation, "stop_service"):
+            self._reconciliation.stop_service()
+        self._websockets.stop_service()
 
     def fetch_deliverymen(self, success: Callable, error: Callable) -> None:
         """
@@ -188,7 +233,9 @@ class FarmaxStrategy(IConnectableStrategy):
 
     def on_delivery_added(self, internal_id: str, external_id: str):
         """Callback: Velide API accepted the order."""
-        if not self._persistence.is_tracked(float(internal_id)):
+        if self._persistence.is_archived(internal_id):
+            return
+        if not self._persistence.journal and not self._persistence.is_tracked(int(internal_id)):
             self._logger.warning(
                 f"Pedido {internal_id} adicionado ao Velide, "
                 "mas não encontrado no rastreamento local."
@@ -214,21 +261,34 @@ class FarmaxStrategy(IConnectableStrategy):
             self._persistence.release_reservation(internal_id)
 
     def on_delivery_deleted_on_velide(self, order: Order):
-        self._persistence.mark_as_cancelled(order.internal_id)
+        if self._persistence.journal:
+            self._persistence.journal.submit("cancelled", order.internal_id,
+                success=lambda _: self._persistence.mark_as_cancelled(order.internal_id))
+        else:
+            self._persistence.mark_as_cancelled(order.internal_id)
         # TODO: Add a property on the order to allow checking if
         # the cancellation was requested internally or not.
         self._logger.info(f"Uma entrega ({order.internal_id}) foi deletada no Velide.")
 
+    def on_cancellation_acknowledged(self, internal_id: str):
+        self._persistence.mark_as_cancelled(internal_id)
+
     def on_delivery_route_started_on_velide(
         self, order: Order, deliveryman_external_id: str
     ):
-        self._persistence.update_status(order.internal_id, DeliveryStatus.IN_PROGRESS)
         self._updater.mark_as_in_route(order, deliveryman_external_id)
 
     def on_delivery_route_ended_on_velide(self, order):
-        self._persistence.mark_as_finished(order.internal_id)
         self._logger.info(f"Pedido ({order.internal_id}) foi entregue no Velide.")
         self._updater.mark_as_done(order)
+
+    def _on_erp_acknowledged(self, internal_id, operation):
+        if operation == "DONE":
+            self._persistence.mark_as_finished(internal_id)
+            log_operation(self._logger, "route_completed", internal_id)
+        elif operation == "IN_ROUTE":
+            self._persistence.update_status(internal_id, DeliveryStatus.IN_PROGRESS)
+            log_operation(self._logger, "route_started", internal_id)
 
     # --- Internal Slots ---
 

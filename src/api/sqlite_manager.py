@@ -2,6 +2,8 @@ import sqlite3
 import logging
 from typing import Optional, List, Tuple
 from enum import Enum
+from threading import RLock
+from api.sync_schema import migrate_sync_schema
 
 
 class DeliveryStatus(Enum):
@@ -43,6 +45,8 @@ class SQLiteManager:
     )
     """
 
+    _schema_lock = RLock()
+
     def __init__(self, db_path: str):
         """
         Initializes the database manager.
@@ -61,6 +65,11 @@ class SQLiteManager:
         self.conn: Optional[sqlite3.Connection] = None
 
     def __enter__(self) -> "SQLiteManager":
+        # Also serialize connection-level WAL setup for concurrent first opens.
+        with self._schema_lock:
+            return self._open()
+
+    def _open(self) -> "SQLiteManager":
         """
         Opens the database connection and creates the tables if they don't exist.
 
@@ -78,19 +87,22 @@ class SQLiteManager:
             # This allows concurrent readers and writers.
             self.conn.execute("PRAGMA journal_mode = WAL;")
 
-            # Optimize Synchronization
-            # 'NORMAL' is safe for WAL and much faster than default 'FULL'.
-            self.conn.execute("PRAGMA synchronous = NORMAL;")
+            # Acknowledged queue entries must survive a host power loss as well.
+            self.conn.execute("PRAGMA synchronous = FULL;")
 
             # Foreign Keys
             self.conn.execute("PRAGMA foreign_keys = ON;")
 
             self._create_tables()
+            migrate_sync_schema(self.conn, self.db_path)
             return self
-        except sqlite3.Error:
+        except Exception:
             self.logger.exception(
                 f"Erro ao conectar ao banco de dados em {self.db_path}."
             )
+            if self.conn:
+                self.conn.close()
+                self.conn = None
             raise
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -113,6 +125,7 @@ class SQLiteManager:
                     self.conn.rollback()
             except sqlite3.Error:
                 self.logger.exception("Erro durante saída.")
+                raise
             finally:
                 self.conn.close()
                 self.conn = None
@@ -258,6 +271,11 @@ class SQLiteManager:
                 if current_local_id != new_local_id:
                     to_insert.append((v_id, new_local_id))
 
+            final_mapping = dict(conn.execute("SELECT velide_id,local_id FROM DeliverymenMapping"))
+            final_mapping.update(mappings)
+            if len(set(incoming_ids)) != len(incoming_ids) or len(set(final_mapping.values())) != len(final_mapping):
+                raise ValueError("Courier mappings must be explicitly one-to-one")
+
             # 4. If nothing changed, return 0 immediately (Save DB write)
             if not to_insert:
                 self.logger.debug(
@@ -266,12 +284,11 @@ class SQLiteManager:
                 )
                 return 0
 
-            # 5. Execute INSERT OR REPLACE only on the real changes
-            # We use REPLACE to handle the 'Unique' constraint 
-            # on local_id automatically.
-            # (It will 'steal' the local_id from another user if necessary).
+            # Delete only explicitly edited keys, allowing an intentional swap
+            # without silently stealing another courier's local identity.
+            cursor.executemany("DELETE FROM DeliverymenMapping WHERE velide_id=?", [(entry[0],) for entry in to_insert])
             insert_query = (
-                "INSERT OR REPLACE INTO DeliverymenMapping (velide_id, local_id) "
+                "INSERT INTO DeliverymenMapping (velide_id, local_id) "
                 "VALUES (?, ?)"
             )
             
@@ -609,10 +626,10 @@ class SQLiteManager:
             return [(row[0], row[1], DeliveryStatus(row[2])) for row in rows]
         except sqlite3.Error:
             self.logger.exception("Erro ao buscar todos os mapeamentos de entrega.")
-            return []
+            raise
         except ValueError:
             self.logger.exception("Erro ao converter status do DB para Enum.")
-            return []
+            raise
 
     def get_active_deliveries(self) -> List[Tuple[str, str, DeliveryStatus]]:
         """
@@ -674,9 +691,7 @@ class SQLiteManager:
         # even if they are old, as they might require manual review.
         safe_to_delete_states = (
             DeliveryStatus.DELIVERED.value,
-            DeliveryStatus.FAILED.value,
             DeliveryStatus.CANCELLED.value,
-            DeliveryStatus.MISSING.value,
         )
 
         # 2. Prepare the query
@@ -688,6 +703,8 @@ class SQLiteManager:
             DELETE FROM DeliveryMapping 
             WHERE status IN ({placeholders})
             AND updated_at < date('now', ?)
+            AND NOT EXISTS (SELECT 1 FROM SyncOrders S
+                WHERE S.internal_id = DeliveryMapping.internal_delivery_id)
         """
 
         time_modifier = f"-{days_retention} days"

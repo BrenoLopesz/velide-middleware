@@ -1,7 +1,7 @@
-from datetime import datetime, timedelta, timezone
-import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
+import pytz
 from httpx import TimeoutException
 
 from models.velide_delivery_models import (
@@ -16,7 +16,6 @@ from models.velide_delivery_models import (
     GraphQLResponse,
     GraphQLResponseError,
     MetadataInput,
-    MetadataResponse,
     Order,
 )
 from config import ApiConfig, ReconciliationConfig, TargetSystem
@@ -36,6 +35,7 @@ class Velide:
             $neighbourhood: String,
             $reference: String,
             $offset: Int,
+            $timestamp: Date,
             $idempotencyKey: String
         ) {
             addDeliveryFromIntegration(
@@ -45,6 +45,7 @@ class Velide:
                 neighbourhood: $neighbourhood
                 reference: $reference
                 offset: $offset
+                timestamp: $timestamp
                 idempotencyKey: $idempotencyKey
             ) {
                 id
@@ -99,6 +100,8 @@ class Velide:
                 name
                 route {
                     id
+                    startedAt
+                    endAt
                     deliveries {
                         id
                         createdAt
@@ -210,6 +213,7 @@ class Velide:
     async def add_delivery(
         self,
         order: Order,
+        *, retry: bool = True,
     ) -> DeliveryResponse:
         """
         Add a delivery via GraphQL mutation with full type safety.
@@ -246,6 +250,10 @@ class Velide:
             # It slices args[1:] to drop 'self', so we prepend it.
             return await self._on_add_delivery_exception(exc, attempt, (self, order), {})
 
+        # The durable dispatcher owns retry scheduling/counts. Its worker still
+        # calls this deployed operation, but performs exactly one HTTP attempt.
+        if not retry:
+            return await _impl()
         return await execute_with_retry(
             _impl,
             operation_desc="enviar nova entrega",
@@ -255,8 +263,7 @@ class Velide:
             on_exception=_on_exc,
         )
 
-    @async_retry(operation_desc="deletar entrega", max_retries=3)
-    async def delete_delivery(self, delivery_id: str) -> bool:
+    async def delete_delivery(self, delivery_id: str, *, retry: bool = True) -> bool:
         """
         Deletes a delivery by ID.
 
@@ -266,15 +273,16 @@ class Velide:
         Returns:
             bool: True if deletion was successful.
         """
-        variables = DeleteDeliveryVariables(deliveryId=delivery_id)
-        payload = GraphQLPayload(
-            query=self.DELETE_DELIVERY_MUTATION, variables=variables
-        )
+        async def _impl():
+            variables = DeleteDeliveryVariables(deliveryId=delivery_id)
+            payload = GraphQLPayload(query=self.DELETE_DELIVERY_MUTATION, variables=variables)
+            response = await self._execute_request(payload)
+            return self._parse_response(response, data_key="deleteDelivery") is True
 
-        response = await self._execute_request(payload)
-
-        # Return a boolean for success.
-        return self._parse_response(response, data_key="deleteDelivery") is True
+        if not retry:
+            return await _impl()
+        # Preserve the no-journal client's existing three-attempt policy.
+        return await execute_with_retry(_impl, operation_desc="deletar entrega", max_retries=3)
 
     @async_retry(operation_desc="buscar entregadores", max_retries=3)
     async def get_deliverymen(self) -> List[DeliverymanResponse]:
@@ -330,8 +338,18 @@ class Velide:
         Returns:
             GraphQLVariables: Validated variables for the mutation
         """
-        # Calculate time offset
-        offset = self._calculate_offset(order.created_at)
+        if order.request_variables is not None:
+            if order.request_variables.get("timestamp") is None:
+                raise ValueError("Legacy frozen request has no absolute timestamp; reconcile its outcome before upgrading it")
+            return AddDeliveryVariables.model_validate(order.request_variables)
+        created_at = order.created_at
+        if created_at.tzinfo is None:
+            if self._api_config.source_timezone:
+                created_at = pytz.timezone(self._api_config.source_timezone).localize(created_at, is_dst=None)
+            else:
+                # Installed CDS configurations historically interpreted naive
+                # receipts in Windows local time. Freeze that instant once.
+                created_at = created_at.astimezone()
 
         # Build metadata
         metadata = MetadataInput(
@@ -344,7 +362,8 @@ class Velide:
         variables_dict = {
             "metadata": metadata.model_dump(exclude_none=True, by_alias=True),
             "address": order.address,
-            "offset": offset if offset > 60000 else 0,
+            "offset": 0,
+            "timestamp": round(created_at.timestamp() * 1000),
         }
 
         # Add optional fields
@@ -374,17 +393,11 @@ class Velide:
         """
         now_utc = datetime.now(timezone.utc)
 
-        # Fix Naive Datetime if necessary
-        # The Pydantic model uses datetime.combine(), which returns a naive datetime.
-        # RISKY: f the input datetime is naive (no timezone), .astimezone() assumes it
-        # belongs to the local system time of the machine running the code.
-        # TODO: Enforce timezone-aware datetimes in the Order model or explicitly
-        # attach the expected timezone (e.g., UTC) 
-        # rather than relying on system local time.
         if created_at_time.tzinfo is None:
-            # .astimezone() without args assumes the datetime is in the
-            # local system timezone and makes it aware.
-            created_at_time = created_at_time.astimezone()
+            if self._api_config.source_timezone:
+                created_at_time = pytz.timezone(self._api_config.source_timezone).localize(created_at_time, is_dst=None)
+            else:
+                created_at_time = created_at_time.astimezone()
 
         # 3. Calculate difference (Now both are Aware)
         time_difference = now_utc - created_at_time
@@ -414,7 +427,13 @@ class Velide:
             if dm.route:
                 for item in dm.route.deliveries:
                     # Store a tuple: (STATUS, DELIVERYMEN_EXTERNAL_ID)
-                    snapshot_map[item.id] = ("ROUTED", dm.id)
+                    if dm.route.started_at:
+                        snapshot_map[item.id] = ("ROUTED", dm.id, {
+                            "execution_id": dm.route.id,
+                            "occurred_at": dm.route.started_at.isoformat(),
+                        })
+                    else:
+                        snapshot_map[item.id] = ("ROUTED", dm.id)
 
         return snapshot_map
 

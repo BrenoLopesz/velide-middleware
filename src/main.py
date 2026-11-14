@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QThreadPool
 from sqlalchemy import create_engine
 
-from config import Settings, TargetSystem, config
+from config import Settings, TargetSystem, config, config_path, install_effective_settings
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_setup import FarmaxSetup
 from models.app_context_model import Services
@@ -187,7 +187,8 @@ def create_strategy(
                 "é obrigatório para o sistema CDS."
             )
 
-        return CdsStrategy(app_config.api, app_config.folder_to_watch)
+        return CdsStrategy(app_config.api, app_config.folder_to_watch, tracking_persistence_service.journal,
+                           baseline_path=getattr(tracking_persistence_service.journal, "cds_baseline_path", None))
 
     elif app_config.target_system == TargetSystem.FARMAX:
         if not app_config.farmax:
@@ -203,8 +204,11 @@ def create_strategy(
             pool_pre_ping=True,
         )
         farmax_setup = FarmaxSetup(engine)
-        farmax_setup.initial_setup()
-        farmax_repository = FarmaxRepository(engine)
+        capabilities = farmax_setup.initial_setup()
+        farmax_repository = FarmaxRepository(
+            engine, journal=tracking_persistence_service.journal.journal,
+            log_available=capabilities["log_available"],
+        )
         return FarmaxStrategy(
             farmax_config=app_config.farmax,
             # farmax_setup=farmax_setup,
@@ -219,8 +223,10 @@ def create_strategy(
     raise ValueError(f"Sistema alvo não suportado: {app_config.target_system}")
 
 
-def build_services(app_config: Settings) -> Services:
+def build_services(app_config: Settings, upgrade=None) -> Services:
     """Creates and wires together all core application services."""
+    if app_config.target_system == TargetSystem.FARMAX and app_config.farmax and not app_config.api.source_timezone:
+        app_config.api.source_timezone = app_config.farmax.timezone
     velide_gateway = VelideGateway(
         app_config.api,
         app_config.target_system,
@@ -229,16 +235,28 @@ def build_services(app_config: Settings) -> Services:
     auth_service = AuthService(app_config.auth, velide_gateway)
     delivery_repository = DeliveryRepository()
     velide_action_handler = VelideActionHandler(delivery_repository)
+    from services.sync_journal_service import SyncJournalService
+    db_path = os.path.join(BUNDLE_DIR, app_config.sqlite_path)
+    scope = app_config.api.velide_server + "|" + app_config.target_system.value
+    if app_config.api.native:
+        scope += "|" + app_config.api.native.merchant_id + "|" + app_config.api.native.connection_id
+    from utils.source_identity import configured_source_identity
+    journal = SyncJournalService(db_path, scope, configured_source_identity(app_config),
+                                 app_config.api.native.timezone if app_config.api.native else app_config.api.source_timezone)
+    if upgrade:
+        journal.cds_baseline_path = upgrade.cds_baseline_path
     deliveries_service = DeliveriesService(
         gateway=velide_gateway,
         api_config=app_config.api,
         target_system=app_config.target_system,
         delivery_repository=delivery_repository,
+        journal=journal,
     )
     sqlite_service = SQLiteService(os.path.join(BUNDLE_DIR, app_config.sqlite_path))
     tracking_persistance_service = TrackingPersistenceService(
         sqlite_service,
-        app_config.sqlite_days_retention
+        app_config.sqlite_days_retention,
+        journal=journal,
     )
     reconciliation_service = ReconciliationService(
         gateway=velide_gateway,
@@ -247,12 +265,26 @@ def build_services(app_config: Settings) -> Services:
         target_system=app_config.target_system,
         reconciliation_config=app_config.reconciliation
     )
+    if app_config.api.native:
+        from services.native_reconciliation_service import NativeReconciliationService
+        reconciliation_service = NativeReconciliationService(velide_gateway, journal, app_config.target_system)
+        reconciliation_service.order_restored.connect(deliveries_service._on_order_restored)
+        reconciliation_service.order_state.connect(deliveries_service.on_native_state)
     websockets_service = VelideWebsocketsService(app_config.api, auth_service)
+    if app_config.api.native:
+        websockets_service.refresh_requested.connect(reconciliation_service.trigger_reconciliation)
+        deliveries_service._dispatcher.import_accepted.connect(lambda *_: reconciliation_service.trigger_reconciliation())
+        deliveries_service._dispatcher.mutation_changed.connect(reconciliation_service.invalidate_pending_reads)
+        if app_config.target_system == TargetSystem.CDS:
+            deliveries_service.listening_started.connect(reconciliation_service.start_service)
+            deliveries_service.listening_started.connect(websockets_service.start_service)
     deliverymen_retriever_service = DeliverymenRetrieverService(
         velide_gateway,
         app_config.api, 
         app_config.target_system
     )
+    sqlite_service.add_many_mappings_result.connect(lambda _: sqlite_service.request_get_all_mappings())
+    sqlite_service.all_mappings_found.connect(deliverymen_retriever_service.update_mapping_cache)
 
     return Services(
         auth=auth_service,
@@ -306,8 +338,16 @@ def main():
     # Set up logging
     configure_logging(view)
 
+    # Keep the installed source/configuration while adopting old local storage.
+    # A centrally provisioned native package is applied atomically, when present.
+    from local_upgrade import upgrade_installation
+    upgrade = upgrade_installation(config_path, BUNDLE_DIR)
+    install_effective_settings(config, upgrade.settings)
+    for message in upgrade.instructions:
+        logging.getLogger(__name__).info(message)
+
     # Build services (Dependency Injection)
-    services = build_services(config)
+    services = build_services(config, upgrade)
 
     setup_tray_icon(app, view, services)
 

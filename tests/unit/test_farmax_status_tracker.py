@@ -185,7 +185,7 @@ def test_poll_cycle_resilience_to_exceptions(tracker, mock_persistence):
 
 
 def test_on_statuses_retrieved_handles_cancellation(tracker, mock_persistence):
-    """Status 'C' should trigger cancellation signal + persistence update."""
+    """An old status-only delta does not establish a complete cancelled sale."""
     tracker._is_running = True
     tracker.order_cancelled = MagicMock()
 
@@ -197,26 +197,26 @@ def test_on_statuses_retrieved_handles_cancellation(tracker, mock_persistence):
     tracker._on_statuses_retrieved([sale_cancelled])
 
     # Assert
-    mock_persistence.get_external_id.assert_called_with("123.0")
-    tracker.order_cancelled.emit.assert_called_with("123.0", "EXT_REF_001")
-    mock_persistence.mark_as_cancelled.assert_called_with(123.0)
+    mock_persistence.get_external_id.assert_not_called()
+    tracker.order_cancelled.emit.assert_not_called()
+    mock_persistence.mark_as_cancelled.assert_not_called()
 
 
 def test_on_statuses_retrieved_handles_delivery(tracker, mock_persistence):
-    """Status 'F' should update persistence (stop tracking) but not emit cancel."""
+    """Farmax completion must never synthesize a Velide route completion."""
     tracker._is_running = True
     tracker.order_cancelled = MagicMock()
 
     # Setup Data
-    sale_finished = FarmaxSale(cd_venda=456.0, status="F")
+    sale_finished = FarmaxSale(cd_venda=456.0, status="V", cd_filial=1, id_produto=100,
+                               ordem=1, evidence_complete=True, snapshot_item_count=1, delivery_exists=True)
 
     # Act
     tracker._on_statuses_retrieved([sale_finished])
 
     # Assert
     tracker.order_cancelled.emit.assert_not_called()
-    # EDIT: Do not mark as finished, so it keeps being tracked through Velide.
-    # mock_persistence.mark_as_finished.assert_called_with(456.0)
+    mock_persistence.mark_as_finished.assert_not_called()
 
 
 def test_on_statuses_retrieved_ignores_active_orders(tracker, mock_persistence):
@@ -266,9 +266,9 @@ def test_set_processing_finished(tracker):
 @pytest.mark.parametrize(
     "status_code, expected_result",
     [
-        ("C", True),
-        ("c", True),  # Case insensitive
-        ("D", True),  # Devolvido
+        ("C", False),
+        ("c", False),
+        ("D", False),  # Item return is not whole-delivery cancellation
         ("A", False),
         ("F", False),
         ("", False),
@@ -282,11 +282,11 @@ def test_is_cancelled_logic(tracker, status_code, expected_result):
 @pytest.mark.parametrize(
     "status_code, expected_result",
     [
-        ("F", True),
-        ("E", True),
-        ("ENTREGUE", True),
-        ("FINALIZADO", True),
-        ("finalizado", True),  # Case insensitive
+        ("F", False),
+        ("E", False),
+        ("ENTREGUE", False),
+        ("FINALIZADO", False),
+        ("finalizado", False),
         ("C", False),
         ("A", False),
         (None, False),
