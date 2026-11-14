@@ -164,10 +164,9 @@ class VelideWorker(QRunnable):
             raise RuntimeError(
                 "API do Velide não foi inicializada! Verifique as credenciais."
             )
-        if self._operation in ("add_delivery", "delete_delivery"):
-            raise RuntimeError("Legacy mutations are paused: the API does not expose an authoritative store binding")
-
         async with client:
+            if not self._gateway.is_ready():
+                raise RuntimeError("A sessão mudou antes do envio. Conecte novamente para continuar.")
             if self._operation == "add_delivery":
                 order = self._kwargs.get("order")
                 if not order:

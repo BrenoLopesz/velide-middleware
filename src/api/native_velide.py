@@ -33,7 +33,7 @@ class NativeVelide:
         self._client = None
 
     async def __aenter__(self):
-        self._client = httpx.AsyncClient(timeout=self.config.timeout, verify=True,
+        self._client = httpx.AsyncClient(timeout=self.config.timeout, verify=self.config.use_ssl,
             headers={"Authorization": "Bearer " + self._token, "X-Merchant-ID": self.native.merchant_id})
         return self
 
@@ -81,7 +81,7 @@ class NativeVelide:
         return NativeRequest(input={
             "merchantId": self.native.merchant_id, "idempotencyKey": key,
             "rawAddress": order.address, "rawComplemento": order.address2,
-            "rawNeighbourhood": order.neighbourhood, "rawReference": order.reference,
+            "rawNeighbourhood": order.neighbourhood if self.config.use_neighbourhood else None, "rawReference": order.reference,
             "createdAtIntent": created.isoformat(), "integration": {
                 "connectionId": self.native.connection_id, "externalOrderId": order.internal_id,
                 "customerName": order.customer_name, "customerContact": order.customer_contact,

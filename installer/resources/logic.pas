@@ -446,3 +446,15 @@ begin
     end;
   end;
 end;
+
+function InstalledConfigExists(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\resources\config.yml'));
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if IsUpgrade and not InstalledConfigExists() then
+    Result := 'Existing config.yml was not found in the update destination. The installation settings must be preserved.';
+end;

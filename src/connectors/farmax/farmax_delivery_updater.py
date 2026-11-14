@@ -1,13 +1,13 @@
-import json
 import logging
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool, QTimer
 
 from connectors.farmax.farmax_worker import FarmaxWorker
 from connectors.farmax.identity import normalize_farmax_id
+from utils.log_messages import log_sync_error
 
 
 class FarmaxDeliveryUpdater(QObject):
-    """Recognize persisted delivery fields. Never write ERP business state."""
+    """Apply durable Velide route facts to each related Farmax delivery."""
     update_success = pyqtSignal(str, str)
     update_failed = pyqtSignal(str, str, str)
 
@@ -49,7 +49,8 @@ class FarmaxDeliveryUpdater(QObject):
         if not payload.get("occurred_at") or not payload.get("execution_id"):
             self._on_error(order.internal_id, operation, "Horário ou execução remota ausente; reconciliação necessária.")
             return
-        payload["courier"] = courier
+        payload["courier"] = courier or payload.get("courier")
+        payload["source_context"] = order.source_context
         internal_id = normalize_farmax_id(order.internal_id)
         key = payload["execution_id"] + ":" + operation
         if not self._journal:
@@ -108,7 +109,7 @@ class FarmaxDeliveryUpdater(QObject):
         self._on_error("", "PERSISTENCE", error)
 
     def _on_error(self, internal_id, operation, error):
-        self._logger.error("Farmax %s %s: %s", internal_id, operation, error)
+        log_sync_error(self._logger, error, internal_id, context="Atualização do Farmax pendente")
         self.update_failed.emit(internal_id, operation, error)
 
 
@@ -120,7 +121,5 @@ class _ObservationRequest:
     def observe(self):
         if not self.current():
             return None
-        effect = self.journal.prepare_effect(self.effect["sequence"], self.effect["generation"])
-        if not effect or not self.current():
-            return None
-        return self.repository.observe_delivery_effect(int(effect["internal_id"]), json.loads(effect["payload"]), self.timezone)
+        return self.journal.apply_effect(self.effect["sequence"], self.effect["generation"],
+                                         self.repository, self.timezone, self.current)

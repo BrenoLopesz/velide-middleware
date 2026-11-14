@@ -1,4 +1,3 @@
-from datetime import time
 import pytest
 from sqlalchemy import text, event
 from connectors.farmax.cancellation import classify_cancellation, CancellationDecision
@@ -32,6 +31,7 @@ def test_existing_completion_matches_without_replaying_departure(farmax_stack):
     expected = effect(repo, "DONE")
     with engine.begin() as conn:
         conn.execute(text("UPDATE ENTREGAS SET STATUS='V', HORA_CHEGADA='13:00:00'"))
+        conn.execute(text("UPDATE VENDAS SET STATUS='V'"))
         conn.execute(text("UPDATE VENDEDORES SET STATUS='I' WHERE CD_VENDEDOR=5"))
     assert repo.observe_delivery_effect(123, expected, "America/Sao_Paulo") == "COMPLETED_FIELDS_MATCH"
     expected["operation"] = "IN_ROUTE"
@@ -39,8 +39,6 @@ def test_existing_completion_matches_without_replaying_departure(farmax_stack):
 
 
 @pytest.mark.parametrize("sql", [
-    "UPDATE VENDAS SET CONCLUIDO='N' WHERE ID_PRODUTO=101",
-    "UPDATE VENDAS SET STATUS='D' WHERE ID_PRODUTO=101",
     "UPDATE VENDAS SET STATUS=NULL WHERE ID_PRODUTO=101",
     "UPDATE VENDAS SET CD_FILIAL=2 WHERE ID_PRODUTO=101",
     "INSERT INTO ENTREGAS(CD_VENDA,CD_FILIAL) VALUES(123,2)",
@@ -61,18 +59,16 @@ def test_conflicting_source_never_gets_repaired(farmax_stack, sql):
     assert all(sql.lstrip().upper().startswith("SELECT") for sql in statements)
 
 
-def test_no_automatic_cashier_or_completion_writer(farmax_stack):
+def test_completion_preserves_checkout_times_and_cashier(farmax_stack):
     repo, engine = farmax_stack
-    with pytest.raises(ValueError, match="disabled"):
-        repo.update_delivery_as_done(123, time(13))
-    with pytest.raises(ValueError, match="disabled"):
-        repo.update_delivery_as_in_route(123,5,time(12),historical=True)
     expected = effect(repo, "DONE")
-    with pytest.raises(ValueError, match="Farmax-side return"):
+    with pytest.raises(ValueError, match="pending"):
         repo.observe_delivery_effect(123, expected, "America/Sao_Paulo")
+    assert repo.apply_delivery_effect(123, expected, "America/Sao_Paulo") == "COMPLETED_FIELDS_MATCH"
     with engine.connect() as conn:
-        assert conn.execute(text("SELECT STATUS,HORA_CHEGADA FROM ENTREGAS")).fetchone() == ("R",None)
+        assert conn.execute(text("SELECT STATUS,HORA_CHEGADA FROM ENTREGAS")).fetchone() == ("V","13:00:00")
         assert conn.execute(text("SELECT CONCLUIDO,HORAFINAL,CHEQUE FROM VENDAS WHERE ID_PRODUTO=101")).fetchone() == ("S","11:05:00","retained")
+        assert conn.execute(text("SELECT ID_OPERADORCAIXA,VALOR FROM CAIXA")).fetchone() == (90,30)
 
 
 def test_conflicting_item_address_does_not_pick_an_arbitrary_row(farmax_stack):
@@ -87,12 +83,12 @@ def test_null_status_keeps_complete_group_and_does_not_poison_other_sale(farmax_
     repo, engine = farmax_stack
     with engine.begin() as conn:
         conn.execute(text("UPDATE VENDAS SET STATUS=NULL WHERE ID_PRODUTO=101"))
-        conn.execute(text("INSERT INTO VENDAS(CD_VENDA,CD_FILIAL,STATUS,CONCLUIDO,TIPO_VENDA) VALUES(124,1,'C','S','V')"))
+        conn.execute(text("INSERT INTO VENDAS SELECT 124,CD_FILIAL,CD_CLIENTE,ID_PRODUTO,ORDEM,CD_PRODUTO,ID_VENDA,DATA_CAIXA,HORA,TEMPENDERECO,TEMPREFERENCIA,'C',CONCLUIDO,ENTREGA,TIPO_VENDA,TROCA,PRECO_TOTAL,HORAFINAL,CHEQUE FROM VENDAS WHERE ID_PRODUTO=102"))
         conn.execute(text("INSERT INTO DELIVERYLOG VALUES(1,124,'DELETE','2026-11-11 12:00:00')"))
     rows = repo.fetch_sales_statuses_by_id((123,124))
     assert len([row for row in rows if row.id == 123]) == 2
     assert classify_cancellation([row for row in rows if row.id == 123]) == CancellationDecision.UNRESOLVED
-    assert classify_cancellation([row for row in rows if row.id == 124]) == CancellationDecision.REMOVAL_CANDIDATE
+    assert classify_cancellation([row for row in rows if row.id == 124]) == CancellationDecision.CANCEL
 
 
 def test_courier_selection_uses_branch_and_activity(farmax_stack):

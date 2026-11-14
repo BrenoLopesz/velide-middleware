@@ -12,6 +12,7 @@ from services.strategies.connectable_strategy import IConnectableStrategy
 from models.velide_delivery_models import Order
 from api.velide_gateway import VelideGateway
 from connectors.farmax.identity import normalize_farmax_id
+from utils.log_messages import log_operation, log_sync_error
 
 
 class DeliveriesService(QObject):
@@ -173,6 +174,9 @@ class DeliveriesService(QObject):
         if self._target_system == TargetSystem.FARMAX:
             internal_id = normalize_farmax_id(internal_id)
         if self._journal:
+            if internal_id not in self._cancellation_intents:
+                self._cancellation_intents.add(internal_id)
+                log_operation(self.logger, "cancellation_requested", internal_id)
             self._dispatcher.request_cancel(internal_id, external_id)
             self.delivery_update.emit(internal_id, DeliveryRowStatus.DELETING)
             return
@@ -276,14 +280,22 @@ class DeliveriesService(QObject):
     def supports_native_retry(self):
         return self._api_config.native is not None
 
+    @property
+    def supports_retry(self):
+        return self._journal is not None
+
     def retry_native_order(self, internal_id):
-        if not self.supports_native_retry or not self._journal:
+        if not self._journal:
             return
         from workers.native_api_worker import NativeApiWorker
         ticket = self._dispatcher._ticket()
         gateway = freeze_gateway(self._gateway)
         def prepared(row):
-            if row["retry_operation"] != "JOB" or not self._dispatcher._current(ticket):
+            if not self._dispatcher._current(ticket):
+                return
+            log_operation(self.logger, "retry_scheduled", internal_id)
+            if row["retry_operation"] != "JOB":
+                self._dispatcher._pump()
                 return
             worker = NativeApiWorker(gateway, "retry_order", internal_id,
                 preflight=lambda: self._dispatcher._current(ticket) and self._journal.journal.retry_is_current(internal_id,row["job_id"],row["effect_generation"]))
@@ -338,9 +350,7 @@ class DeliveriesService(QObject):
             import json
             self._on_delivery_request_failure(internal_id,json.loads(row["source_review"]).get("message") or "Source review is required")
             return
-        self.logger.info(
-            f"Entrega {internal_id} ({external_id}) cancelada no Velide com sucesso."
-        )
+        log_operation(self.logger, "cancellation_confirmed", internal_id)
         self.delivery_update.emit(internal_id, DeliveryRowStatus.CANCELLED)
         self._repository.remove(internal_id)
         self._acknowledge_cancellation(internal_id)
@@ -352,7 +362,7 @@ class DeliveriesService(QObject):
 
     def _on_delivery_request_failure(self, internal_id: str, error_msg: str):
         """Called when Dispatcher encounters an error."""
-        self.logger.error("Sincronização pendente (%s): %s", internal_id, error_msg)
+        log_sync_error(self.logger, error_msg, internal_id)
         self.delivery_failed.emit(internal_id, error_msg)
         self.delivery_update.emit(internal_id, DeliveryRowStatus.ERROR)
         # Original code removed it on failure. Depending on 

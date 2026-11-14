@@ -132,10 +132,11 @@ def test_f7_reinstall_matches_existing_final_fields_without_departure_update(far
 
 @pytest.mark.parametrize("attempted", [True,False])
 def test_f8_only_never_attempted_work_may_be_requeued(journal, attempted):
+    journal.scope = "https://legacy.invalid/|Farmax"
     journal.accept("123", {"internal_id":"123"})
     if attempted:
         journal.claim()
-    manifest = {"version":1,"old_scope":"test","new_scope":"https://new.invalid/graphql|Farmax|00000000-0000-0000-0000-000000000001|00000000-0000-0000-0000-000000000002",
+    manifest = {"version":1,"old_scope":journal.scope,"new_scope":"https://new.invalid/graphql|Farmax|00000000-0000-0000-0000-000000000001|00000000-0000-0000-0000-000000000002",
                 "deliveries":[{"internal_id":"123","state":"QUEUED"}],"couriers":[]}
     with SQLiteManager(journal.path) as db:
         if attempted:
@@ -162,7 +163,7 @@ def test_f9_queued_workers_do_not_use_replacement_session_credentials(qtbot):
     assert len(errors) == 2  # Neither worker opens a client using store-B.
 
 
-def test_f9_unverifiable_legacy_store_binding_pauses_dispatch(journal, qtbot):
+def test_f9_installed_legacy_transport_restores_without_new_store_endpoint(journal, qtbot):
     config = ApiConfig(velide_server="https://api.invalid/",velide_websockets_server="wss://api.invalid/")
     gateway = VelideGateway(config,TargetSystem.FARMAX)
     gateway.update_token("store-A")
@@ -171,7 +172,8 @@ def test_f9_unverifiable_legacy_store_binding_pauses_dispatch(journal, qtbot):
     errors = []
     dispatcher.task_failed.connect(lambda *args: errors.append(args))
     dispatcher.start()
-    assert not dispatcher._running and "binding" in errors[0][1]
+    qtbot.waitUntil(lambda: dispatcher._authorized)
+    assert dispatcher._running and not errors
     dispatcher.stop()
     service.pool.waitForDone()
 

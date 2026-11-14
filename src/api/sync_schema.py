@@ -10,7 +10,7 @@ def migrate_sync_schema(conn, path):
     conn.execute("BEGIN IMMEDIATE")
     try:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version > 4:
+        if version > 5:
             raise RuntimeError("Synchronization database is newer than this application")
         if version == 0:
             if path != ":memory:" and conn.execute("SELECT 1 FROM DeliveryMapping UNION ALL SELECT 1 FROM DeliverymenMapping LIMIT 1").fetchone():
@@ -66,7 +66,17 @@ def migrate_sync_schema(conn, path):
         if version < 4:
             conn.execute("ALTER TABLE SyncScope ADD COLUMN source_timezone TEXT")
             conn.execute("ALTER TABLE SyncOrders ADD COLUMN source_receipt_raw TEXT")
-        conn.execute("PRAGMA user_version=4")
+        if version < 5:
+            conn.execute("ALTER TABLE SyncOrders ADD COLUMN add_attempts INTEGER NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE SyncOrders ADD COLUMN delete_attempts INTEGER NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE SyncOrders ADD COLUMN farmax_progress TEXT")
+            conn.execute("ALTER TABLE SyncOrders ADD COLUMN source_context TEXT")
+            conn.execute("UPDATE SyncOrders SET add_attempts=attempts WHERE external_id IS NULL")
+            conn.execute("""CREATE TABLE SyncFarmaxEvents (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL,
+                internal_id TEXT NOT NULL, evidence TEXT NOT NULL,
+                observed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+        conn.execute("PRAGMA user_version=5")
         conn.commit()
     except Exception:
         conn.rollback()

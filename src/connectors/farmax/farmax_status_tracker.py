@@ -8,7 +8,7 @@ from PyQt5.QtCore import pyqtSignal, QObject, QThreadPool, QTimer
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_worker import FarmaxWorker
 from connectors.farmax.identity import normalize_farmax_id
-from connectors.farmax.cancellation import classify_cancellation, CancellationDecision
+from connectors.farmax.cancellation import cancellation_progress, CancellationDecision
 
 # We must import the model to type-hint the callback correctly
 from models.farmax_models import FarmaxSale
@@ -32,7 +32,7 @@ class FarmaxStatusTracker(QObject):
     Unlike the Ingestor (which looks for NEW rows), this service:
     1. Retrieves a list of 'active' IDs from the Persistence Service.
     2. Queries Farmax to get the current status of those specific IDs.
-    3. Emits signals if an order has been Cancelled or Finalized remotely.
+    3. Reports cancellation progress; completion remains owned by Velide.
     """
 
     # Signals
@@ -42,6 +42,9 @@ class FarmaxStatusTracker(QObject):
     error_occurred = pyqtSignal(str)
     review_required = pyqtSignal(str, str, object)
     source_active = pyqtSignal(str)
+    # (canonical sale ID, JSON-safe complete snapshot/counts/decision).
+    # Consumers persist this before acknowledging any cancellation request.
+    cancellation_progress = pyqtSignal(str, object)
 
     def __init__(
         self,
@@ -60,6 +63,7 @@ class FarmaxStatusTracker(QObject):
         self._is_processing = False  # Semaphore to prevent overlapping poll cycles
         self._pending_workers = 0
         self._generation = 0
+        self._last_logged_progress = {}
 
         # Timer
         self._poll_timer = QTimer(self)
@@ -112,6 +116,9 @@ class FarmaxStatusTracker(QObject):
 
             # 1. Get IDs that the system thinks are "Active" (Not Delivered/Cancelled)
             active_ids = self._persistence.get_active_monitored_ids()
+            active_keys = {normalize_farmax_id(value) for value in active_ids}
+            self._last_logged_progress = {key: value for key, value in self._last_logged_progress.items()
+                                          if key in active_keys}
 
             if not active_ids:
                 self._logger.debug("Nenhum pedido ativo para monitorar.")
@@ -179,16 +186,16 @@ class FarmaxStatusTracker(QObject):
             for item in sales_updates:
                 by_sale[normalize_farmax_id(item.id)].append(item)
             for internal_id, items in by_sale.items():
-                decision = classify_cancellation(items)
-                if decision != CancellationDecision.ACTIVE:
-                    message = ("Source delivery removal candidate; verify identity and cancel in Velide if appropriate"
-                               if decision == CancellationDecision.REMOVAL_CANDIDATE else
-                               "Retained delivery or incomplete/exceptional sale evidence requires review")
-                    self.review_required.emit(internal_id, message, [item.model_dump(mode="json") for item in items])
-                    self._logger.warning(
-                        "Pedido %s com alteração parcial ou evidência incompleta; "
-                        "aguardando nova consulta.", internal_id
-                    )
+                progress = cancellation_progress(items)
+                self.cancellation_progress.emit(internal_id, progress)
+                self._log_progress_if_changed(internal_id, progress)
+                decision = CancellationDecision(progress["decision"])
+                if decision == CancellationDecision.CANCEL:
+                    # Only request cancellation. The durable consumer owns
+                    # retries/ACK and must not archive until remote success.
+                    self.order_cancelled.emit(internal_id, self._persistence.get_external_id(internal_id))
+                elif decision != CancellationDecision.ACTIVE:
+                    self.review_required.emit(internal_id, progress["reason"], progress["items"])
                 else:
                     self.source_active.emit(internal_id)
 
@@ -197,6 +204,26 @@ class FarmaxStatusTracker(QObject):
                 "Erro inesperado ao processar atualizações de status."
             )
             self.error_occurred.emit(str(e))
+
+    def _log_progress_if_changed(self, internal_id, progress):
+        # The journal logs only accepted/correlated changes. Legacy callers get
+        # an in-memory fallback without suppressing any poll evidence/signals.
+        if getattr(self._persistence, "journal", None) is not None:
+            return
+        summary = tuple(progress[field] for field in (
+            "decision", "reason", "total_items", "cancelled_items", "active_items",
+            "returned_items", "unknown_items", "percentage", "snapshot_complete"))
+        if self._last_logged_progress.get(internal_id) == summary:
+            return
+        self._last_logged_progress[internal_id] = summary
+        if progress["decision"] == CancellationDecision.CANCEL:
+            self._logger.info("Pedido %s: %s (%s/%s itens cancelados).",
+                              internal_id, progress["reason"], progress["cancelled_items"], progress["total_items"])
+        elif progress["decision"] != CancellationDecision.ACTIVE:
+            self._logger.warning("Pedido %s: %s Aguardando nova consulta.", internal_id, progress["reason"])
+        elif progress["cancelled_items"]:
+            self._logger.info("Pedido %s: %s/%s itens cancelados (%.1f%%); entrega permanece ativa.",
+                              internal_id, progress["cancelled_items"], progress["total_items"], progress["percentage"])
 
     def _on_worker_error(self, error_msg: str) -> None:
         """Handles DB query errors."""

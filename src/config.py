@@ -1,4 +1,5 @@
 from enum import Enum
+from copy import deepcopy
 import os
 from pathlib import Path
 from typing import Optional, Type, TypeVar
@@ -232,7 +233,7 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def matching_source_timezone(self):
-        if self.api.native and self.farmax and self.farmax.timezone != self.api.native.timezone:
+        if self.target_system == TargetSystem.FARMAX and self.api.native and self.farmax and self.farmax.timezone != self.api.native.timezone:
             raise ValueError("Farmax and native merchant timezones must agree")
         return self
 
@@ -261,6 +262,40 @@ class Settings(BaseModel):
 
             # Create an instance of the class (cls) using the loaded data
             return cls(**config_data)
+
+
+def install_effective_settings(current, effective):
+    """Refresh pre-imported config references before constructing any services/UI."""
+    for name in Settings.model_fields:
+        setattr(current, name, deepcopy(getattr(effective, name)))
+    return current
+
+
+def native_upgrade_document(document, patch, sqlite_path):
+    """Apply only server-owned cutover settings to the original YAML document.
+
+    Do not round-trip through model_dump(): that drops unknown installation
+    settings and materializes defaults over the operator's original choices.
+    The caller publishes the returned document only after migrating a DB copy.
+    """
+    if not isinstance(patch, dict) or set(patch) - {"api", "auth"}:
+        raise ValueError("Cutover may change only native API/auth configuration")
+    api = patch.get("api", {})
+    allowed = {"native", "velide_server", "velide_websockets_server", "source_timezone"}
+    if not isinstance(api, dict) or set(api) - allowed:
+        raise ValueError("Cutover cannot override local API preferences or retries")
+    if not all(api.get(key) for key in ("native", "velide_server", "velide_websockets_server")):
+        raise ValueError("Authoritative native endpoints and merchant/connection settings are required")
+    result = deepcopy(document)
+    result["api"].update(deepcopy(api))
+    if "auth" in patch:
+        # An omitted auth section retains the installed issuer/client/audience.
+        # A changed one must be complete, never filled from example deployment values.
+        AuthenticationConfig.model_validate(patch["auth"])
+        result["auth"] = deepcopy(patch["auth"])
+    result["sqlite_path"] = str(sqlite_path)
+    Settings.model_validate(result)
+    return result
 
 
 config_path = os.environ.get(

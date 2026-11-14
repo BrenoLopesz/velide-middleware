@@ -43,7 +43,7 @@ class DashboardPresenter(QObject):
         self._machine.logged_in_state.exited.connect(self.stop)
 
         self._connect_signals()
-        self._dashboard_view.deliveries_table.retry_enabled = services.deliveries.supports_native_retry
+        self._dashboard_view.deliveries_table.retry_enabled = services.deliveries.supports_retry
         self._dashboard_view.deliveries_table.retry_requested.connect(services.deliveries.retry_native_order)
 
     def start(self) -> None:
@@ -62,8 +62,6 @@ class DashboardPresenter(QObject):
             )
 
     def on_authenticate(self):
-        access_token = self._machine.logged_in_state.property("access_token")
-
         if self._main_view.tray_icon is not None:
             app = QApplication.instance()
             # Prevents the app from exiting after closing the UI now.

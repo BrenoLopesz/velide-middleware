@@ -17,3 +17,21 @@ def configured_source_identity(settings):
     else:
         return None
     return sha256(json.dumps(identity).encode("utf-8")).hexdigest()
+
+
+def configured_scope(settings):
+    """Keep the installed endpoint spelling: changing it is a scope change."""
+    scope = settings.api.velide_server + "|" + settings.target_system.value
+    if settings.api.native:
+        scope += "|" + settings.api.native.merchant_id + "|" + settings.api.native.connection_id
+    return scope
+
+
+def configured_source_timezone(settings):
+    if settings.api.native:
+        return settings.api.native.timezone
+    if settings.api.source_timezone:
+        return settings.api.source_timezone
+    if settings.target_system.value == "Farmax" and settings.farmax:
+        return settings.farmax.timezone
+    return None

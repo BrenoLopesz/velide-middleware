@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 from cx_Freeze import Executable, setup
 from qt_compat import install_qt_glob_compat
+from release_resources import resource_files
 
 install_qt_glob_compat()
 
@@ -58,9 +59,7 @@ build_exe_options = {
         "xml", 
         "pydoc"
     ],
-    "include_files": [
-        (str(RESOURCES_DIR), "resources"),
-    ],
+    "include_files": resource_files(RESOURCES_DIR),
     "build_exe": str(OUTPUT_DIR),
     
     # --- FIX FOR [WinError 123] ---

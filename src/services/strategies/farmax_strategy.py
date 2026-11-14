@@ -19,6 +19,7 @@ from services.strategies.connectable_strategy import ERPFeature, IConnectableStr
 from services.tracking_persistence_service import TrackingPersistenceService
 from api.sqlite_manager import DeliveryStatus
 from services.velide_websockets_service import VelideWebsocketsService
+from utils.log_messages import log_operation, log_sync_error
 
 
 class FarmaxStrategy(IConnectableStrategy):
@@ -90,7 +91,10 @@ class FarmaxStrategy(IConnectableStrategy):
         self._ingestor.error_occurred.connect(self._on_service_error)
 
         # When Tracker finds cancellations -> Emit to System
-        self._status_tracker.order_cancelled.connect(self.order_cancelled.emit)
+        if self._persistence.journal:
+            self._status_tracker.cancellation_progress.connect(self._source_progress)
+        else:
+            self._status_tracker.order_cancelled.connect(self.order_cancelled.emit)
         self._status_tracker.error_occurred.connect(self._on_service_error)
         self._status_tracker.review_required.connect(self._source_review)
         # A normal-looking later snapshot cannot prove that a removed/recreated
@@ -176,9 +180,6 @@ class FarmaxStrategy(IConnectableStrategy):
 
     def _start_remote_services(self):
         if self._listening:
-            if not self._websockets.api_config.native:
-                self._on_service_error("Legacy synchronization is paused until an authoritative store binding is available")
-                return
             self._reconciliation.start_service()
             self._websockets.start_service()
 
@@ -192,9 +193,17 @@ class FarmaxStrategy(IConnectableStrategy):
         self._updater.stop()
 
     def _source_review(self, internal_id, message, evidence):
-        if self._persistence.journal:
-            self._persistence.journal.submit("source_review", internal_id, {"message": message, "evidence": evidence})
-        self.synchronization_failed.emit(internal_id, message)
+        # Incomplete source polls are retried. Partial-item changes must never
+        # create a permanent hold on an otherwise active delivery.
+        self._logger.debug("Pedido %s: %s", internal_id, message)
+
+    def _source_progress(self, internal_id, progress):
+        def committed(result):
+            if not self._listening or not result.get("request_cancel"):
+                return
+            self.order_cancelled.emit(internal_id, result.get("external_id"))
+        self._persistence.journal.submit("record_farmax_progress", internal_id, progress,
+            success=committed, failure=lambda error: log_sync_error(self._logger, error, internal_id))
 
     def stop_listening(self):
         """Stops all polling services."""
@@ -276,8 +285,10 @@ class FarmaxStrategy(IConnectableStrategy):
     def _on_erp_acknowledged(self, internal_id, operation):
         if operation == "DONE":
             self._persistence.mark_as_finished(internal_id)
+            log_operation(self._logger, "route_completed", internal_id)
         elif operation == "IN_ROUTE":
             self._persistence.update_status(internal_id, DeliveryStatus.IN_PROGRESS)
+            log_operation(self._logger, "route_started", internal_id)
 
     # --- Internal Slots ---
 

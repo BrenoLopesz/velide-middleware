@@ -8,7 +8,7 @@ from threading import RLock
 from utils.token_storage import store_token_at_file
 
 from workers.authorization_flow_worker import AuthorizationFlowWorker
-from workers.stored_token_retriever_worker import StoredTokenRetrieverWorker
+from workers.stored_token_retriever_worker import StoredTokenRetrieverWorker, auth_context
 from workers.refresh_token_worker import RefreshTokenWorker
 
 from api.velide_gateway import VelideGateway
@@ -61,7 +61,7 @@ class AuthService(QObject):
         with self._session_lock:
             if generation != self._session_generation or (credential_revision is not None and credential_revision != self._credential_revision):
                 return False
-            store_token_at_file(bundle)
+            store_token_at_file(dict(bundle, middleware_auth=auth_context(self._auth_config)))
             # Fence already-running disk readers before queuing publication to Qt.
             self._credential_revision += 1
             return True
@@ -93,7 +93,7 @@ class AuthService(QObject):
             return
         generation = self._session_generation
         revision = self._credential_revision
-        worker = StoredTokenRetrieverWorker()
+        worker = StoredTokenRetrieverWorker(self._auth_config)
         # If stored token is expired, try to refresh it immediately
         worker.signals.expired.connect(lambda token: self._manual_refresh_token(token) if generation == self._session_generation and revision == self._credential_revision else None)
         worker.signals.token.connect(lambda access, refresh: self._on_access_token_received(access, refresh, generation, revision))

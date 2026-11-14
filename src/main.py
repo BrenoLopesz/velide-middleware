@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QThreadPool
 from sqlalchemy import create_engine
 
-from config import Settings, TargetSystem, config
+from config import Settings, TargetSystem, config, config_path, install_effective_settings
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_setup import FarmaxSetup
 from models.app_context_model import Services
@@ -187,7 +187,8 @@ def create_strategy(
                 "é obrigatório para o sistema CDS."
             )
 
-        return CdsStrategy(app_config.api, app_config.folder_to_watch, tracking_persistence_service.journal)
+        return CdsStrategy(app_config.api, app_config.folder_to_watch, tracking_persistence_service.journal,
+                           baseline_path=getattr(tracking_persistence_service.journal, "cds_baseline_path", None))
 
     elif app_config.target_system == TargetSystem.FARMAX:
         if not app_config.farmax:
@@ -222,9 +223,9 @@ def create_strategy(
     raise ValueError(f"Sistema alvo não suportado: {app_config.target_system}")
 
 
-def build_services(app_config: Settings) -> Services:
+def build_services(app_config: Settings, upgrade=None) -> Services:
     """Creates and wires together all core application services."""
-    if app_config.farmax and not app_config.api.source_timezone:
+    if app_config.target_system == TargetSystem.FARMAX and app_config.farmax and not app_config.api.source_timezone:
         app_config.api.source_timezone = app_config.farmax.timezone
     velide_gateway = VelideGateway(
         app_config.api,
@@ -242,6 +243,8 @@ def build_services(app_config: Settings) -> Services:
     from utils.source_identity import configured_source_identity
     journal = SyncJournalService(db_path, scope, configured_source_identity(app_config),
                                  app_config.api.native.timezone if app_config.api.native else app_config.api.source_timezone)
+    if upgrade:
+        journal.cds_baseline_path = upgrade.cds_baseline_path
     deliveries_service = DeliveriesService(
         gateway=velide_gateway,
         api_config=app_config.api,
@@ -335,8 +338,16 @@ def main():
     # Set up logging
     configure_logging(view)
 
+    # Keep the installed source/configuration while adopting old local storage.
+    # A centrally provisioned native package is applied atomically, when present.
+    from local_upgrade import upgrade_installation
+    upgrade = upgrade_installation(config_path, BUNDLE_DIR)
+    install_effective_settings(config, upgrade.settings)
+    for message in upgrade.instructions:
+        logging.getLogger(__name__).info(message)
+
     # Build services (Dependency Injection)
-    services = build_services(config)
+    services = build_services(config, upgrade)
 
     setup_tray_icon(app, view, services)
 

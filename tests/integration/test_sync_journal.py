@@ -85,8 +85,9 @@ def test_effects_retry_in_order_and_deduplicate(journal, remote_state):
 
 def test_unversioned_event_never_authorizes_source_work(journal, remote_state):
     journal.native_states([remote_state()])
+    original = journal.next_effect()
     journal.enqueue_effect("123", "old:IN_ROUTE", "IN_ROUTE", {"occurred_at": "2026-11-10T15:00Z"})
-    assert journal.next_effect() is None
+    assert journal.next_effect() == original  # Unversioned input cannot replace native authority.
     journal.native_states([remote_state()])
     assert journal.next_effect()["effect_key"] == "route:IN_ROUTE"
 
@@ -179,6 +180,7 @@ def test_erp_observation_retries_without_mutating_source(journal, qtbot, farmax_
     journal.accept("123", data)
     journal.native_states([remote_state("IN_TRANSIT")])
     updater = FarmaxDeliveryUpdater(repo, MagicMock(), service, "America/Sao_Paulo")
+    updater._timer.setInterval(20)  # Exercise periodic retry without waiting the production five-second interval.
     errors, successes = [], []
     updater.update_failed.connect(lambda *args: errors.append(args))
     updater.update_success.connect(lambda *args: successes.append(args))

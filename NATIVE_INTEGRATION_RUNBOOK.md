@@ -1,145 +1,116 @@
 # Middleware reliability and native integration
 
-Implementation handoff for the 2026-11-11 reliability/native migration plan.
+## Current status — user-directed restoration (2026-11-14)
 
-> **Independent-review correction:** the original automatic ERP write-back and cancellation assumptions were not justified by the retained native evidence. Farmax now runs as a read-only observer; legacy automatic dispatch is paused because authoritative store binding is unavailable. The detailed finding/disposition report is `MIDDLEWARE_INDEPENDENT_REVIEW.md` in the companion server PR. The automation described in the original plan is not yet a qualified Farmax workflow.
+**Automatic native and legacy imports and Velide-led Farmax departure/completion are restored.** Ordinary updates automatically adopt the installed database and configuration. The earlier observer-only reduction was rejected by the user and is superseded; it is not the current operating contract.
 
-## Delivered implementation
+Final verification: **478 Middleware tests passed, including disposable Firebird 2.5; server typecheck and 229 selected tests passed**, including real Python → Bun → Python inventory/export/consumer interoperability. Two independent read-only reviewers approved their scopes with no outstanding findings. The final Main x64 cx_Freeze build and `migrate-native.exe --help` passed. Frozen automatic CLI/inventory checks and the updater full freeze are still pending.
 
-- Exact Farmax ID normalization, polling recovery, one WebSocket business-event path, and corrected departure reconciliation.
-- Sale-level discrepancy classification. Retained all-C and partial C/D states never authorize automatic delivery cancellation. Removed I/V and mixed S/C cases are review candidates; the branchless log cannot establish an unconditional identity/intent guarantee.
-- A versioned SQLite journal for source observations, original payloads, frozen requests, import acceptance, cancellation, remote state, and ordered ERP effects. Acknowledgements follow commit.
-- Restart recovery, hydration before Farmax monitoring, bounded log reads with overlap, and a periodic current-pending scan. A fixed overlap is not treated as a commit-order guarantee.
-- Farmax observation validates branch, multiplicity, original source provenance, dates, and retained courier mapping. It recognizes existing persisted fields and never writes departure, arrival, conclusion, sale status, or cashier fields. Unknown/custom schema objects are inspected, never installed or replaced at startup.
-- Native import jobs, exact source-state reconciliation, paginated reinstall recovery, source-scoped notification hints, explicit retry, and terminal/unknown identity retention.
-- CDS startup scans, move/modify handling, incomplete-file retry, deterministic identity, and durable acceptance.
-- TLS verification and timeouts for authentication, refresh-token rotation, scoped database binding, and stopped-session callback guards.
-- A packaged offline migration utility, including backups and a read-only validation mode.
+[Middleware PR #3](https://github.com/BrenoLopesz/velide-middleware/pull/3) and [server PR #250](https://github.com/BrenoLopesz/velide-server/pull/250) remain unmerged. Full PR CI for the restoration after commits has not run yet. Signed installer release, x86 qualification, and a live pilot are not complete.
 
-Full cashier finalization and courier-return exception workflows remain deferred. Source IDs are preserved; native merchant/connection scope is additional API ownership, not a Farmax business-key redesign.
+## Restored delivery behavior
 
-## Backend dependency and activation
+- Both transports import automatically. Configurations without `api.native` continue using the installed legacy endpoint and authenticated session; a new store-discovery endpoint is not required. Frozen requests retain their identity and original order time across retries.
+- Velide route facts drive each related Farmax delivery: departure projects courier, departure time and `R`; completion projects `V`, fills arrival when absent, and updates eligible active sale items to `V`. Existing arrival is preserved. An already returned `V` delivery retains populated courier/departure fields.
+- `C`/`D`/`I` item rows are never revived. `CONCLUIDO`, `HORAFINAL`, business dates and cashier ownership are preserved. Cashier transfer/finalization remains future work and is not a prerequisite for these ordinary writes.
+- Exact source, branch, item and courier identities are checked. Retained `source_context` also binds original adopted mappings without an order payload, preventing later observations from silently retargeting them.
+- `SyncOrders` retains imports, cancellation intent, source evidence and remote state; `SyncEffects` holds durable ordered ERP writes. A shared journal/ERP lock and an authority check before commit prevent writes already known to be superseded. Acknowledgements follow committed, verified fields; obsolete callbacks cannot acknowledge newer work. This is not a transaction spanning Velide and Farmax, and cannot fence remote changes that have not yet been observed.
+- Native notifications accelerate periodic authoritative reconciliation. Missed notifications, offline completion and paginated reinstall recovery use retained identities and route revisions. Completed native deliveries remain monitored for undo/redo.
 
-The companion `velide-server` branch is `feature/middleware-native-integration`.
+### Cancellation policy
 
-Deploy the backend's `0057_integration_orders.sql` and `0058_native_integration_permissions.sql`, compatible import workers, and the native server before activating this client.
+The user explicitly chose these rules:
 
-Provision an `integration_connections` record bound to the merchant, logical ERP source, and internal Auth0-backed user. A dedicated integration role needs:
+| Source/route condition | Current behavior |
+|---|---|
+| All retained item rows are `C` | The item-row count reaches 100% and creates durable whole-delivery cancellation intent, **even if `ENTREGAS` remains**. This is the user's integration policy, not a claim that Farmax always deletes such deliveries. |
+| Partial cancellation | Portuguese progress logging only; partial cancellation itself creates no hold and does not stop ordinary delivery work. |
+| Repeated or incomplete snapshots | Counts are correlated by retained item identity, never cumulatively summed across polls. Missing historical `C` rows remain cancellation evidence. Missing active/unconfirmed rows become unknown and cannot produce 100%. |
+| Physical delivery removal | Correlate retained sale identity, a complete sale snapshot and DELETE evidence. Qualifying removal requests cancellation. Branchless-log limitations are logged; general, unconditional removal attribution is not claimed. |
+| Native delivery in transit | Keep cancellation `REQUESTED` with `CANCELLATION_DEFERRED`; do not acknowledge it or exhaust the retry budget while waiting for the active route. |
+| Route aborted and delivery returns to `PENDING` | Retry the retained cancellation. |
+| Route completed | Keep an explicit lifecycle conflict; do not retroactively change delivery history or finances. |
 
-- `integration.import`
-- `integration.read`
-- `integration.cancel`
-- `integration.retry`
-- `courier.read`
+`DELIVERYLOG` lacks branch, row-incarnation and transaction identity. Reused IDs, source restores and ambiguous evidence still need reconciliation; a DELETE entry alone is insufficient.
 
-General delivery cancellation/read authority is not required by the source integration operations. Configure the actual native Auth0 issuer, audience, and client before authenticating.
+### Recovery, CDS and operator messages
 
-Example native configuration fragment:
+`Processando no Velide` means import-job acceptance, not delivery completion. Errors and unresolved work remain visible in the dashboard and journal. **Tentar sincronização novamente** provides explicit retry; source-review holds require resolution rather than being silently cleared. A nonretryable legacy recovery failure becomes `CONFLICT`, preventing a hot retry loop.
 
-```yaml
-api:
-  velide_server: "https://native.example.invalid/graphql"
-  velide_websockets_server: "wss://native.example.invalid/graphql"
-  use_ssl: true
-  native:
-    merchant_id: "00000000-0000-0000-0000-000000000001"
-    connection_id: "00000000-0000-0000-0000-000000000002"
-    timezone: "America/Sao_Paulo"
-    reconcile_interval_ms: 15000
-farmax:
-  # Supply the installation's existing host/file/user/password.
-  timezone: "America/Sao_Paulo"
-```
+CDS scans are bounded and recover incomplete/new/changed files. Original unknown receipts are saved in the upgrade inventory, held visibly as `NEEDS_REVIEW`, and never blindly resubmitted. New files continue flowing. Stable identity uses the lowercase filename and original `horario_pedido`; receipt evidence survives upgrades. Authoritative package resolutions can link or classify historical receipts; local filename/customer similarity cannot recover the old release's random-ID mapping.
 
-Merchant and source timezone must agree. Naive source order times are localized explicitly; ambiguous local times are rejected. Retries reuse the frozen request and original timestamp.
+Dashboard messages are plain Portuguese. Original errors and tracebacks remain in diagnostic logs. The native client respects `use_neighbourhood`, `use_ssl` and configured retries. Authentication context (issuer, audience, client and scope) is persisted and checked before cached-token publication/refresh, including the token path used with external configuration. Compatible old JWT sessions remain usable on ordinary updates; changed authentication cannot reuse a mismatched cached session.
 
-Omitting `api.native` retains compatibility documents but **does not enable automatic legacy mutation**. The retained legacy API authenticates users internally yet exposes no authoritative store-ID operation to bind durable work; successful authentication, a location ID, or a client token claim is insufficient. Its deployed idempotency is not in doubt. Each local database is bound to one endpoint/source scope. Switching to native requires the migration manifest, rather than just changing a URL. `VELIDE_CONFIG_PATH` can select a configuration file for rehearsal.
+## Ordinary automatic update
 
-## Operational behavior
+The auto-installer/startup adopts the old SQLite database and configuration automatically, retaining mappings, pending effects and a WAL-aware backup. **No handwritten manifest, native package or completed-route requirement applies to an ordinary update.** Existing legacy configuration keeps working until a valid native package is provisioned. An optional package validation/publication failure leaves legacy service available.
 
-`Processando no Velide` means a job has been accepted, not that a delivery has been created or delivered. Errors remain visible in the delivery table/log and in journal `last_error` fields. In native mode, the row context menu offers **Tentar sincronização novamente** for explicit retries.
+The first-hop installer directly installs the corrected update batch before the old self-updater executes. Release allowlists exclude local databases and tokens. Real CMD/robocopy execution and a small Inno compile have been tested; this does not establish a full signed installer release.
 
-Job notifications only accelerate reconciliation. Periodic authoritative reads recover missed notifications and offline route completion. Scope recovery uses pages of at most 100 references; its progress is durable. Source references missing from the server remain unresolved.
-
-`SyncOrders` separates submission, cancellation, remote state, and mapping. `SyncEffects` now records **read-only comparison obligations**, tied to authoritative revisions/generations. Cancellation, deletion, undo, or changed source evidence supersedes obsolete observations; late results cannot acknowledge a new generation. Completed native deliveries remain monitored for undo/redo. A remote completion remains unresolved until persisted Farmax delivery fields match or the discrepancy is reviewed. An existing matching V can satisfy both departure/completion observations without replaying a departure. This is not a cashier-settlement acknowledgement.
-
-## Existing-installation migration
-
-Finish legacy routes and reconcile all outstanding ERP work first. Stop Middleware while preparing and applying the manifest. Rehearse on a SQLite copy.
-
-1. Create/verify native pending deliveries and source identities in staging. The backend identity migration utility links existing native pending records and preserves explicit historical outcomes; it does not manufacture a pending delivery or infer its address.
-2. Map every retained local order and courier. Use exact source/legacy/native identifiers, never customer/address matching.
-3. Prepare SQLite without starting ingestion, validate the manifest, then apply it:
+The packaged automatic entry point, also used by the installer, is:
 
 ```powershell
-.\migrate-native.exe "velide.db" "manifest.json" --prepare
-.\migrate-native.exe "velide.db" "manifest.json"
-.\migrate-native.exe "velide.db" "manifest.json" --apply
+.\migrate-native.exe --automatic `
+  --config "$InstallRoot\resources\config.yml" --bundle-dir "$InstallRoot"
 ```
 
-The source equivalent is `python src/native_migration.py ...`. Preparation upgrades the SQLite schema and retains existing mappings. Application creates a WAL-aware backup, checks outstanding effects/routes, applies mappings transactionally, and stores the full manifest audit. Repeating an already applied manifest is idempotent.
+It takes the application instance lock; application/database writers must be stopped while adoption or cutover runs. Configuration can also be selected through `VELIDE_CONFIG_PATH`.
 
-Existing unbound work also requires a qualified `source_identity` configuration fingerprint and, for Farmax, `farmax_branch_id` during offline preparation. Calculate the fingerprint using `utils.source_identity.configured_source_identity` with the actual installation settings; it detects host/file/folder changes but does not prove database incarnation. Do not guess a branch or adopt data from an unverified source. A legacy order with attempts, a frozen request, a job, or cancellation uncertainty cannot be declared never submitted merely because its delivery mapping is missing.
+## Planned native cutover
 
-SQLite v4 also persists the original `source_timezone`. Qualify that timezone when adopting older naive timestamps; `--prepare` accepts it in the manifest. Payload comparison uses canonical UTC instants and retains raw local receipt evidence separately. The CDS identity key still uses the original file receipt representation, so upgrading/recovering does not regenerate order IDs. A conflicting immutable payload commits a review hold before reporting the error, preventing the old queued payload from being dispatched.
+Exact flags, package fields and publication rules are in [installer/UPGRADE_CONTRACT.md](installer/UPGRADE_CONTRACT.md). Its command/package contract applies here; the final restoration status above supersedes older intermediate verification/dependency notes.
 
-Example local manifest:
+1. Deploy server migrations `0057_integration_orders.sql` and `0058_native_integration_permissions.sql`, compatible import workers and the native server. Provision the actual merchant/connection and internal Auth0-backed user. The integration role needs `integration.import`, `integration.read`, `integration.cancel`, `integration.retry` and `courier.read`. Generic `getJobStatus`/`jobStatusUpdated` retain merchant authentication without an added `delivery.read` requirement.
+2. Pause Middleware for the final inventory and package publication. Export automatically from the installation; the output path must be new:
 
-```json
-{
-  "version": 1,
-  "old_scope": "https://legacy.example.invalid/|Farmax",
-  "new_scope": "https://native.example.invalid/graphql|Farmax|00000000-0000-0000-0000-000000000001|00000000-0000-0000-0000-000000000002",
-  "deliveries": [
-    {
-      "internal_id": "123",
-      "legacy_delivery_id": "retained-legacy-id",
-      "native_delivery_id": "00000000-0000-0000-0000-000000000003",
-      "state": "IMPORTED"
-    }
-  ],
-  "couriers": [
-    {
-      "local_id": "5",
-      "legacy_id": "retained-legacy-courier",
-      "native_id": "00000000-0000-0000-0000-000000000004"
-    }
-  ]
-}
-```
+   ```powershell
+   .\migrate-native.exe --export-upgrade-inventory `
+     --config "$InstallRoot\resources\config.yml" --bundle-dir "$InstallRoot" `
+     --output "$InventoryOutput"
+   ```
 
-Possible local outcomes are `QUEUED`, `ACCEPTED` (requires `native_job_id`), `IMPORTED` (requires `native_delivery_id`), `TERMINAL`, and `NEEDS_REVIEW`. Previously submitted orders cannot simply be declared queued. Retain unknown legacy outcomes explicitly and seed their identities on the backend too.
+   Source equivalent: `python src/native_migration.py` with the same flags. The inventory includes retained work and sanitized business evidence, excluding credentials/tokens. Export can adopt old storage but does not consume a waiting package or change configuration.
+3. The centralized server migration provides exact native identities and its courier-ID translation. It retains original order IDs, legacy delivery links, jobs, immutable customer/address/time data, and authoritative historical outcomes. Missing server rows do not prove an order was never submitted.
+4. From the companion worktree's `server/` directory, using a dedicated read-only administrative `DATABASE_URL`, generate the bound package:
 
-### CDS file baseline
+   ```powershell
+   bun scripts/export-native-upgrade-package.ts `
+     --inventory "$InventoryInput" `
+     --merchant-id "$NativeMerchantId" --connection-id "$NativeConnectionId" `
+     --graphql "$NativeGraphqlEndpoint" --websocket "$NativeWebsocketEndpoint" `
+     --courier-map "$CourierMigrationOutput" --output "$PackageOutput"
+   ```
 
-CDS identity is the lowercase filename plus the original `horario_pedido`, hashed under the configured source. A repeated observation is the same order. Two filenames can represent two legitimate identical orders; changing data under the same filename/timestamp is a conflict, not a new order.
+   Output must be new. Add `--auth-config "$NativeAuthConfig"` only for a complete authentication change. The exporter derives timezone from merchant settings and checks existing source timezone. Missing/ambiguous/conflicting links produce an issue report and exit **2**, with no partial package. It does not create native deliveries or invent IDs.
+5. Provision the generated file as `native-upgrade.json` alongside the installed config through the trusted rollout channel. Atomic publication follows the contract:
 
-Before upgrading an existing CDS installation, inventory files that the old release already consumed: that release generated volatile random IDs. Include reviewed completed files in the local manifest's optional `processed_cds_files` array, and run `--prepare` while the old application is stopped:
+   ```powershell
+   $Destination = "$InstallRoot\resources\native-upgrade.json"
+   $Staged = "$Destination.pending"
+   Copy-Item -LiteralPath "$PackageOutput" -Destination "$Staged"
+   if (Test-Path -LiteralPath "$Destination") {
+     [System.IO.File]::Replace($Staged, $Destination, $null)
+   } else {
+     [System.IO.File]::Move($Staged, $Destination)
+   }
+   ```
 
-```json
-"processed_cds_files": [
-  { "filename": "ent1.json", "created_at": "2026-01-01T12:00:00" }
-]
-```
+   Normal auto-installer/startup consumes it through `--automatic`; the same command above can be invoked for a stopped-installation rollout. No store-side configuration or manifest editing is required.
 
-These become durable terminal source identities, preventing the new startup scan from importing historical files. List only confirmed processed files; preserve pending/unknown files for reconciliation. Existing mapped orders still require explicit delivery entries. Files are never deleted by this tool.
+The package is bound to installation/config/source identity and the retained-work digest. If work changed after export, regenerate inventory/package. The consumer validates binding and consistency, not a server signature. It prepares a separate database and atomically activates database/endpoint through config replacement; failures retain the old usable installation and repeat application is a no-op. Active routes can cut over with exact native mappings; pending ERP effects defer cutover while legacy service remains available. These are planned-cutover conditions, not ordinary-update requirements.
 
 ## Verification and remaining release work
 
-Local verification covers Python 3.8.0, Qt, real SQLite, native HTTP fixtures, cancellation/restart/response-loss scenarios, and a disposable Firebird **2.5** database with a delivery-log trigger. The Windows x64 cx_Freeze build and packaged `migrate-native.exe --help` were exercised. The build includes timezone and certificate data and a build-only workaround for Python 3.8.0 wildcard-path handling.
+| Check | Latest result |
+|---|---|
+| Full Middleware suite | **478 passed**, including disposable Firebird **2.5** |
+| Server | Typecheck and **229 selected tests passed**, including real Python → Bun → Python export/consumer interoperability |
+| Independent read-only reviews | Both scopes approved, no outstanding findings: Farmax final **92** tests; upgrades final **36**, plus the previous **111** checks (separate runs, not an additive suite total) |
+| Installer checks | Actual CMD/robocopy and small Inno compile passed |
+| Final x64 cx_Freeze | Main application and update installer built successfully |
+| Frozen migration CLI | `--help`, automatic original-installation adoption/native cutover/repeat, and inventory export passed (2 executable-level tests) |
+| Pending release checks | Full PR CI after commits, full signed installer release/upgrade, x86 and live pilot |
 
-The earlier **178-pass** result predates independent review and did not establish ERP correctness. Consult the independent-review report and subsequent PR checks for corrected verification results.
+Middleware suite command: set `QT_QPA_PLATFORM=offscreen`, `PYTHONDONTWRITEBYTECODE=1`, then run `python -m pytest -q -p no:cacheprovider tests`. `VELIDE_TEST_FIREBIRD=1` enables the disposable localhost Firebird fixture; `VELIDE_TEST_FIREBIRD_PASSWORD` selects its service password. No customer database is used by that fixture.
 
-The final corrective pass has **239 passing tests**, independently rerun by the reviewer together with **14 additional independent checks**. All acknowledged code findings were closed under the narrowed observer/native-sync contract. This is explicitly not approval of the removed automatic Farmax writer or of a live cutover.
-
-Run the suite with `QT_QPA_PLATFORM=offscreen`, `PYTHONDONTWRITEBYTECODE=1`, and `python -m pytest -q -p no:cacheprovider tests`. Setting `VELIDE_TEST_FIREBIRD=1` enables the disposable localhost Firebird test; `VELIDE_TEST_FIREBIRD_PASSWORD` selects the test service password. No customer database is used by that fixture.
-
-Still required before live cutover:
-
-- Qualify the actual deployed Farmax/Firebird version and source address/date rules, including midnight boundaries and representative triggers/index plans.
-- Rehearse against the deployed native API, broker, geocoding dependencies, real authentication, and copied store data; verify migrated coordinates and immutable order times.
-- Qualify the x86 build and signed installer upgrades on supported Windows installations. A successful x64 freeze is not an installer-upgrade rehearsal.
-- Select the pilot store, supply its exact migration manifest/exports, drain legacy work, migrate and reconcile before resuming one backend, and observe its backlog to completion.
-- A rollback after native business writes requires reconciliation of those new facts; restoring an old SQLite file alone is insufficient.
-
-The implementation has not deployed migrations or switched a live store. Phase 6 remains an operational staging/pilot task.
+Operational qualification still needs the actual Farmax/Firebird version, custom triggers, date/time behavior and deployed native services/authentication, followed by a selected-store rehearsal and pilot. Configuration fingerprints do not prove database incarnation. Delivery synchronization does not settle cashier accounts; rollback after native business writes requires reconciling those facts, not just restoring old SQLite. No live store has been switched by this work.

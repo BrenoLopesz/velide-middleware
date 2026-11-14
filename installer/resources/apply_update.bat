@@ -18,7 +18,7 @@ setlocal
 set "UPDATE_SOURCE_FOLDER=%TEMP%\velide_installer_update"
 
 :: Set the main executable to run after the update is finished.
-set "MAIN_EXECUTABLE=..\..\main.exe"
+set "MAIN_EXECUTABLE=main.exe"
 
 :: Set the path for the log file. All steps will be appended here.
 set "LOG_FILE=%~dp0update_log.txt"
@@ -65,7 +65,7 @@ echo Checking for source folder...
 if not exist "%UPDATE_SOURCE_FOLDER%" (
     echo "[ERROR] The source folder ""%UPDATE_SOURCE_FOLDER%"" was not found."
     echo "Update cannot be applied."
-    goto End
+    goto Restart
 )
 echo Source folder found.
 echo.
@@ -90,7 +90,7 @@ if %ERRORLEVEL% GEQ 8 (
     echo.
     echo [ERROR] Robocopy failed with exit code %ERRORLEVEL%. An error occurred during the file move process.
     echo The update may not have been applied correctly.
-    goto End
+    goto Restart
 )
 echo Robocopy completed successfully (Exit Code: %ERRORLEVEL%).
 
@@ -114,6 +114,9 @@ echo   Update applied successfully!
 echo =================================================
 echo.
 
+:Restart
+:: Inno has already installed the application. A self-updater copy failure must
+:: not leave that usable application closed; startup repeats the local upgrade.
 :: NEW METHOD: Navigate to the correct directory to resolve the path
 pushd "%~dp0"
 cd ..\..

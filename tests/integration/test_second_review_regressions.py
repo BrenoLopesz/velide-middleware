@@ -164,7 +164,8 @@ def test_r4_delayed_stored_bundle_cannot_undo_refresh(qtbot,monkeypatch,new_acce
         expired = pyqtSignal(str)
         error = pyqtSignal(str)
     workers = []
-    def factory():
+    def factory(auth_config):
+        assert auth_config == auth._auth_config
         worker = SimpleNamespace(signals=Signals())
         workers.append(worker)
         return worker
@@ -240,7 +241,7 @@ def test_r6_concurrent_first_opens_migrate_once(tmp_path,version):
         current.close()
         return result
     with ThreadPoolExecutor(max_workers=2) as pool:
-        assert list(pool.map(lambda _: opened(),range(2))) == [4,4]
+        assert list(pool.map(lambda _: opened(),range(2))) == [5,5]
     with SQLiteManager(path) as db:
         assert [row[1] for row in db._get_conn().execute("PRAGMA table_info(SyncSource)")].count("attempts") == 1
         assert db.get_delivery_by_internal_id("123")[0] == "legacy"

@@ -54,7 +54,8 @@ class VelideActionHandler(QObject):
         for order in orders:
             if order is not None:
                 occurred = action.route.started_at or (action.timestamp - timedelta(milliseconds=action.offset))
-                order.effect_context = {"execution_id": action.route.id, "occurred_at": occurred.isoformat()}
+                order.effect_context = {"execution_id": action.route.id, "occurred_at": occurred.isoformat(),
+                                        "started_at": occurred.isoformat(), "courier": deliveryman.id}
                 # 2. Notify UI (Presenter)
                 self.delivery_in_route.emit(order, deliveryman.id)
 
@@ -73,7 +74,11 @@ class VelideActionHandler(QObject):
         for order in orders:
             if order is not None:
                 occurred = action.route.ended_at or (action.timestamp - timedelta(milliseconds=action.offset))
-                order.effect_context = {"execution_id": action.route.id, "occurred_at": occurred.isoformat()}
+                previous = order.effect_context or {}
+                order.effect_context = {"execution_id": action.route.id, "occurred_at": occurred.isoformat(),
+                    "started_at": action.route.started_at.isoformat() if action.route.started_at else previous.get("started_at"),
+                    "completed_at": occurred.isoformat(),
+                    "courier": action.deliveryman.id if action.deliveryman else previous.get("courier")}
                 # 2. Notify UI (Presenter)
                 self.delivery_delivered.emit(order)
 
