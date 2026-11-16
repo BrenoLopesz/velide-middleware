@@ -118,6 +118,10 @@ class NativeChangeFeedService(QObject):
             return
         if ticket != (self.generation, self.gateway.generation):
             self.pending = True
+            # The obsolete worker has drained; schedule the current lifecycle's
+            # replacement even though its ticket intentionally differs.
+            self.followup.start(100)
+            return
         elif error:
             self.reconciler.sync_error.emit(error)
             # Notification bursts must not cause a retry storm during an outage.
