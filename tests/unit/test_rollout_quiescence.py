@@ -256,7 +256,18 @@ def test_inflight_erp_ack_survives_timeout_then_resume(runtime_factory, remote_s
     graph.release()
 
 
-def test_native_feed_read_drains_before_rollout_resume(runtime_factory, remote_state, qtbot):
+@pytest.fixture
+def feed_worker_loop_policy():
+    from utils.fix_asyncio import apply_asyncio_fix
+    previous = asyncio.get_event_loop_policy()
+    apply_asyncio_fix()
+    try:
+        yield
+    finally:
+        asyncio.set_event_loop_policy(previous)
+
+
+def test_native_feed_read_drains_before_rollout_resume(feed_worker_loop_policy, runtime_factory, remote_state, qtbot):
     from services.native_change_feed_service import NativeChangeFeedService
 
     runtime = runtime_factory(native=True, farmax=True)

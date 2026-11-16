@@ -218,6 +218,23 @@ class SyncJournal:
                 ON CONFLICT(scope,source_id) DO UPDATE SET payload=excluded.payload""",
                 (self.scope, encode({"after": after, "complete": complete})))
 
+    def native_recovery_ready(self):
+        """Read bootstrap and feed recovery from one SQLite snapshot.
+
+        Dirty work includes deferred retries and locally queued identities: an
+        existing local row is not proof that its remote mapping was recovered.
+        """
+        with self._db() as db:
+            row = db._get_conn().execute("""
+                SELECT source.payload, feed.scope, feed.resync_boundary,
+                       EXISTS(SELECT 1 FROM SyncDirtyOrders WHERE scope=?)
+                FROM SyncSource AS source
+                LEFT JOIN SyncRemoteFeed AS feed ON feed.scope=source.scope
+                WHERE source.scope=? AND source.source_id='native-bootstrap'
+            """, (self.scope, self.scope)).fetchone()
+            return bool(row and json.loads(row[0])["complete"]
+                        and row[1] is not None and row[2] is None and not row[3])
+
     def feed_status(self):
         with self._db() as db:
             rows = self._rows(db._get_conn(), "SELECT * FROM SyncRemoteFeed WHERE scope=?")

@@ -283,6 +283,7 @@ def build_services(app_config: Settings, upgrade=None, ownership=None) -> Servic
     if native_farmax:
         from services.native_change_feed_service import NativeChangeFeedService
         reconciliation_service.change_feed = NativeChangeFeedService(velide_gateway, journal, reconciliation_service)
+        reconciliation_service.change_feed.progressed.connect(reconciliation_service.check_recovery)
         websockets_service.refresh_requested.connect(reconciliation_service.change_feed.trigger)
     if app_config.api.native:
         if not native_farmax:

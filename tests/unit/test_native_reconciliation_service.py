@@ -455,10 +455,12 @@ def test_rollout_pause_stops_feed_and_fences_old_callbacks(reconciler, qtbot, ph
     feed = []
     recovered = []
     h.service.change_feed = SimpleNamespace(
-        start=lambda: feed.append("start"), stop=lambda: feed.append("stop"))
+        start=lambda: feed.append("start"), stop=lambda: feed.append("stop"),
+        busy=False, pending=False, generation=1)
     h.service.recovery_ready.connect(lambda: recovered.append(True))
     start(h, bootstrapped=phase == "order_states")
     if phase == "order_states":
+        h.journal.complete("native_recovery_ready", True)
         old = load_orders(h)
     else:
         h.workers[-1].signals.result.emit([])
@@ -481,7 +483,130 @@ def test_rollout_pause_stops_feed_and_fences_old_callbacks(reconciler, qtbot, ph
     assert len(recovered) == before and not h.published
     h.service.resume_after_rollout()
     h.journal.complete("bootstrap_status", {"after": "", "complete": True})
+    h.journal.complete("native_recovery_ready", True)
     assert feed == ["start", "stop", "start"]
     assert len(recovered) == before + 1
     complete_read(h, load_orders(h), revision=2)
     qtbot.waitUntil(lambda: h.published == [state(2)])
+
+
+def attach_feed(h):
+    h.service.change_feed = SimpleNamespace(
+        start=lambda: None, stop=lambda: None,
+        busy=False, pending=False, generation=1)
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure"])
+def test_retired_readiness_callback_cannot_open_or_release_restarted_pass(reconciler, outcome):
+    h = reconciler
+    attach_feed(h)
+    recovered = []
+    h.service.recovery_ready.connect(lambda: recovered.append(True))
+    start(h)
+    old = h.journal.take("native_recovery_ready")
+    h.service.stop_service()
+    start(h)
+    ticket = h.service._active_ticket
+    if outcome == "success":
+        old.success(True)
+    else:
+        old.failure("retired")
+    assert not recovered and not h.errors
+    assert h.service._busy and h.service._active_ticket == ticket
+    h.journal.complete("native_recovery_ready", True)
+    assert recovered == [True]
+
+
+def test_feed_progress_supersedes_pending_readiness_result(reconciler):
+    h = reconciler
+    attach_feed(h)
+    recovered = []
+    h.service.recovery_ready.connect(lambda: recovered.append(True))
+    start(h)
+    old = h.journal.take("native_recovery_ready")
+    h.service.check_recovery()  # A feed cycle committed after the old snapshot.
+    old.success(True)
+    assert not recovered
+    assert h.journal.count("native_recovery_ready") == 2
+    h.journal.complete("native_recovery_ready", False)
+    assert not recovered
+    h.service.check_recovery()
+    h.journal.complete("native_recovery_ready", True)
+    assert recovered == [True]
+    h.service.check_recovery()
+    assert h.journal.count("native_recovery_ready") == 3
+
+
+def test_readiness_reannouncement_rechecks_feed_and_durable_state(reconciler):
+    h = reconciler
+    attach_feed(h)
+    recovered = []
+    h.service.recovery_ready.connect(lambda: recovered.append(True))
+    start(h)
+    h.journal.complete("native_recovery_ready", True)
+    h.service.change_feed.busy = True
+    h.service.ensure_recovered()
+    assert recovered == [True]
+    assert h.journal.count("native_recovery_ready") == 1
+    h.service.change_feed.busy = False
+    h.service.check_recovery()
+    h.journal.complete("native_recovery_ready", False)
+    assert recovered == [True]
+    h.service.check_recovery()
+    h.journal.complete("native_recovery_ready", True)
+    assert recovered == [True, True]
+
+
+def test_readiness_failure_backs_off_without_releasing_scheduler(reconciler, monkeypatch):
+    h = reconciler
+    attach_feed(h)
+    start(h)
+    ticket = h.service._active_ticket
+    for _ in range(20):
+        h.service.check_recovery()
+    h.journal.take("native_recovery_ready").failure("storage unavailable")
+    assert h.errors == ["storage unavailable"]
+    assert h.service._busy and h.service._active_ticket == ticket
+    for _ in range(20):
+        h.service.check_recovery()
+    assert h.journal.count("native_recovery_ready") == 1
+    monkeypatch.setattr("services.native_reconciliation_service.time.monotonic",
+                        lambda: h.service._recovery_retry_after + 1)
+    h.service.check_recovery()
+    assert h.journal.count("native_recovery_ready") == 2
+
+
+def test_feed_readiness_listener_can_pause_before_old_pass_continues(reconciler):
+    h = reconciler
+    attach_feed(h)
+    h.service.recovery_ready.connect(h.service.pause_for_rollout)
+    start(h)
+    h.journal.complete("native_recovery_ready", True)
+    assert h.service._rollout_paused and not h.service._running
+    assert not h.service._refresh_timer.isActive()
+    h.journal.take("active_orders").success([])
+    assert not h.service._busy and not h.service._refresh_timer.isActive()
+
+
+@pytest.mark.parametrize("invalidate", ["mutation", "gateway"])
+@pytest.mark.parametrize("outcome", ["ready", "failed"])
+def test_invalidated_readiness_result_rechecks_without_releasing_pass(reconciler, invalidate, outcome):
+    h = reconciler
+    attach_feed(h)
+    recovered = []
+    h.service.recovery_ready.connect(lambda: recovered.append(True))
+    start(h)
+    old = h.journal.take("native_recovery_ready")
+    ticket = h.service._active_ticket
+    if invalidate == "mutation":
+        h.service.invalidate_pending_reads()
+    else:
+        h.gateway.update_token("replacement")
+    if outcome == "ready":
+        old.success(True)
+    else:
+        old.failure("retired")
+    assert not recovered and not h.errors
+    assert h.service._busy and h.service._active_ticket == ticket
+    h.journal.complete("native_recovery_ready", False)
+    assert not recovered

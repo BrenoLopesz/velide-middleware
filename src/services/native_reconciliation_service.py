@@ -1,4 +1,5 @@
 import json
+import time
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool, QTimer
 from config import TargetSystem
 from workers.native_api_worker import NativeApiWorker
@@ -39,9 +40,16 @@ class NativeReconciliationService(QObject):
         self._initializing = False
         self._rollout_paused = False
         self.change_feed = None
+        self._recovery_announced = False
+        self._recovery_check = None
+        self._recovery_recheck = False
+        self._recovery_revision = 0
+        self._recovery_retry_after = 0
+        self.timer.timeout.connect(self.check_recovery)
 
     def invalidate_pending_reads(self):
         self._generation += 1
+        self._recovery_revision += 1
         if self._running:
             self._refresh_pending = True
             # Let the in-flight callback drain before starting a replacement.
@@ -55,6 +63,8 @@ class NativeReconciliationService(QObject):
         self._generation += 1
         self._lifecycle += 1
         self._initialized = self._initializing = False
+        self._recovery_announced = False
+        self._recovery_retry_after = 0
         # Periodic recovery is owned by the running service, not a read callback.
         self.timer.start()
         if self.change_feed:
@@ -71,9 +81,62 @@ class NativeReconciliationService(QObject):
         if self._rollout_paused:
             return
         if self._running and self._initialized and self._bootstrapped:
-            self.recovery_ready.emit()
+            self._recovery_announced = False
+            self.check_recovery()
         else:
             self.start_service()
+
+    def check_recovery(self):
+        """Open intake only after both inventory and feed recovery are durable."""
+        if (not self._running or self._rollout_paused or not self._initialized
+                or not self._bootstrapped or self._recovery_announced):
+            return
+        if self.change_feed is None:
+            self._recovery_announced = True
+            self.recovery_ready.emit()
+            return
+        if self._recovery_check is not None:
+            # A feed completion can supersede a queued SQLite result.
+            self._recovery_recheck = True
+            return
+        feed = self.change_feed
+        if (feed.busy or feed.pending
+                or time.monotonic() < self._recovery_retry_after):
+            return
+        ticket = (self._lifecycle, self.gateway.generation,
+                  self._recovery_revision, feed.generation)
+        request = object()
+        self._recovery_check = request
+        self._recovery_recheck = False
+
+        def finished(ready, error=None):
+            if self._recovery_check is not request:
+                return
+            self._recovery_check = None
+            if not self._running or self._rollout_paused:
+                return
+            current = (self._lifecycle, self.gateway.generation,
+                       self._recovery_revision, feed.generation)
+            if ticket != current:
+                self.check_recovery()
+                return
+            if error is not None:
+                # Do not release the independent reconciliation pass or turn
+                # feed wakeups into immediate retries on a storage failure.
+                self._recovery_retry_after = (
+                    time.monotonic() + self.timer.interval() / 1000)
+                self.sync_error.emit(error)
+                return
+            if self._recovery_recheck:
+                self.check_recovery()
+                return
+            if ready and not feed.busy and not feed.pending:
+                self._recovery_announced = True
+                self.recovery_ready.emit()
+
+        self.journal.submit(
+            "native_recovery_ready", success=lambda ready: finished(ready),
+            failure=lambda error: finished(False, error))
 
     def _load_bootstrap(self):
         if self._initializing or not self._running:
@@ -96,7 +159,7 @@ class NativeReconciliationService(QObject):
             self._initialized = True
             self._bootstrap_after, self._bootstrapped = state["after"], state["complete"]
             if self._bootstrapped:
-                self.recovery_ready.emit()
+                self.check_recovery()
             if lifecycle == self._lifecycle and self._running:
                 self.trigger_reconciliation()
 
@@ -108,6 +171,9 @@ class NativeReconciliationService(QObject):
         self._active_ticket = None
         self._batches = []
         self._refresh_pending = False
+        self._recovery_check = None
+        self._recovery_recheck = False
+        self._recovery_announced = False
         self._refresh_timer.stop()
         self.timer.stop()
         if self.change_feed:
@@ -212,7 +278,7 @@ class NativeReconciliationService(QObject):
     def _bootstrap_page_finished(self, ticket):
         if self._current(ticket):
             if self._bootstrapped:
-                self.recovery_ready.emit()
+                self.check_recovery()
             # Recovery listeners can synchronously pause or replace this pass.
             if not self._current(ticket):
                 return
