@@ -33,6 +33,8 @@ class DeliveryRowStatus(Enum):
     DELETING = "Deletando..."
     CANCELLED = "Cancelado"
     ERROR = "Erro"
+    PARTIAL = "Farmax: representação parcial"
+    UNSUPPORTED = "Farmax: estado não representável"
 
 
 STATUS_COLORS: Dict[DeliveryRowStatus, Optional[QBrush]] = {
@@ -47,6 +49,8 @@ STATUS_COLORS: Dict[DeliveryRowStatus, Optional[QBrush]] = {
     DeliveryRowStatus.ERROR: QBrush(QColor(231, 98, 104)),
     DeliveryRowStatus.DELETING: QBrush(QColor(233, 149, 33)),
     DeliveryRowStatus.CANCELLED: QBrush(QColor(211, 118, 0)),
+    DeliveryRowStatus.PARTIAL: QBrush(QColor(211, 118, 0)),
+    DeliveryRowStatus.UNSUPPORTED: QBrush(QColor(211, 118, 0)),
 }
 
 # This serves as the single source of truth for converting Backend -> UI.
@@ -72,6 +76,8 @@ def map_db_status_to_ui(db_status: DeliveryStatus) -> DeliveryRowStatus:
 def sync_row_status(row) -> DeliveryRowStatus:
     if row.get("last_error") or row.get("source_review") or row.get("submission") in ("NEEDS_REVIEW","UNKNOWN"):
         return DeliveryRowStatus.ERROR
+    if row.get("projection_outcome") in ("PARTIAL", "UNSUPPORTED"):
+        return DeliveryRowStatus[row["projection_outcome"]]
     if row.get("cancellation") == "REQUESTED":
         return DeliveryRowStatus.DELETING
     if row.get("cancellation") == "ACKNOWLEDGED":
@@ -134,6 +140,8 @@ class DeliveryTableModel(QAbstractTableModel):
             return None
         if role == Qt.UserRole:
             return self._data[index.row()].id
+        if role == Qt.ToolTipRole:
+            return self._data[index.row()].order.sync_details
 
         if role == Qt.ForegroundRole:
             return self._font_data(index)

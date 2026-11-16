@@ -29,13 +29,14 @@ class VelideWebsocketsService(QObject):
     started = pyqtSignal()
     service_stopped = pyqtSignal()
 
-    def __init__(self, api_config: ApiConfig, auth_service: AuthService):
+    def __init__(self, api_config: ApiConfig, auth_service: AuthService, journal=None):
         """
         Initializes the service with configuration and authentication dependencies.
         """
         super().__init__()
         self.api_config = api_config
         self.auth_service = auth_service 
+        self.journal = journal
         
         self._worker: Optional[VelideWebsocketsWorker] = None
         self._thread_pool = QThreadPool.globalInstance()
@@ -60,7 +61,7 @@ class VelideWebsocketsService(QObject):
         self.started.emit()
         
         # Inject AuthService and Config into Worker
-        self._worker = VelideWebsocketsWorker(self.api_config, self.auth_service)
+        self._worker = VelideWebsocketsWorker(self.api_config, self.auth_service, self.journal)
         
         # Connect Data & Lifecycle Signals
         self._worker.signals.action_received.connect(self.action_received.emit)

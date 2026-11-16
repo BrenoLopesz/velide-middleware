@@ -241,7 +241,7 @@ def test_r6_concurrent_first_opens_migrate_once(tmp_path,version):
         current.close()
         return result
     with ThreadPoolExecutor(max_workers=2) as pool:
-        assert list(pool.map(lambda _: opened(),range(2))) == [5,5]
+        assert list(pool.map(lambda _: opened(),range(2))) == [6,6]
     with SQLiteManager(path) as db:
         assert [row[1] for row in db._get_conn().execute("PRAGMA table_info(SyncSource)")].count("attempts") == 1
         assert db.get_delivery_by_internal_id("123")[0] == "legacy"

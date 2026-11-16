@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import json
 import pytest
 from PyQt5.QtCore import QCoreApplication
 
@@ -30,7 +31,11 @@ class DeferredJournal:
         return matching[0]
 
     def complete(self, method, result):
-        self.take(method).success(result)
+        call = self.take(method)
+        if method == "native_states":
+            result = [dict(internal_id=value["externalOrderId"], remote_state=json.dumps(value),
+                           last_error=None, payload=None) for value in call.args[0]]
+        call.success(result)
 
     def count(self, method):
         return sum(call.method == method for call in self.calls)
@@ -69,7 +74,8 @@ def reconciler(qtbot, monkeypatch):
     service = NativeReconciliationService(gateway, journal, TargetSystem.FARMAX)
     errors, published = [], []
     service.sync_error.connect(errors.append)
-    service.order_state.connect(published.append)
+    service.order_state.connect(lambda value: published.append(
+        {key: item for key, item in value.items() if not key.startswith("_")}))
     harness = SimpleNamespace(
         service=service, journal=journal, gateway=gateway, workers=workers,
         errors=errors, published=published,
@@ -94,7 +100,7 @@ def load_orders(harness, count=1):
 
 
 def state(revision):
-    return {"externalOrderId": "0", "revision": str(revision)}
+    return {"externalOrderId": "0", "revision": str(revision), "error": None}
 
 
 def complete_read(harness, worker, revision=1):
@@ -129,6 +135,14 @@ def test_refresh_burst_during_pass_runs_one_follow_up(reconciler, qtbot, phase):
     assert h.journal.count("active_orders") == 2
     assert len(h.workers) == 2
     assert h.published == [state(1), state(2)]
+
+
+def test_rejected_unknown_order_is_not_published(reconciler):
+    h = reconciler
+    start(h)
+    load_orders(h).signals.result.emit([state(1)])
+    h.journal.take("native_states").success([])
+    assert h.published == []
 
 
 def test_refresh_waits_for_all_batches_before_reloading(reconciler, qtbot):

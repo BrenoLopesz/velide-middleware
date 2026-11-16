@@ -24,9 +24,6 @@ def test_superseded_completion_cannot_commit_source_changes(tmp_path, farmax_sta
     repo, engine = farmax_stack
     journal = seeded(tmp_path, repo)
     journal.native_states([remote_state("COMPLETED", revision="1")])
-    departure = journal.next_effect()
-    observation = _ObservationRequest(journal, repo, departure, "America/Sao_Paulo", lambda: True).observe()
-    journal.effect_result(departure["sequence"], generation=departure["generation"], observation=observation)
     done = journal.next_effect()
     changed = []
     def invalidate(conn, cursor, statement, parameters, context, many):
@@ -35,8 +32,14 @@ def test_superseded_completion_cannot_commit_source_changes(tmp_path, farmax_sta
             changed.append(True)
             journal.native_states([remote_state("IN_TRANSIT", revision="2")])
     event.listen(engine, "before_cursor_execute", invalidate)
-    with pytest.raises(FarmaxWaitingError):
-        _ObservationRequest(journal, repo, done, "America/Sao_Paulo", lambda: True).observe()
+    request = _ObservationRequest(journal, repo, done, "America/Sao_Paulo", lambda: True)
+    if phase == "read":
+        # The targeted source refresh can discover supersession before the ERP
+        # transaction even starts. Discard it without manufacturing a write.
+        assert request.observe() is None
+    else:
+        with pytest.raises(FarmaxWaitingError):
+            request.observe()
     event.remove(engine, "before_cursor_execute", invalidate)
     assert changed and not journal.effect_is_current(done["sequence"], done["generation"])
     with engine.connect() as conn:

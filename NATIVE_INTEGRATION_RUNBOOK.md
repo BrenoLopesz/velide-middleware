@@ -4,6 +4,19 @@ Production prerequisites, package contents and exact operator commands are in
 [Native rollout and `native-upgrade.json`](docs/NATIVE_ROLLOUT.md). A binary update
 alone does not convert the server's business data or deliver a store package.
 
+## Follow-up: native Farmax undo/redo
+
+[Reversible projection and recovery](docs/FARMAX_UNDO_REDO.md) describes the
+current native logistics contract above PR #4. Native `S/R/V` fields now follow
+Velide in both directions, including populated ERP return fields; historical
+observations are retained in transactional receipts. Item reversals require
+write-version provenance. Holds, cancellation and deletion remain explicit
+native visibility limitations. The companion server migration/API above PR #250
+must be deployed first.
+
+The restoration section below records the earlier baseline. Its preserve-native-
+return rule continues for legacy transport, but is superseded for native Farmax.
+
 ## Follow-up: reversible intake profiles
 
 The updated automatic consumer retains legacy and native connection profiles,

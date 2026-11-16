@@ -10,7 +10,7 @@ def migrate_sync_schema(conn, path):
     conn.execute("BEGIN IMMEDIATE")
     try:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version > 5:
+        if version > 6:
             raise RuntimeError("Synchronization database is newer than this application")
         if version == 0:
             if path != ":memory:" and conn.execute("SELECT 1 FROM DeliveryMapping UNION ALL SELECT 1 FROM DeliverymenMapping LIMIT 1").fetchone():
@@ -76,7 +76,39 @@ def migrate_sync_schema(conn, path):
                 sequence INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL,
                 internal_id TEXT NOT NULL, evidence TEXT NOT NULL,
                 observed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
-        conn.execute("PRAGMA user_version=5")
+        if version < 6:
+            for statement in [
+                "ALTER TABLE SyncOrders ADD COLUMN cancellation_request_id TEXT",
+                "ALTER TABLE SyncOrders ADD COLUMN cancellation_evidence TEXT",
+                "ALTER TABLE SyncOrders ADD COLUMN projection_outcome TEXT",
+                "ALTER TABLE SyncOrders ADD COLUMN projection_reason TEXT",
+                "ALTER TABLE SyncEffects ADD COLUMN application_id TEXT",
+                "ALTER TABLE SyncEffects ADD COLUMN verified_at REAL",
+            ]:
+                conn.execute(statement)
+            conn.execute("""CREATE TABLE SyncCancellationReceipts (
+                scope TEXT NOT NULL,internal_id TEXT NOT NULL,request_id TEXT NOT NULL,
+                disposition TEXT NOT NULL,evidence TEXT,revision TEXT,
+                PRIMARY KEY(scope,internal_id,request_id,disposition))""")
+            conn.execute("""CREATE TABLE SyncRemoteFeed (
+                scope TEXT PRIMARY KEY,cursor TEXT NOT NULL DEFAULT '0',
+                resync_after TEXT,resync_boundary TEXT)""")
+            conn.execute("""CREATE TABLE SyncDirtyOrders (
+                scope TEXT NOT NULL,internal_id TEXT NOT NULL,revision TEXT NOT NULL,
+                invalidation TEXT NOT NULL,queue_position INTEGER NOT NULL,
+                retry_at REAL NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(scope,internal_id))""")
+            conn.execute("CREATE INDEX sync_dirty_fair ON SyncDirtyOrders(scope,queue_position)")
+            # Before request IDs existed, every native cancellation used the
+            # server's reserved legacy receipt. Never turn an upgrade retry into
+            # a fresh request that can override an already restored delivery.
+            conn.execute("""UPDATE SyncOrders SET cancellation_request_id='legacy',
+                cancellation_evidence='RECOVERED_UNKNOWN'
+                WHERE scope LIKE '%|Farmax|%' AND cancellation<>'NONE'""")
+            # Require a fresh authoritative snapshot before using the new writer.
+            conn.execute("UPDATE SyncEffects SET state='SUPERSEDED' WHERE scope LIKE '%|Farmax|%'")
+            conn.execute("UPDATE SyncOrders SET effect_authority=NULL WHERE scope LIKE '%|Farmax|%'")
+        conn.execute("PRAGMA user_version=6")
         conn.commit()
     except Exception:
         conn.rollback()

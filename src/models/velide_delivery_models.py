@@ -32,6 +32,7 @@ class Order(BaseModel):
         ..., description="Internal ERP ID used for tracking.", exclude=True
     )
     ui_status_hint: Optional[Any] = Field(None, exclude=True)
+    sync_details: Optional[str] = Field(None, exclude=True)
     request_variables: Optional[dict] = Field(None, exclude=True)
     effect_context: Optional[dict] = Field(None, exclude=True)
     source_context: Optional[dict] = None
