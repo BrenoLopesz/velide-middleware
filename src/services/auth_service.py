@@ -44,6 +44,8 @@ class AuthService(QObject):
         self._session_lock = RLock()
         self._interactive_flow = False
         self._refreshing = False
+        self._rollout_paused = False
+        self._rollout_token = None
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.timeout.connect(self._on_refresh_timer_triggered)
@@ -83,10 +85,14 @@ class AuthService(QObject):
 
     def request_device_code_screen(self):
         """ Emits a signal to start the auth flow. """
+        if self._rollout_paused:
+            return
         self.device_code_requested.emit()
 
     def load_device_flow(self):
         """Creates and connects the authorization worker."""
+        if self._rollout_paused:
+            return
         self.loading.emit()
         self.invalidate_session()
         self._interactive_flow = True
@@ -103,6 +109,8 @@ class AuthService(QObject):
     @pyqtSlot()
     def load_stored_token(self):
         """Creates and connects the token retriever worker."""
+        if self._rollout_paused:
+            return
         if self._interactive_flow:
             self.error.emit("Autenticação em andamento", "Aguardando a nova sessão")
             return
@@ -131,6 +139,16 @@ class AuthService(QObject):
         THE CENTRAL HUB.
         Called whenever we get a valid token (from Login, Storage, or Refresh).
         """
+        if self._rollout_paused:
+            # Do not wait on _session_lock: a refresh worker may be holding it
+            # across slow token storage. Publication is a GUI-thread operation;
+            # validate this deferred candidate again after all workers drain.
+            if generation is not None and generation != self._session_generation:
+                return
+            if credential_revision is not None and credential_revision != self._credential_revision:
+                return
+            self._rollout_token = (access_token, refresh_token, generation, credential_revision)
+            return
         with self._session_lock:
             if generation is not None and generation != self._session_generation:
                 return
@@ -160,6 +178,8 @@ class AuthService(QObject):
 
     def _schedule_next_refresh(self, access_token: str):
         """Decodes JWT and sets the timer."""
+        if self._rollout_paused:
+            return
         try:
             # Decode without verification (we just want the 'exp' claim)
             decoded = jwt.decode(access_token, options={"verify_signature": False})
@@ -201,7 +221,7 @@ class AuthService(QObject):
         Performs the refresh. 
         Previously named '_refresh_token', renamed to be more explicit.
         """
-        if self._interactive_flow or self._refreshing:
+        if self._rollout_paused or self._interactive_flow or self._refreshing:
             return
         self._refreshing = True
         generation = self._session_generation
@@ -220,3 +240,22 @@ class AuthService(QObject):
             lambda msg: self.error.emit("Sessão expirada. Faça login novamente.", msg) if generation == self._session_generation else None
         )
         self._thread_pool.start(worker)
+
+    def pause_for_rollout(self):
+        self._rollout_paused = True
+        self._resume_interactive = self._interactive_flow
+        self._refresh_timer.stop()
+        if self._authorization_flow_worker:
+            self._authorization_flow_worker.stop()
+
+    def resume_after_rollout(self):
+        self._rollout_paused = False
+        pending, self._rollout_token = self._rollout_token, None
+        if pending:
+            self._on_access_token_received(*pending)
+        elif self._resume_interactive:
+            self.load_device_flow()
+        elif self._bundle_access_token:
+            self._schedule_next_refresh(self._bundle_access_token)
+        else:
+            self.load_stored_token()

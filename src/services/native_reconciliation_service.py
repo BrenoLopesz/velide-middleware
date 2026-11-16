@@ -14,6 +14,7 @@ class NativeReconciliationService(QObject):
     order_state = pyqtSignal(dict)
     order_restored = pyqtSignal(Order, object)
     sync_error = pyqtSignal(str)
+    recovery_ready = pyqtSignal()
 
     def __init__(self, gateway, journal, target):
         super().__init__()
@@ -30,15 +31,19 @@ class NativeReconciliationService(QObject):
         self._lifecycle = 0
         self._initialized = False
         self._initializing = False
+        self._rollout_paused = False
+        self._reconcile_soon = QTimer(self)
+        self._reconcile_soon.setSingleShot(True)
+        self._reconcile_soon.timeout.connect(self.trigger_reconciliation)
 
     def invalidate_pending_reads(self):
         self._generation += 1
         self._busy = False
         if self._running:
-            QTimer.singleShot(0, self.trigger_reconciliation)
+            self._reconcile_soon.start(0)
 
     def start_service(self):
-        if self._running:
+        if self._rollout_paused or self._running:
             return
         self._running = True
         self._generation += 1
@@ -47,6 +52,20 @@ class NativeReconciliationService(QObject):
         # Periodic recovery is owned by the running service, not a read callback.
         self.timer.start()
         self._load_bootstrap()
+
+    def ensure_recovered(self):
+        """Reannounce durable recovery after scope validation, if already read.
+
+        Startup wiring may have started reconciliation before authentication.
+        Keep this separate from start_service(): Farmax calls that method while
+        opening intake, so reannouncing there would recurse through scope_ready.
+        """
+        if self._rollout_paused:
+            return
+        if self._running and self._initialized and self._bootstrapped:
+            self.recovery_ready.emit()
+        else:
+            self.start_service()
 
     def _load_bootstrap(self):
         if self._initializing or not self._running:
@@ -66,6 +85,8 @@ class NativeReconciliationService(QObject):
             self._initializing = False
             self._initialized = True
             self._bootstrap_after, self._bootstrapped = state["after"], state["complete"]
+            if self._bootstrapped:
+                self.recovery_ready.emit()
             self.trigger_reconciliation()
 
     def stop_service(self):
@@ -74,8 +95,21 @@ class NativeReconciliationService(QObject):
         self._generation += 1
         self._busy = False
         self.timer.stop()
+        self._reconcile_soon.stop()
+
+    def pause_for_rollout(self):
+        self._resume_running = self._running
+        self._rollout_paused = True
+        self.stop_service()
+
+    def resume_after_rollout(self):
+        self._rollout_paused = False
+        if self._resume_running:
+            self.start_service()
 
     def trigger_reconciliation(self):
+        if self._rollout_paused:
+            return
         if self._running and not self._initialized:
             self._load_bootstrap()
             return
@@ -105,16 +139,25 @@ class NativeReconciliationService(QObject):
             if generation != self._generation or not self._running:
                 return
             self._publish(states, rows)
-            self._bootstrapped = len(states) < 100
-            if states:
-                self._bootstrap_after = states[-1]["externalOrderId"]
-            self.journal.submit("bootstrap_progress", self._bootstrap_after, self._bootstrapped,
-                                success=lambda _: self._bootstrap_page_finished(generation), failure=self._error)
+            complete = len(states) < 100
+            after = states[-1]["externalOrderId"] if states else self._bootstrap_after
+            def saved(_):
+                if generation != self._generation or not self._running:
+                    # A committed page is recovered from SQLite next cycle.
+                    # Never announce recovery using speculative in-memory state.
+                    self._initialized = False
+                    return
+                self._bootstrap_after, self._bootstrapped = after, complete
+                self._bootstrap_page_finished(generation)
+            self.journal.submit("bootstrap_progress", after, complete,
+                                success=saved, failure=self._error)
         self.journal.submit("native_states", states, self.target == TargetSystem.FARMAX, success=committed, failure=self._error)
 
     def _bootstrap_page_finished(self, generation):
         if generation == self._generation and self._running:
             self._busy = False
+            if self._bootstrapped:
+                self.recovery_ready.emit()
             self.trigger_reconciliation()
 
     def _loaded(self, rows):

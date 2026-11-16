@@ -19,6 +19,9 @@ def stack(tmp_path,qtbot):
     gateway.is_ready.return_value = False
     service = DeliveriesService(gateway,config,TargetSystem.CDS,DeliveryRepository(),journal=journal)
     service._dispatcher._running = True
+    # These retry/source-hold regressions exercise an already recovered graph.
+    # Startup pagination and the closed recovery gate have dedicated tests.
+    service._dispatcher._recovery_ready = True
     table = DeliveryTableModel()
     service.delivery_acknowledged.connect(table.add_delivery_acknowledge)
     service.delivery_update.connect(lambda internal,status: table.update_delivery(internal,service.get_order(internal),status) if service.get_order(internal) else None)

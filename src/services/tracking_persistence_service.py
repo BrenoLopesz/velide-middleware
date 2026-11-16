@@ -37,6 +37,8 @@ class TrackingPersistenceService(QObject):
         self.logger = logging.getLogger(__name__)
         self._sqlite = sqlite_service
         self.journal = journal
+        self._rollout_paused = False
+        self._deferred_hydration = None
         self._cleanup_service = DailyCleanupService(
             sqlite_service=self._sqlite, 
             days_retention=sqlite_days_retention
@@ -93,6 +95,11 @@ class TrackingPersistenceService(QObject):
         Populates the in-memory cache using NORMALIZED keys.
         Segregates Active vs Archived based on Status.
         """
+        if self._rollout_paused:
+            # owned_ids() takes the ownership SQLite write lock. A read result
+            # queued before pause must not block the GUI behind a draining writer.
+            self._deferred_hydration = rows
+            return
         count_active = 0
         # count_archived = 0
         ownership = self.journal.journal.__dict__.get("ownership") if self.journal else None
@@ -140,6 +147,15 @@ class TrackingPersistenceService(QObject):
             if row["external_id"]:
                 self._id_map[key] = row["external_id"]
         self.hydrated.emit()
+
+    def pause_for_rollout(self):
+        self._rollout_paused = True
+
+    def resume_after_rollout(self):
+        self._rollout_paused = False
+        rows, self._deferred_hydration = self._deferred_hydration, None
+        if rows is not None:
+            self._on_initial_data_loaded(rows)
 
     # --- Public API for Strategy ---
 

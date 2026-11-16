@@ -148,7 +148,9 @@ def _adopt(database, settings, result):
                 id INTEGER PRIMARY KEY CHECK(id=1), installation_id TEXT NOT NULL,
                 scope TEXT NOT NULL, source_identity TEXT NOT NULL,
                 legacy_adopted INTEGER NOT NULL, adopted_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
-            installation_id = str(uuid.uuid4())  # Local installation ID, NEVER a native API ID.
+            # Native onboarding already registered this independent installation
+            # UUID. Ordinary legacy adoption still generates its own local ID.
+            installation_id = settings.installation_id or str(uuid.uuid4())
             conn.execute("INSERT INTO UpgradeInstallation(id,installation_id,scope,source_identity,legacy_adopted) VALUES(1,?,?,?,?)",
                          (installation_id, scope, identity, int(not settings.api.native)))
             create_inventory_table(conn)
@@ -211,7 +213,7 @@ def installation_binding(config_path, database_path):
         conn.close()
 
 
-def _native_cutover(config_path, raw, document, database, package, result):
+def _native_cutover(config_path, raw, document, database, package, result, before_commit=None):
     if package.get("version") != 1 or not package.get("authority"):
         raise ValueError("An authoritative version-1 installation package is required")
     identity = hashlib.sha256(json.dumps(package, sort_keys=True).encode("utf-8")).hexdigest()
@@ -253,7 +255,7 @@ def _native_cutover(config_path, raw, document, database, package, result):
     staged = _new_path(database.parent, database.stem + ".native-" + identity[:12] + "-", ".db")
     try:
         _copy_database(database, staged)
-        _publish_native_copy(config_path, raw, document, package, result, identity, staged)
+        _publish_native_copy(config_path, raw, document, package, result, identity, staged, before_commit)
     except BaseException:
         # Ordinary rejected packages should not accumulate full database copies
         # on every launch. If publication might have happened, keep the copy.
@@ -264,7 +266,7 @@ def _native_cutover(config_path, raw, document, database, package, result):
         raise
 
 
-def _publish_native_copy(config_path, raw, document, package, result, identity, staged):
+def _publish_native_copy(config_path, raw, document, package, result, identity, staged, before_commit=None):
     from config import Settings, native_upgrade_document
     from native_migration import migrate
 
@@ -364,6 +366,10 @@ def _publish_native_copy(config_path, raw, document, package, result, identity, 
             raise ValueError("Configuration changed while preparing cutover")
         from upgrade_auth import bind_pre_cutover_auth
         bind_pre_cutover_auth(Path(result.token_path), result.settings.auth, result.backups)
+        if before_commit is not None:
+            # Automatic rollout persists its independent, verified native grant
+            # into the final profile cache BEFORE the sole activation commit.
+            before_commit(new_settings)
         # Both profiles remain live. Never clone the legacy refresh grant, even
         # for identical auth: concurrent rotation could revoke the token family.
         # Native obtains an independent device-flow session in its empty cache.
@@ -411,7 +417,7 @@ def _cds_observation_options(result):
     result.cds_baseline_path = str(path)
 
 
-def upgrade_installation(config_path, bundle_dir=None, package_path=None):
+def upgrade_installation(config_path, bundle_dir=None, package_path=None, before_commit=None, automatic=False):
     """Return effective Settings + diagnostics. Call before build_services.
 
     Adoption errors raise (no ingestion should start with an ambiguous binding).
@@ -422,10 +428,17 @@ def upgrade_installation(config_path, bundle_dir=None, package_path=None):
     from config import Settings
     config_path = Path(config_path).resolve()
     bundle_dir = Path(bundle_dir).resolve() if bundle_dir else config_path.parent.parent
-    with FileLock(str(config_path) + ".upgrade.lock", timeout=0):
+    if not automatic:
+        from middleware_rollout import recover_local_rollout
+        recover_local_rollout(config_path, bundle_dir)
+        if package_path and Path(package_path).name.endswith(".automatic-native-upgrade.json"):
+            raise ValueError("Automatic rollout packages require the live coordinator")
+    with FileLock(str(config_path) + ".upgrade.lock", timeout=0, is_singleton=True):
         raw = config_path.read_bytes()
         document = yaml.safe_load(raw.decode("utf-8-sig"))
         settings = Settings.model_validate(document)
+        if settings.onboarding:
+            raise ValueError("Complete native setup before installation adoption")
         database = Path(settings.sqlite_path)
         if not database.is_absolute():
             database = bundle_dir / database
@@ -440,7 +453,7 @@ def upgrade_installation(config_path, bundle_dir=None, package_path=None):
         if package_path.exists():
             try:
                 package = json.loads(package_path.read_text(encoding="utf-8-sig"))
-                _native_cutover(config_path, raw, document, database, package, result)
+                _native_cutover(config_path, raw, document, database, package, result, before_commit)
             except Exception as exc:
                 # Keep the technical cause for CLI/support diagnostics; main
                 # logs instructions at INFO and QLogHandler shows them verbatim.

@@ -324,6 +324,8 @@ class FarmaxDeliveryIngestor(QObject):
 
     def _fetch_details_payload(self, sale_ids: Tuple[float, ...]) -> None:
         """Initiates the worker to fetch full order details."""
+        if not self._is_running:
+            return
         worker = FarmaxWorker.for_fetch_deliveries_by_id(
             self._repository, cd_vendas=sale_ids
         )
@@ -420,7 +422,7 @@ class FarmaxDeliveryIngestor(QObject):
                 pass
 
             self._retry_timer.timeout.connect(
-                partial(self._fetch_details_payload, sale_ids=payload)
+                self._guard(partial(self._fetch_details_payload, sale_ids=payload))
             )
             self._retry_timer.start(delay)
         else:

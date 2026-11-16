@@ -93,7 +93,7 @@ def export_upgrade_inventory(config_path, bundle_dir=None):
 
     config_path = Path(config_path).resolve()
     root = Path(bundle_dir).resolve() if bundle_dir else config_path.parent.parent
-    with FileLock(str(config_path) + ".upgrade.lock", timeout=0):
+    with FileLock(str(config_path) + ".upgrade.lock", timeout=0, is_singleton=True):
         raw = config_path.read_bytes()
         settings = Settings.model_validate(yaml.safe_load(raw.decode("utf-8-sig")))
         endpoint = urlsplit(settings.api.velide_server)

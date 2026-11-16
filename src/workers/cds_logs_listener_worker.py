@@ -277,6 +277,8 @@ class CdsLogsListenerWorker(QRunnable):
 
     def run(self):
         try:
+            if self._stop.is_set():
+                return
             if not os.path.isdir(self.folder_path):
                 raise ValueError("Diretório CDS inválido")
             self._prepare_baseline()
@@ -324,5 +326,5 @@ class CdsLogsListenerWorker(QRunnable):
 
     def stop(self):
         self._stop.set()
-        if self._observer:
-            self._observer.stop()
+        # Observer.stop() can join emitter threads. Keep that work in run()'s
+        # finally block, never in the GUI caller with a rollout deadline.

@@ -35,6 +35,7 @@ class CdsStrategy(IConnectableStrategy):
         self._baseline_path = baseline_path
         self._pending_files = tuple(pending_files)
         self._running = False
+        self._rollout_paused = False
         self._announced = set()
         self._local_orders = {}
         self._invalid_files = {}
@@ -46,7 +47,7 @@ class CdsStrategy(IConnectableStrategy):
 
     def start_listening(self):
         """Creates and starts the file listener worker in a background thread."""
-        if self._running:
+        if self._rollout_paused or self._running:
             return
         self._running = True
         self._file_listener_worker = CdsLogsListenerWorker(self._folder_to_watch, self._baseline_path, self._pending_files)
@@ -65,6 +66,16 @@ class CdsStrategy(IConnectableStrategy):
         if self._file_listener_worker is None:
             return
         self._file_listener_worker.stop()
+
+    def pause_for_rollout(self):
+        self._resume_running = self._running
+        self._rollout_paused = True
+        self.stop_listening()
+
+    def resume_after_rollout(self):
+        self._rollout_paused = False
+        if self._resume_running:
+            self.start_listening()
 
     def fetch_deliverymen(self, success, error):
         raise NotImplementedError

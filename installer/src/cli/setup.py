@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 from cx_Freeze import Executable, setup
 from qt_compat import install_qt_glob_compat
-from release_resources import resource_files
+from release_resources import generate_service_resource, resource_files
 
 install_qt_glob_compat()
 
@@ -16,6 +16,10 @@ ROOT_DIR = CURRENT_DIR.parent.parent.parent  # Go up 3 levels to velide-middlewa
 SRC_DIR = ROOT_DIR / "src"
 OUTPUT_DIR = ROOT_DIR / "output" / "middleware"
 RESOURCES_DIR = ROOT_DIR / "resources"
+# Never freeze the checked-in .invalid placeholder or reuse a previous build's URL.
+SERVICE_RESOURCE = generate_service_resource(
+    ROOT_DIR / "output" / "release-resources" / "middleware-service.json"
+)
 
 # Add src to python path so cx_Freeze can find imports
 sys.path.insert(0, str(SRC_DIR))
@@ -59,7 +63,7 @@ build_exe_options = {
         "xml", 
         "pydoc"
     ],
-    "include_files": resource_files(RESOURCES_DIR),
+    "include_files": resource_files(RESOURCES_DIR, service_resource=SERVICE_RESOURCE),
     "build_exe": str(OUTPUT_DIR),
     
     # --- FIX FOR [WinError 123] ---

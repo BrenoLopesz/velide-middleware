@@ -29,6 +29,9 @@ class DurableDeliveryDispatcher(QObject):
         self._validating = False
         self._validation_ticket = None
         self._blocked_epoch = None
+        self._rollout_paused = False
+        self._requires_recovery = False  # Enabled by DeliveriesService's graph gate.
+        self._recovery_ready = True
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._pump)
@@ -40,8 +43,11 @@ class DurableDeliveryDispatcher(QObject):
         return self._running and ticket == self._ticket()
 
     def start(self):
+        if self._rollout_paused:
+            return
         self._generation += 1
         self._running = True
+        self._recovery_ready = not self._requires_recovery
         self._authorized = self._validating = False
         self._blocked_epoch = None
         self._timer.start()
@@ -49,18 +55,20 @@ class DurableDeliveryDispatcher(QObject):
 
     def stop(self):
         self._generation += 1
+        self._recovery_ready = not self._requires_recovery
         self._running = self._authorized = self._validating = False
         self._timer.stop()
         self.scope_invalidated.emit()
 
     def invalidate_auth(self):
+        self._recovery_ready = not self._requires_recovery
         self._generation += 1
         self._authorized = self._validating = self._busy = False
         self._busy_ticket = None
         self.scope_invalidated.emit()
 
     def _validate_scope(self):
-        if not self._running or self._validating or not self.gateway.is_ready():
+        if self._rollout_paused or not self._running or self._validating or not self.gateway.is_ready():
             return
         if self._blocked_epoch == self.gateway.generation:
             return
@@ -85,6 +93,11 @@ class DurableDeliveryDispatcher(QObject):
         QThreadPool.globalInstance().start(worker)
 
     def _validated(self, ticket):
+        if self._rollout_paused:
+            # Validation is a repeatable read, not a mutation outcome. Defer the
+            # synchronous ownership binding until a fresh validation on resume.
+            self._validating = False
+            return
         if not self._current(ticket):
             if self._validation_ticket == ticket:
                 self._validating = False
@@ -155,13 +168,16 @@ class DurableDeliveryDispatcher(QObject):
         self.request_cancel(internal_id, external_id)
 
     def _pump(self):
-        if not self._running or not self.gateway.is_ready():
+        if self._rollout_paused or not self._running or not self.gateway.is_ready():
             return
         if not self._authorized or self._authorized_epoch != self.gateway.generation:
             if self._authorized:
+                self._recovery_ready = not self._requires_recovery
                 self.scope_invalidated.emit()
             self._authorized = False
             self._validate_scope()
+            return
+        if not self._recovery_ready:
             return
         if self._busy:
             return
@@ -288,6 +304,18 @@ class DurableDeliveryDispatcher(QObject):
             self._busy = False
             self._busy_ticket = None
         self._pump()
+
+    def pause_for_rollout(self):
+        # Do not invalidate tickets/gateway: a sent mutation must commit its
+        # outcome and its normal post-commit callbacks before the barrier.
+        self._rollout_paused = True
+        self._timer.stop()
+
+    def resume_after_rollout(self):
+        self._rollout_paused = False
+        if self._running:
+            self._timer.start()
+            self._pump()
 
     def _storage_error(self, error, ticket=None):
         if ticket is not None and not self._current(ticket):

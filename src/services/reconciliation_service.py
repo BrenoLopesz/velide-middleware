@@ -58,9 +58,12 @@ class ReconciliationService(QObject):
         self._is_missing_api = False
         self._reconciliation_config = reconciliation_config
         self._in_flight = False
+        self._rollout_paused = False
 
     def start_service(self):
         """Starts the automatic background timer."""
+        if self._rollout_paused:
+            return
         if not self._reconciliation_config.enabled:
             self.logger.warning(
                 "Serviço de reconciliação está desativado nas configurações!"
@@ -84,6 +87,19 @@ class ReconciliationService(QObject):
         self.trigger_reconciliation()
         self.timer.start(self._reconciliation_config.sync_interval_ms)
 
+    def stop_service(self):
+        self.timer.stop()
+
+    def pause_for_rollout(self):
+        self._resume_running = self.timer.isActive()
+        self._rollout_paused = True
+        self.stop_service()
+
+    def resume_after_rollout(self):
+        self._rollout_paused = False
+        if self._resume_running:
+            self.start_service()
+
     def register_websocket_event(self, velide_id: str):
         """
         Call this method whenever a Websocket event arrives for a delivery.
@@ -96,7 +112,7 @@ class ReconciliationService(QObject):
         """
         Step 1: Spawns the Worker to fetch the Global Snapshot.
         """
-        if self._in_flight:
+        if self._rollout_paused or self._in_flight:
             return
         self._in_flight = True
         self.sync_started.emit()

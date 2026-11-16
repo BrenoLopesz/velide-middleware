@@ -224,6 +224,8 @@ def create_strategy(
 
 def build_services(app_config: Settings, upgrade=None, ownership=None) -> Services:
     """Creates and wires together all core application services."""
+    if app_config.onboarding:
+        raise ValueError("Conclua a configuração nativa antes de iniciar a sincronização")
     if app_config.target_system == TargetSystem.FARMAX and app_config.farmax and not app_config.api.source_timezone:
         app_config.api.source_timezone = app_config.farmax.timezone
     velide_gateway = VelideGateway(
@@ -273,6 +275,7 @@ def build_services(app_config: Settings, upgrade=None, ownership=None) -> Servic
     if app_config.api.native:
         from services.native_reconciliation_service import NativeReconciliationService
         reconciliation_service = NativeReconciliationService(velide_gateway, journal, app_config.target_system)
+        deliveries_service.set_recovery_service(reconciliation_service)
         reconciliation_service.order_restored.connect(deliveries_service._on_order_restored)
         reconciliation_service.order_state.connect(deliveries_service.on_native_state)
     websockets_service = VelideWebsocketsService(app_config.api, auth_service)
@@ -348,6 +351,13 @@ def main():
     # Set up logging
     configure_logging(view)
 
+    if config.onboarding:
+        from visual.screens.native_onboarding_screen import NativeOnboardingDialog
+        setup = NativeOnboardingDialog(config_path, BUNDLE_DIR)
+        if setup.exec_() != setup.Accepted:
+            return
+        install_effective_settings(config, Settings.from_yaml(config_path))
+
     # Keep the installed source/configuration while adopting old local storage.
     # A centrally provisioned native package is applied atomically, when present.
     from local_upgrade import upgrade_installation
@@ -360,6 +370,29 @@ def main():
     # changes new intake only; the other profile remains available for recovery.
     from services.profile_application import ProfileApplication
     runtime = ProfileApplication(app, config, upgrade, config_path, BUNDLE_DIR, view)
+    # Keep retired Qt receivers alive after their drained shutdown; a queued
+    # presentation-only signal must never target a destroyed object.
+    retired = []
+    from services.rollout_controller import RolloutController
+    def attach(current):
+        current.rollout = RolloutController(current, config_path, BUNDLE_DIR)
+        current.rollout.activated.connect(rebuild)
+    def rebuild(_result):
+        nonlocal runtime
+        old = runtime
+        old.shutdown()
+        for profile in old.runtimes.values():
+            profile.presenter._machine.stop()
+            profile.view.hide()
+        retired.append(old)
+        effective = upgrade_installation(config_path, BUNDLE_DIR)
+        install_effective_settings(config, effective.settings)
+        replacement_view = MainView()
+        configure_logging(replacement_view)
+        runtime = ProfileApplication(app, config, effective, config_path, BUNDLE_DIR, replacement_view)
+        attach(runtime)
+        runtime.start()
+    attach(runtime)
     runtime.start()
 
     # Run the application event loop

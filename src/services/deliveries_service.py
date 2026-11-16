@@ -40,6 +40,9 @@ class DeliveriesService(QObject):
             gateway,
             QThreadPool.globalInstance()
         )
+        if journal and api_config.native:
+            self._dispatcher._requires_recovery = True
+            self._dispatcher._recovery_ready = False
 
         # 2. CONFIGURATION
         self._api_config = api_config
@@ -47,6 +50,8 @@ class DeliveriesService(QObject):
         self._active_strategy: Optional[IConnectableStrategy] = None
         self._cancellation_intents = set()
         self._listening = False
+        self._rollout_paused = False
+        self._recovery = None
 
         # 3. CONNECT INTERNAL DISPATCHER SIGNALS
         # This bridges the gap between the Worker -> Dispatcher -> Service
@@ -56,8 +61,50 @@ class DeliveriesService(QObject):
         if journal:
             self._dispatcher.order_restored.connect(self._on_order_restored)
             self._dispatcher.import_accepted.connect(self._on_import_accepted)
-            self._dispatcher.scope_ready.connect(lambda: self._active_strategy.on_scope_verified() if self._active_strategy else None)
-            self._dispatcher.scope_invalidated.connect(lambda: self._active_strategy.on_scope_invalidated() if self._active_strategy else None)
+            self._dispatcher.scope_ready.connect(self._scope_ready)
+            self._dispatcher.scope_invalidated.connect(self._scope_invalidated)
+
+    def set_recovery_service(self, reconciliation):
+        """Native builder hookup, BEFORE start_listening (including CDS).
+
+        Scope validation starts recovery; its durable final page opens intake.
+        An unbound native service deliberately fails closed.
+        """
+        if self._recovery is not None:
+            if self._recovery is reconciliation:
+                return
+            raise ValueError("Native recovery service is already bound")
+        self._recovery = reconciliation
+        reconciliation.recovery_ready.connect(self._recovery_completed)
+
+    def _scope_ready(self):
+        if self._rollout_paused:
+            return
+        if self._api_config.native:
+            if self._recovery:
+                self._recovery.ensure_recovered()
+            return
+        if self._active_strategy:
+            self._active_strategy.on_scope_verified()
+
+    def _scope_invalidated(self):
+        if self._active_strategy:
+            self._active_strategy.on_scope_invalidated()
+            if self._api_config.native:
+                self._active_strategy.stop_listening()
+        if self._recovery:
+            self._recovery.stop_service()
+
+    def _recovery_completed(self):
+        if (self._rollout_paused or not self._listening
+                or not self._dispatcher._authorized
+                or self._dispatcher._authorized_epoch != self._gateway.generation):
+            return
+        self._dispatcher._recovery_ready = True
+        self._active_strategy.on_scope_verified()
+        # Farmax hydrates again, now including recovered remote identities.
+        self._active_strategy.start_listening()
+        self._dispatcher._pump()
 
     def get_order(self, order_id: str) -> Optional[Order]:
         """Facade for the repository."""
@@ -81,7 +128,7 @@ class DeliveriesService(QObject):
         self._active_strategy.synchronization_failed.connect(self._on_delivery_request_failure)
 
     def start_listening(self):
-        if self._listening:
+        if self._rollout_paused or self._listening:
             return
         if self._active_strategy is None:
             self.logger.critical(
@@ -91,7 +138,8 @@ class DeliveriesService(QObject):
         self._listening = True
         if self._journal:
             self._dispatcher.start()
-        self._active_strategy.start_listening()
+        if not self._api_config.native:
+            self._active_strategy.start_listening()
         self.listening_started.emit()
 
     # =========================================================================
@@ -281,6 +329,16 @@ class DeliveriesService(QObject):
         if hasattr(self._gateway, "invalidate_session"):
             self._gateway.invalidate_session()
 
+    def pause_for_rollout(self):
+        self._rollout_paused = True
+        self._dispatcher.pause_for_rollout()
+
+    def resume_after_rollout(self):
+        self._rollout_paused = False
+        self._dispatcher.resume_after_rollout()
+        if self._journal and self._listening and self._dispatcher._authorized:
+            self._scope_ready()
+
     @property
     def supports_native_retry(self):
         return self._api_config.native is not None
@@ -290,7 +348,7 @@ class DeliveriesService(QObject):
         return self._journal is not None
 
     def retry_native_order(self, internal_id):
-        if not self._journal:
+        if self._rollout_paused or not self._journal or not self._dispatcher._recovery_ready:
             return
         from workers.native_api_worker import NativeApiWorker
         ticket = self._dispatcher._ticket()

@@ -226,5 +226,6 @@ output/
 docs/*
 !docs/AUTH0_TRANSITION.md
 !docs/NATIVE_ROLLOUT.md
+!docs/AUTOMATIC_ROLLOUT.md
 meta/
 .roomodes
