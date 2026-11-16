@@ -55,6 +55,8 @@ class RolloutController(QObject):
         super().__init__(runtime)
         self.runtime = runtime
         self.busy = False
+        self._retired = False
+        self._closed = False
         self.native_auth = None
         self._auth_pool = QThreadPool(self)
         self._retired_auth = []
@@ -104,15 +106,32 @@ class RolloutController(QObject):
         self.timer.start(1000)
 
     def on_token(self, name, token):
-        if self.busy or not self.coordinator:
+        if self._retired or self.busy or not self.coordinator:
             return
         if self.coordinator.state["state"] == "ACK_PENDING" and name == "native":
             self._perform(lambda: self.coordinator.acknowledge(token))
+            self.schedule()
         elif name == "legacy":
             self.timer.start(100)
 
+    def _handoff_if_committed(self, result=None):
+        # Durable ACK_PENDING/APPLIED also describe an already-active native
+        # runtime. Only this controller's paused legacy graph needs rebuilding.
+        if self._retired or not self.coordinator._paused:
+            return False
+        if self.coordinator.state["state"] not in {"ACK_PENDING", "APPLIED"} and not committed_receipt(
+                self.coordinator.config_path, self.coordinator.bundle_dir, self.coordinator.state):
+            return False
+        # Retire BEFORE emitting: the synchronous rebuild can shut us down, and
+        # queued token/timer callbacks must not rebuild again or rearm this timer.
+        self._retired = True
+        self.timer.stop()
+        self.dialog.hide()
+        self.activated.emit(result)
+        return True
+
     def _perform(self, operation):
-        if self.busy or self.coordinator is None:
+        if self._retired or self.busy or self.coordinator is None:
             return None
         self.busy = True
         self.transport.cancel_requested = False
@@ -121,45 +140,47 @@ class RolloutController(QObject):
         self.finish.setEnabled(False)
         try:
             result = operation()
-            if self.coordinator.state["state"] in {"ACK_PENDING", "APPLIED"} and self.coordinator._paused:
-                self.timer.stop()
-                self.dialog.hide()
-                self.activated.emit(result)
+            self._handoff_if_committed(result)
             return result
         except Exception as error:
             # Invalidation disk failure deliberately leaves the graph blocked;
             # never claim resumed service or enable another final inventory.
             self.message.setText("Não foi possível concluir a atualização: " + str(error))
-            if self.coordinator.state["state"] in {"ACK_PENDING", "APPLIED"} or committed_receipt(
-                    self.coordinator.config_path, self.coordinator.bundle_dir, self.coordinator.state):
-                self.activated.emit(None)
-            elif self.coordinator.state["state"] in {"PAUSING", "WAITING", "READY", "APPLYING"}:
+            if not self._handoff_if_committed() and self.coordinator.state["state"] in {
+                    "PAUSING", "WAITING", "READY", "APPLYING"}:
                 self.message.setText("Recuperação necessária antes de continuar: " + str(error))
             return None
         finally:
             self.busy = False
             self.transport.cancel_requested = False
-            state = self.coordinator.state["state"]
-            self.retry.setEnabled(state not in {"PAUSING", "WAITING", "READY", "APPLYING"} and
-                                  getattr(self.coordinator.graph, "state", "running") == "running")
-            self.login.setEnabled(state in {"AWAITING_LOGIN", "PREPARED"})
-            self.finish.setEnabled(state == "PREPARED")
+            if not self._retired:
+                state = self.coordinator.state["state"]
+                self.retry.setEnabled(state not in {"PAUSING", "WAITING", "READY", "APPLYING"} and
+                                      getattr(self.coordinator.graph, "state", "running") == "running")
+                self.login.setEnabled(state in {"AWAITING_LOGIN", "PREPARED"})
+                self.finish.setEnabled(state == "PREPARED")
 
     def discover(self):
+        if self._retired:
+            return
         self._perform(self.coordinator.discover if self.coordinator else lambda: None)
         if self.coordinator and self.coordinator.state["state"] in {"AWAITING_LOGIN", "PREPARED"}:
             self.dialog.show()
         self.schedule()
 
     def schedule(self):
-        if not self.coordinator:
+        if self._retired or not self.coordinator:
             return
         state = self.coordinator.state
-        if state["state"] not in {"APPLIED", "PREPARED", "AWAITING_LOGIN", "ACK_PENDING"}:
+        if state["state"] == "ACK_PENDING":
+            self.timer.start(30000)
+        elif state["state"] not in {"APPLIED", "PREPARED", "AWAITING_LOGIN"}:
             self.timer.start(int(max(1, min(300, state.get("retry_after_seconds", 30))) * 1000))
+        else:
+            self.timer.stop()
 
     def tick(self):
-        if self.busy or self.coordinator is None:
+        if self._retired or self.busy or self.coordinator is None:
             return
         state = self.coordinator.state["state"]
         if state == "INVALIDATED" and getattr(self.coordinator.graph, "state", "running") != "running":
@@ -173,12 +194,13 @@ class RolloutController(QObject):
             token = native.services.auth._bundle_access_token if native else None
             if token:
                 self._perform(lambda: self.coordinator.acknowledge(token))
-            if self.coordinator.state["state"] == "ACK_PENDING":
-                self.timer.start(30000)
+            self.schedule()
         elif state not in {"APPLIED", "PREPARED", "AWAITING_LOGIN"}:
             self.discover()
 
     def _resumed(self):
+        if self._retired:
+            return
         self.message.setText("A sincronização legada foi retomada. Verifique novamente para iniciar outra tentativa.")
         self.retry.setEnabled(True)
 
@@ -198,7 +220,7 @@ class RolloutController(QObject):
         self.message.setText(labels.get(state["state"], state["state"]))
 
     def start_login(self):
-        if self.busy or not self.coordinator:
+        if self._retired or self.busy or not self.coordinator:
             return
         self.timer.stop()
         if self.native_auth:
@@ -221,7 +243,7 @@ class RolloutController(QObject):
             url, url, html.escape(code.get("user_code", ""))))
 
     def prepared(self, token):
-        if self.busy or not self.native_auth:
+        if self._retired or self.busy or not self.native_auth:
             return
         self._perform(lambda: self.coordinator.prepare(read_token_from_file(self.coordinator.prepared_path)))
 
@@ -252,7 +274,7 @@ class RolloutController(QObject):
         self.schedule()
 
     def cancel(self):
-        if not self.coordinator:
+        if self._retired or not self.coordinator:
             return
         if self.busy:
             self.transport.cancel_requested = True
@@ -269,6 +291,9 @@ class RolloutController(QObject):
         self.schedule()
 
     def shutdown(self):
+        if self._closed:
+            return
+        self._closed = self._retired = True
         self.timer.stop()
         if self.native_auth:
             self.native_auth.invalidate_session()
