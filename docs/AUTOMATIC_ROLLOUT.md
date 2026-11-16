@@ -283,6 +283,9 @@ branch before merging this rollout PR.
 Reconciliation uses one queued refresh/retry timer and lifecycle/pass/gateway
 tickets. Rollout pause stops that scheduler and its correction feed; graph quiescence
 drains outstanding workers and journal callbacks before inventory export. Recovery
-opens native intake only after the final bootstrap checkpoint is committed. An
+opens native intake only after the final bootstrap checkpoint is committed. For
+Farmax, the correction feed must also be initialized, with no inventory resync or
+dirty identities remaining, including locally queued orders. Feed progress triggers
+a lifecycle-fenced readiness check against one durable SQLite snapshot. An
 invalidated checkpoint is reloaded from SQLite, and retired callbacks cannot release
 a replacement pass or announce recovery for it.
