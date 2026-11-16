@@ -67,6 +67,12 @@ financial records are outside these writes. Missing/duplicate/source-incarnation
 conflicts fail targeted identity checks. An all-cancelled/returned source cannot
 be made eligible by reversing commercial records.
 
+After source identity validation, a native projection with no eligible items
+waits without changing delivery or sale fields. If the same correlated source
+later becomes eligible, normal retry resumes projection. Unknown statuses and
+identity/provenance conflicts still require review; existing source-review holds
+are not cleared by an active snapshot or the retry button.
+
 ## Notification and recovery
 
 `integrationOrderChanges` is a source-authorized cursor query and WebSocket
@@ -114,6 +120,13 @@ Inventory recovery preserves the server request ID; unknown historical evidence
 stays consumed until a complete active source snapshot establishes a new baseline.
 Request receipts and current remote state are separate. Delayed mutation responses
 cannot replace restored local state.
+An acknowledged request reopens on its matching server `SUPERSEDED` receipt,
+including the reserved `legacy` receipt. V5 also acknowledged remote-only
+cancellation/deletion, which has no server request receipt. Those legacy rows
+can recover from an active `NONE` state only when the feed claim proves the read
+started after the ACK and its local generation has not changed. A higher history
+revision alone does not prove restoration: the read can predate the cancellation
+ACK. Contradictory active reads are rejected and their dirty work remains pending.
 Schema-v5 native cancellation intent migrates with the server's reserved
 `legacy` request ID, so startup retries also respect earlier supersession.
 
@@ -127,10 +140,12 @@ New regression suites:
 
 - `tests/integration/test_farmax_undo_redo.py`: committed forward/backward/skipped
   transitions, same-value native interference, crash/retry provenance, rapid
-  replacement, stale acknowledgements, drift, holds, cancellation restoration.
+  replacement, stale acknowledgements, drift, holds, cancellation restoration,
+  temporary source ineligibility and retained identity-review holds.
 - `tests/integration/test_native_change_feed.py`: cursor/dirty durability,
   notification during reads, source resync restart and replay, invalid pages,
-  durable fairness for missing/lagging/empty/failed reads.
+  durable fairness for missing/lagging/empty/failed reads, delayed-read/ACK ordering
+  with zero stale ERP writes, and post-ACK legacy recovery fences.
 - `tests/integration/test_cancellation_recovery.py`: recovered request dispositions,
   consumed-evidence suppression, metadata changes and new cancellation lifetimes.
 - `tests/unit/test_native_change_service.py`: burst coalescing, shutdown/restart,

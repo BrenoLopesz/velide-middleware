@@ -6,7 +6,7 @@ from sqlalchemy import event, text
 
 from api.sqlite_manager import SQLiteManager
 from api.sync_journal import SyncJournal
-from connectors.farmax.errors import FarmaxWaitingError
+from connectors.farmax.errors import FarmaxEvidenceError, FarmaxWaitingError
 from test_restored_write_fences import seeded
 from test_firebird_dialect import firebird  # noqa: F401 - disposable localhost fixture
 
@@ -225,6 +225,70 @@ def test_same_source_cancellation_evidence_cannot_recancel_restored_order(tmp_pa
     with sqlite3.connect(journal.path) as conn:
         assert conn.execute("SELECT disposition FROM SyncCancellationReceipts ORDER BY disposition").fetchall() == [
             ("ACKNOWLEDGED",), ("SUPERSEDED",)]
+
+
+@pytest.mark.parametrize("backend", ["farmax_stack", "firebird"])
+def test_restored_delivery_waits_for_same_sources_commercial_eligibility(
+        tmp_path, request, remote_state, backend):
+    from connectors.farmax.cancellation import cancellation_progress
+    repo, engine = request.getfixturevalue(backend)
+    journal = seeded(tmp_path, repo)
+    journal.native_states([remote_state("PENDING", execution=None)])
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE VENDAS SET STATUS='C'"))
+    intent = journal.record_farmax_progress("123", cancellation_progress(repo.fetch_sales_statuses_by_id((123,))))
+    journal.native_states([remote_state("CANCELLED", revision="2", execution=None,
+        cancellation="ACKNOWLEDGED", cancellationRequestId=intent["cancellation_request_id"])])
+    journal.native_states([remote_state("PENDING", revision="3", execution=None,
+        cancellation="SUPERSEDED", cancellationRequestId=intent["cancellation_request_id"])])
+    before = delivery(engine)
+    effect = journal.next_effect()
+    with pytest.raises(FarmaxWaitingError) as pending:
+        journal.apply_effect(effect["sequence"], effect["generation"], repo, ZONE, lambda: True)
+    assert journal.effect_result(effect["sequence"], str(pending.value), effect["generation"],
+                                 error_kind=pending.value.kind)
+    row = journal.get_order("123")
+    assert row["source_review"] is None and row["projection_outcome"] == "PENDING"
+    assert delivery(engine) == before
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT STATUS FROM VENDAS ORDER BY ORDEM")).fetchall() == [("C",), ("C",)]
+        assert conn.execute(text("SELECT COUNT(*) FROM VELIDE_PROJECTION_APPLY")).scalar() == 0
+    # Only the source operator restores commercial eligibility. No remote
+    # revision change or review-hold clearing is needed to retry the same target.
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE VENDAS SET STATUS='S'"))
+    active = journal.record_farmax_progress("123", cancellation_progress(repo.fetch_sales_statuses_by_id((123,))))
+    assert active["accepted"] and active["decision"] == "ACTIVE"
+    assert journal.retry_work("123")["retry_operation"] == "LOCAL"
+    assert apply(journal, repo)["outcome"] == "MATCHED"
+    assert delivery(engine) == ("S", None, None, None)
+
+
+def test_source_identity_conflict_stays_latched_when_items_become_active(tmp_path, farmax_stack, remote_state):
+    from connectors.farmax.cancellation import cancellation_progress
+    repo, engine = farmax_stack
+    journal = seeded(tmp_path, repo)
+    original_customer = repo.fetch_deliveries_by_id((123,), pending_only=False)[0].source_context["customer_id"]
+    journal.native_states([remote_state("PENDING", execution=None)])
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE ENTREGAS SET CD_CLIENTE=999"))
+        conn.execute(text("UPDATE VENDAS SET CD_CLIENTE=999,STATUS='C'"))
+    effect = journal.next_effect()
+    with pytest.raises(FarmaxEvidenceError, match="Source identity changed") as conflict:
+        journal.apply_effect(effect["sequence"], effect["generation"], repo, ZONE, lambda: True)
+    assert conflict.value.kind == "SOURCE_CONFLICT"
+    assert journal.effect_result(effect["sequence"], str(conflict.value), effect["generation"],
+                                 error_kind=conflict.value.kind)
+    review = journal.get_order("123")["source_review"]
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE ENTREGAS SET CD_CLIENTE=:customer"), {"customer": original_customer})
+        conn.execute(text("UPDATE VENDAS SET CD_CLIENTE=:customer,STATUS='S'"), {"customer": original_customer})
+    assert journal.record_farmax_progress("123", cancellation_progress(repo.fetch_sales_statuses_by_id((123,))))["accepted"]
+    journal.native_states([remote_state("PENDING", revision="2", execution=None)])
+    assert journal.get_order("123")["source_review"] == review
+    assert journal.next_effect() is None
+    with pytest.raises(ValueError, match="Resolve the source review"):
+        journal.retry_work("123")
 
 
 def test_hold_is_a_partial_visibility_result_and_release_reconciles(tmp_path, farmax_stack, remote_state):
