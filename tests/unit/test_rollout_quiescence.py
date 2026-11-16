@@ -219,11 +219,13 @@ def test_deferred_erp_effects_reject_export_without_erasing_work(runtime_factory
         assert db._get_conn().execute("SELECT state FROM SyncEffects").fetchone()[0] == "PENDING"
 
 
-def test_inflight_erp_ack_survives_timeout_then_resume(runtime_factory, remote_state, qtbot):
+def test_inflight_erp_ack_survives_timeout_then_resume(runtime_factory, remote_state, qtbot, farmax_stack):
     runtime = runtime_factory(farmax=True)
     journal = runtime.journal.journal
+    repository, _ = farmax_stack
+    source = repository.fetch_deliveries_by_id((123,), pending_only=False)[0].source_context
     journal.accept("123", dict(internal_id="123", customerName="Test", address="Rua A",
-                               createdAt="2026-11-11T12:00:00-03:00", source_context={"branch_id": "1"}))
+                               createdAt="2026-11-11T12:00:00-03:00", source_context=source))
     with SQLiteManager(journal.path) as db:
         db.add_mapping("courier", "5")
     journal.native_states([remote_state("IN_TRANSIT")])
@@ -233,7 +235,9 @@ def test_inflight_erp_ack_survives_timeout_then_resume(runtime_factory, remote_s
         assert finish.wait(3)
         assert kwargs["authority_check"]()
         return "DEPARTURE_FIELDS_MATCH"
-    runtime.strategy._updater._repository = SimpleNamespace(apply_delivery_effect=observe)
+    runtime.strategy._updater._repository = SimpleNamespace(
+        apply_delivery_effect=observe,
+        fetch_sales_statuses_by_id=repository.fetch_sales_statuses_by_id)
     outcomes = []
     runtime.strategy._updater.update_success.connect(lambda *args: outcomes.append(args))
     runtime.strategy._updater.start()
@@ -250,6 +254,58 @@ def test_inflight_erp_ack_survives_timeout_then_resume(runtime_factory, remote_s
     with SQLiteManager(journal.path) as db:
         assert db._get_conn().execute("SELECT state FROM SyncEffects").fetchone()[0] == "ACKNOWLEDGED"
     graph.release()
+
+
+def test_native_feed_read_drains_before_rollout_resume(runtime_factory, remote_state, qtbot):
+    from services.native_change_feed_service import NativeChangeFeedService
+
+    runtime = runtime_factory(native=True, farmax=True)
+    reconciler = runtime.services.reconciliation
+    journal = runtime.journal.journal
+    entered, finish = threading.Event(), threading.Event()
+    publications = []
+    reconciler.order_state.connect(publications.append)
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def order_changes(self, after):
+            return dict(afterSequence=after or "0", eventSequence="1", headSequence="1",
+                        resyncRequired=False, events=[] if after else [
+                            dict(sequence="1", externalOrderId="123", revision="10")])
+
+        async def order_states(self, refs):
+            entered.set()
+            assert finish.wait(3)
+            return [remote_state("PENDING", revision="10", execution=None)]
+
+    gateway = SimpleNamespace(
+        generation=1, config=runtime.gateway.config,
+        is_ready=lambda: True, get_client=Client)
+    feed = NativeChangeFeedService(gateway, runtime.journal, reconciler)
+    reconciler.change_feed = feed
+    reconciler.start_service()
+    qtbot.waitUntil(entered.is_set)
+    graph = barrier(runtime)
+    try:
+        assert not graph.quiesce(time.monotonic() + 0.03)
+        assert not feed.running and feed.busy
+        assert not graph.resume()
+        assert graph.state == "resuming"
+        assert journal.get_order("123") is None
+    finally:
+        finish.set()
+    qtbot.waitUntil(lambda: graph.state == "running" and not feed.busy)
+    assert feed.running
+    assert publications == []
+    assert journal.get_order("123") is None
+    # The drained read cannot consume its durable invalidation. Normal retry
+    # scheduling will retrieve the authoritative state in the resumed lifecycle.
+    assert journal.dirty_orders() == [{"internal_id": "123"}]
 
 
 def test_persistence_failure_prevents_snapshot(runtime_factory, monkeypatch):

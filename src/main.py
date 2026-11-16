@@ -278,9 +278,15 @@ def build_services(app_config: Settings, upgrade=None, ownership=None) -> Servic
         deliveries_service.set_recovery_service(reconciliation_service)
         reconciliation_service.order_restored.connect(deliveries_service._on_order_restored)
         reconciliation_service.order_state.connect(deliveries_service.on_native_state)
-    websockets_service = VelideWebsocketsService(app_config.api, auth_service)
+    native_farmax = app_config.api.native and app_config.target_system == TargetSystem.FARMAX
+    websockets_service = VelideWebsocketsService(app_config.api, auth_service, journal.journal if native_farmax else None)
+    if native_farmax:
+        from services.native_change_feed_service import NativeChangeFeedService
+        reconciliation_service.change_feed = NativeChangeFeedService(velide_gateway, journal, reconciliation_service)
+        websockets_service.refresh_requested.connect(reconciliation_service.change_feed.trigger)
     if app_config.api.native:
-        websockets_service.refresh_requested.connect(reconciliation_service.trigger_reconciliation)
+        if not native_farmax:
+            websockets_service.refresh_requested.connect(reconciliation_service.trigger_reconciliation)
         deliveries_service._dispatcher.import_accepted.connect(lambda *_: reconciliation_service.trigger_reconciliation())
         deliveries_service._dispatcher.mutation_changed.connect(reconciliation_service.invalidate_pending_reads)
         if app_config.target_system == TargetSystem.CDS and ownership is None:

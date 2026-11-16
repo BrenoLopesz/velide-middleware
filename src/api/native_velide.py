@@ -19,8 +19,8 @@ class NativeRequest(BaseModel):
 
 
 STATE_FIELDS = """externalOrderId found revision jobId importStatus deliveryId deliveryStatus
-    deleted cancellation retainedOutcome code retryable error
-    execution { id courierId status startedAt completedAt abortedAt }
+    deleted heldAt cancelledAt cancellationReason cancellation cancellationRequestId retainedOutcome code retryable error
+    execution { id revision courierId status startedAt completedAt abortedAt }
     source { connectionId externalOrderId customerName customerContact sourceContext }
     request { rawAddress rawComplemento rawNeighbourhood rawReference createdAtIntent }"""
 
@@ -113,13 +113,34 @@ class NativeVelide:
         return result
 
     async def list_orders(self, after=""):
-        return await self._request("""query($merchantId:ID!,$connectionId:ID!,$after:String) {
+        states = await self._request("""query($merchantId:ID!,$connectionId:ID!,$after:String) {
             integrationOrders(merchantId:$merchantId,connectionId:$connectionId,after:$after,limit:100) {
             """ + STATE_FIELDS + " } }", {"merchantId": self.native.merchant_id,
                                            "connectionId": self.native.connection_id, "after": after}, "integrationOrders")
+        if not isinstance(states, list) or len(states) > 100:
+            raise NativeApiError("Invalid source inventory", "INVALID_RESPONSE", True)
+        ids = [state["externalOrderId"] for state in states]
+        if ids != sorted(set(ids)) or any(value <= after for value in ids):
+            raise NativeApiError("Source inventory did not advance", "INVALID_RESPONSE", True)
+        return states
 
-    async def cancel_order(self, external_order_id):
-        return await self._order_mutation("cancelIntegrationOrder", external_order_id)
+    async def order_changes(self, after="0"):
+        from api.native_change_contract import CHANGE_FIELDS, validate_change_page
+        page = await self._request("""query($merchantId:ID!,$connectionId:ID!,$after:String) {
+            integrationOrderChanges(merchantId:$merchantId,connectionId:$connectionId,afterSequence:$after,limit:100) {
+            """ + CHANGE_FIELDS + " } }", {"merchantId": self.native.merchant_id,
+                                           "connectionId": self.native.connection_id, "after": after}, "integrationOrderChanges")
+        validate_change_page(page)
+        if page["afterSequence"] != after:
+            raise NativeApiError("Mismatched integration change cursor", "INVALID_RESPONSE", True)
+        return page
+
+    async def cancel_order(self, external_order_id, request_id=None):
+        return await self._request("""mutation($merchantId:ID!,$connectionId:ID!,$externalOrderId:String!,$requestId:String) {
+            cancelIntegrationOrder(merchantId:$merchantId,connectionId:$connectionId,externalOrderId:$externalOrderId,requestId:$requestId)
+            { success jobId code retryable error cancellation cancellationRequestId } }""", {"merchantId": self.native.merchant_id,
+                "connectionId": self.native.connection_id, "externalOrderId": external_order_id, "requestId": request_id},
+                "cancelIntegrationOrder")
 
     async def retry_order(self, external_order_id):
         return await self._order_mutation("retryIntegrationOrder", external_order_id)

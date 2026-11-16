@@ -108,6 +108,9 @@ class FarmaxStrategy(IConnectableStrategy):
             lambda internal_id, operation, error: self.synchronization_failed.emit(internal_id, error)
         )
         self._updater.update_success.connect(self._on_erp_acknowledged)
+        if hasattr(self._reconciliation, "order_state"):
+            self._reconciliation.order_state.connect(self._persistence.observe_native_state)
+            self._reconciliation.order_state.connect(lambda _: self._updater._pump())
 
     def _on_persistence_hydrated(self):
         """
@@ -220,7 +223,7 @@ class FarmaxStrategy(IConnectableStrategy):
         def committed(result):
             if not self._listening or not result.get("request_cancel"):
                 return
-            self.order_cancelled.emit(internal_id, result.get("external_id"))
+            self.cancellation_committed.emit(internal_id, result)
         self._persistence.journal.submit("record_farmax_progress", internal_id, progress,
             success=committed, failure=lambda error: log_sync_error(self._logger, error, internal_id))
 
@@ -318,6 +321,13 @@ class FarmaxStrategy(IConnectableStrategy):
         self._updater.mark_as_done(order)
 
     def _on_erp_acknowledged(self, internal_id, operation):
+        if hasattr(self._reconciliation, "_publish") and self._persistence.journal:
+            def publish(row):
+                if row and row["remote_state"] and self._listening:
+                    import json
+                    self._reconciliation._publish([json.loads(row["remote_state"])], [row])
+            self._persistence.journal.submit("get_order", internal_id, success=publish)
+            return
         if operation == "DONE":
             self._persistence.mark_as_finished(internal_id)
             log_operation(self._logger, "route_completed", internal_id)

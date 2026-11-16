@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -67,7 +68,10 @@ def test_f2_obsolete_selected_effect_cannot_execute_or_ack(journal, remote_state
     journal.native_states([remote_state()])
     selected = journal.next_effect()
     journal.native_states([remote_state(terminal, revision="2", **changes)])
-    assert journal.next_effect() is None
+    if terminal == "PENDING":
+        assert journal.next_effect()["operation"] == "WAITING"
+    else:
+        assert journal.next_effect() is None
     assert journal.prepare_effect(selected["sequence"], selected["generation"]) is None
     assert journal.effect_result(selected["sequence"], generation=selected["generation"], observation="COMPLETED_FIELDS_MATCH") is False
 
@@ -90,7 +94,7 @@ def test_f3_stale_execution_and_changed_same_revision_are_not_applied(journal, r
     journal.native_states([remote_state("IN_TRANSIT", revision="20", route="new")])
     current = journal.next_effect()
     journal.native_states([remote_state("IN_TRANSIT", revision="19", route="old")])
-    assert journal.next_effect()["effect_key"] == "new:IN_ROUTE"
+    assert json.loads(journal.next_effect()["payload"])["execution_id"] == "new"
     assert journal.next_effect()["generation"] == current["generation"]
     conflicting = remote_state("IN_TRANSIT", revision="20", route="new")
     conflicting["execution"]["startedAt"] = "2026-11-11T14:00:00Z"

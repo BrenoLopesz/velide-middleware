@@ -109,7 +109,8 @@ class FarmaxDeliveryUpdater(QObject):
             if error:
                 self._on_error(effect["internal_id"], effect["operation"], error)
             else:
-                self.update_success.emit(effect["internal_id"], "DONE" if observation == "COMPLETED_FIELDS_MATCH" else effect["operation"])
+                matched = observation.get("observation") if isinstance(observation, dict) else observation
+                self.update_success.emit(effect["internal_id"], "DONE" if matched == "COMPLETED_FIELDS_MATCH" else effect["operation"])
             self._pump()
         if self._journal and effect["sequence"] is not None:
             self._journal.submit("effect_result", effect["sequence"], error, effect["generation"], observation, error_kind,

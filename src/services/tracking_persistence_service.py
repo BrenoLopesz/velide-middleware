@@ -159,6 +159,19 @@ class TrackingPersistenceService(QObject):
 
     # --- Public API for Strategy ---
 
+    def observe_native_state(self, state):
+        """Mirror committed current facts; restoration removes only the live tombstone."""
+        key = self._normalize_id(state["externalOrderId"])
+        if not state.get("found") or not state.get("deliveryId"):
+            return
+        self._id_map[key] = state["deliveryId"]
+        if state.get("deleted") or state.get("deliveryStatus") in ("CANCELLED", "COMPLETED"):
+            self.stop_tracking(key)
+        else:
+            self._archived_ids.discard(key)
+            self._status_cache[key] = (DeliveryStatus.IN_PROGRESS if state.get("deliveryStatus") == "IN_TRANSIT"
+                                       else DeliveryStatus.ADDED)
+
     def reserve_id(self, internal_id: RawID) -> bool:
         """
         Optimistically reserves an Internal ID in memory.

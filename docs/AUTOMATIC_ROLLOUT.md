@@ -273,3 +273,16 @@ release execution are separate from these local packaging checks.
 - The updater was rebuilt and its frozen-resource check passed. Logs:
   `D:\velide-middleware-lab\rollout-final-updater-inno-startup.log` and
   `D:\velide-middleware-lab\rollout-final-updater-inno-startup-resources.log`.
+
+## Reconciliation stack compatibility
+
+The rollout branch includes the refresh scheduler and reversible Farmax projection
+changes. Merge the refresh fix and reversible projection into the native integration
+branch before merging this rollout PR.
+
+Reconciliation uses one queued refresh/retry timer and lifecycle/pass/gateway
+tickets. Rollout pause stops that scheduler and its correction feed; graph quiescence
+drains outstanding workers and journal callbacks before inventory export. Recovery
+opens native intake only after the final bootstrap checkpoint is committed. An
+invalidated checkpoint is reloaded from SQLite, and retired callbacks cannot release
+a replacement pass or announce recovery for it.

@@ -124,8 +124,8 @@ class Session:
         self.strategy._updater.update_success.connect(lambda *args: self.applied.append(args))
         # Same production-facing signal composition: strategy emits only AFTER
         # record_farmax_progress commits, then the dispatcher owns HTTP/ACK.
-        self.strategy.order_cancelled.connect(self._record_intent)
-        self.strategy.order_cancelled.connect(self.dispatcher.request_cancel)
+        self.strategy.cancellation_committed.connect(lambda key, intent: self._record_intent(key, intent["external_id"]))
+        self.strategy.cancellation_committed.connect(self.dispatcher.resume_cancellation)
         self.dispatcher.deletion_success.connect(self._acknowledged)
         self.dispatcher.scope_ready.connect(self.strategy.on_scope_verified)
         self.dispatcher.scope_invalidated.connect(self.strategy.on_scope_invalidated)
@@ -216,7 +216,8 @@ class Session:
         assert self.journal.get_order(str(sale))["cancellation"] == "REQUESTED"
         assert not self.persistence.is_archived(str(sale)) and self.acks == []
         request, body = self.server.cancellations[-1]
-        assert body["variables"] == dict(merchantId=MERCHANT, connectionId=CONNECTION, externalOrderId=str(sale))
+        assert body["variables"] == dict(merchantId=MERCHANT, connectionId=CONNECTION, externalOrderId=str(sale),
+                                         requestId=self.journal.get_order(str(sale))["cancellation_request_id"])
         assert request.headers["Authorization"] == "Bearer e2e-token"
         assert request.headers["X-Merchant-ID"] == MERCHANT
         assert request.url == ENDPOINT
@@ -308,7 +309,35 @@ def change_items(engine, statuses, sale=123):
                          dict(status=status, sale=sale, position=position))
 
 
-def test_route_projection_per_delivery_partial_log_and_completion_preservation(composition, caplog):
+def test_queued_committed_source_callback_cannot_recreate_superseded_intent(composition, monkeypatch):
+    from connectors.farmax.cancellation import cancellation_progress
+    app = composition()
+    app.journal.native_states([native_state(123, "IN_TRANSIT")])
+    with app.engine.begin() as conn:
+        conn.execute(text("UPDATE VENDAS SET STATUS='C'"))
+    progress = cancellation_progress(app.repo.fetch_sales_statuses_by_id((123,)))
+    callbacks = []
+    submit = app.service.submit
+    def defer(method, *args, **kwargs):
+        if method == "record_farmax_progress":
+            result = app.journal.record_farmax_progress(*args)
+            callbacks.append(lambda: kwargs["success"](result))
+        else:
+            submit(method, *args, **kwargs)
+    monkeypatch.setattr(app.service, "submit", defer)
+    app.strategy._source_progress("123", progress)
+    original = app.journal.get_order("123")["cancellation_request_id"]
+    restored = dict(native_state(123, "PENDING", revision="2"), execution=None,
+                    cancellation="SUPERSEDED", cancellationRequestId=original)
+    app.journal.native_states([restored])
+    callbacks[0]()
+    app.wait(lambda: not app.service._callbacks and not app.dispatcher._busy)
+    assert app.server.cancellations == [] and app.acks == []
+    assert app.journal.get_order("123")["cancellation"] == "NONE"
+    assert app.journal.get_order("123")["cancellation_request_id"] == original
+
+
+def test_route_projection_per_delivery_partial_log_and_authoritative_completion(composition, caplog):
     engine = composition.engine
     with engine.begin() as conn:
         conn.execute(text("INSERT INTO ENTREGAS SELECT 124,CD_FILIAL,CD_CLIENTE,NOME,BAIRRO,DATA,STATUS,CD_ENTREGADOR,HORA_SAIDA,HORA_CHEGADA,ENVIADO,ID_OPERADOR_CAIXA_ORIGINAL FROM ENTREGAS WHERE CD_VENDA=123"))
@@ -335,7 +364,7 @@ def test_route_projection_per_delivery_partial_log_and_completion_preservation(c
                             started="2026-11-11T16:30:00Z", completed="2026-11-11T17:00:00Z")])
     with engine.connect() as conn:
         assert conn.execute(text("SELECT CD_VENDA,STATUS,HORA_CHEGADA,ID_OPERADOR_CAIXA_ORIGINAL FROM ENTREGAS ORDER BY CD_VENDA")).fetchall() == [
-            (123, "V", "13:05:00", 90), (124, "V", "14:00:00", 90)]
+            (123, "V", "13:10:00", 90), (124, "V", "14:00:00", 90)]
         assert conn.execute(text("SELECT STATUS,CONCLUIDO,HORAFINAL FROM VENDAS WHERE CD_VENDA=123 ORDER BY ORDEM")).fetchall() == [
             ("C", "S", "11:05:00"), ("V", "N", "11:05:00"), ("V", "S", "11:05:00")]
     assert app.local_rows("SELECT DISTINCT status FROM DeliveryMapping") == [(DeliveryStatus.DELIVERED.value,)]

@@ -51,7 +51,7 @@ class VelideWebsocketsWorker(QRunnable):
     - Pydantic model validation for incoming data.
     """
 
-    def __init__(self, api_config: ApiConfig, auth_service: AuthService):
+    def __init__(self, api_config: ApiConfig, auth_service: AuthService, journal=None):
         """
         Initializes the worker.
 
@@ -70,6 +70,7 @@ class VelideWebsocketsWorker(QRunnable):
 
         self.api_config = api_config
         self.auth_service = auth_service
+        self.journal = journal
         self.signals = VelideWebsocketsSignals()
         self.logger = logging.getLogger(__name__)
 
@@ -113,6 +114,11 @@ class VelideWebsocketsWorker(QRunnable):
             self._subscription_query = gql("""subscription($merchantId: ID!, $connectionId: ID!) {
                 integrationJobStatusUpdated(merchantId:$merchantId,connectionId:$connectionId) { jobId status }
             }""")
+            if journal:
+                from api.native_change_contract import CHANGE_FIELDS
+                self._subscription_query = gql("""subscription($merchantId:ID!,$connectionId:ID!,$after:String) {
+                    integrationOrderChanges(merchantId:$merchantId,connectionId:$connectionId,afterSequence:$after) {
+                    """ + CHANGE_FIELDS + " } }")
 
     def stop(self):
         """
@@ -244,6 +250,9 @@ class VelideWebsocketsWorker(QRunnable):
         variables: Dict[str, str] = {"authorization": token}
         if self.api_config.native:
             variables = {"merchantId": self.api_config.native.merchant_id, "connectionId": self.api_config.native.connection_id}
+            if self.journal:
+                checkpoint = self.journal.feed_status()
+                variables["after"] = checkpoint["cursor"] if checkpoint["initialized"] else None
 
         async with Client(
             transport=self._transport, fetch_schema_from_transport=False
@@ -261,6 +270,8 @@ class VelideWebsocketsWorker(QRunnable):
                 if not self._is_running:
                     break
                 if self.api_config.native:
+                    if self.journal:
+                        self.journal.accept_change_page(data["integrationOrderChanges"])
                     self.signals.refresh_requested.emit()
                     continue
                 

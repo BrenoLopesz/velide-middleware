@@ -154,14 +154,18 @@ class DurableDeliveryDispatcher(QObject):
         self.journal.submit("accept", *args, success=lambda _: self._pump(),
                             failure=lambda error: self.task_failed.emit(internal_id, error))
 
-    def request_cancel(self, internal_id, external_id=None):
+    def resume_cancellation(self, internal_id, intent):
+        self.request_cancel(internal_id, intent.get("external_id"),
+                            intent["cancellation_request_id"], intent["cancellation_evidence"])
+
+    def request_cancel(self, internal_id, external_id=None, request_id=None, evidence=None):
         self.mutation_changed.emit()
         ticket = self._ticket()
         def accepted(row):
-            if self._current(ticket) and row["cancellation"] == "ACKNOWLEDGED":
+            if self._current(ticket) and row and row["cancellation"] == "ACKNOWLEDGED":
                 self.deletion_success.emit(internal_id, row["external_id"] or "")
             self._pump()
-        self.journal.submit("cancel", internal_id, external_id, success=accepted,
+        self.journal.submit("cancel", internal_id, external_id, request_id, evidence, success=accepted,
                             failure=lambda error: self.task_failed.emit(internal_id, error))
 
     def queue_delete(self, internal_id, external_id):
@@ -229,17 +233,29 @@ class DurableDeliveryDispatcher(QObject):
         if not self.native:
             self._send_legacy(row, ticket, gateway, preflight)
             return
+        args = (json.loads(row["request"]),) if row["operation"] == "ADD" else (internal, row["cancellation_request_id"])
         worker = NativeApiWorker(gateway, "submit_import" if row["operation"] == "ADD" else "cancel_order",
-                                  json.loads(row["request"]) if row["operation"] == "ADD" else internal,
-                                  preflight=preflight)
+                                  *args, preflight=preflight)
         if row["operation"] == "ADD":
             worker.signals.result.connect(lambda result: self.journal.submit("accepted_job", internal, result["jobId"], row["attempts"],
                 success=lambda accepted: self._completed(ticket, accepted, self.import_accepted, internal, result["jobId"]), failure=self._storage_error))
         else:
-            worker.signals.result.connect(lambda _: self.journal.submit("cancelled", internal,
-                success=lambda accepted: self._completed(ticket, accepted is not False, self.deletion_success, internal, row["external_id"] or ""), failure=self._storage_error))
+            worker.signals.result.connect(lambda result: self._native_cancel_result(row, ticket, result))
         worker.signals.failed.connect(lambda error: self._failed(row, ticket, error, gateway.config))
         QThreadPool.globalInstance().start(worker)
+
+    def _native_cancel_result(self, row, ticket, result):
+        if result.get("code") == "CANCELLATION_SUPERSEDED":
+            def superseded(_):
+                if self._current(ticket):
+                    self.mutation_changed.emit()
+                self._release(ticket)
+            self.journal.submit("cancellation_superseded", row["internal_id"], row["attempts"], row["cancellation_request_id"],
+                                success=superseded, failure=self._storage_error)
+        else:
+            self.journal.submit("cancelled", row["internal_id"], row["attempts"], row["cancellation_request_id"],
+                success=lambda accepted: self._completed(ticket, accepted is not False, self.deletion_success,
+                                                         row["internal_id"], row["external_id"] or ""), failure=self._storage_error)
 
     def _send_legacy(self, row, ticket, gateway, preflight):
         internal = row["internal_id"]
@@ -276,6 +292,9 @@ class DurableDeliveryDispatcher(QObject):
         self._release(ticket)
 
     def _failed(self, row, ticket, error, config=None):
+        if error.get("code") == "CANCELLATION_SUPERSEDED" and row["operation"] == "DELETE":
+            self._native_cancel_result(row, ticket, error)
+            return
         if error.get("code") == "CANCELLATION_DEFERRED" and row["operation"] == "DELETE":
             def deferred(accepted):
                 if accepted and self._current(ticket):
