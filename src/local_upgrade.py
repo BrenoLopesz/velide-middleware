@@ -42,6 +42,7 @@ class UpgradeResult:
     backups: list = field(default_factory=list)
     instructions: list = field(default_factory=list)
     token_path: str = None
+    ownership_path: str = None
 
 
 def _connect(path, readonly=False):
@@ -214,6 +215,17 @@ def _native_cutover(config_path, raw, document, database, package, result):
     if package.get("version") != 1 or not package.get("authority"):
         raise ValueError("An authoritative version-1 installation package is required")
     identity = hashlib.sha256(json.dumps(package, sort_keys=True).encode("utf-8")).hexdigest()
+    # A retained package also stays idempotent after selecting legacy intake.
+    if result.settings.backend_profiles.get("native"):
+        from backend_profiles import absolute
+        native_database = absolute(result.settings.backend_profiles["native"].sqlite_path, result.bundle_dir)
+        native_conn = _connect(native_database, readonly=True)
+        try:
+            if _has_table(native_conn, "UpgradePackages") and native_conn.execute(
+                    "SELECT 1 FROM UpgradePackages WHERE identity=?", (identity,)).fetchone():
+                return
+        finally:
+            native_conn.close()
     conn = _connect(database, readonly=True)
     try:
         if _has_table(conn, "UpgradePackages") and conn.execute(
@@ -323,6 +335,22 @@ def _publish_native_copy(config_path, raw, document, package, result, identity, 
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     finally:
         conn.close()
+    from backend_profiles import add_provisioned_profiles, configurations
+    from api.backend_ownership import BackendOwnership
+    proposed = add_provisioned_profiles(document, proposed, result.bundle_dir, staged)
+    ownership_path = Path(str(staged) + ".ownership.db")
+    _copy_database(result.ownership_path, ownership_path)
+    registry = BackendOwnership(ownership_path, configured_source_identity(result.settings))
+    registry.fork_identity()
+    proposed["backend_ownership_path"] = str(ownership_path)
+    proposed["backend_ownership_id"] = registry.identity
+    new_settings = Settings.model_validate(proposed)
+    for name, profile in configurations(new_settings, result.bundle_dir).items():
+        registry.register(name, configured_scope(profile), profile.sqlite_path)
+    # The package is the explicit authority for an EXISTING-order transfer.
+    # Later backend selection never repeats this transfer.
+    registry.transfer([entry["internal_id"] for entry in manifest["deliveries"]], "legacy", "native")
+    registry.select("native")
     # All supporting files must exist before publishing the native config.
     _cds_observation_options(UpgradeResult(new_settings, str(staged), result.installation_id))
     # Ensure the complete old configuration remains available, including unknown keys.
@@ -336,6 +364,9 @@ def _publish_native_copy(config_path, raw, document, package, result, identity, 
             raise ValueError("Configuration changed while preparing cutover")
         from upgrade_auth import bind_pre_cutover_auth
         bind_pre_cutover_auth(Path(result.token_path), result.settings.auth, result.backups)
+        # Both profiles remain live. Never clone the legacy refresh grant, even
+        # for identical auth: concurrent rotation could revoke the token family.
+        # Native obtains an independent device-flow session in its empty cache.
         if config_path.read_bytes() != raw:
             raise ValueError("Configuration changed while binding the pre-cutover session")
         os.replace(str(candidate), str(config_path))  # Sole native activation commit point.
@@ -345,6 +376,11 @@ def _publish_native_copy(config_path, raw, document, package, result, identity, 
     result.settings = new_settings
     result.database_path = str(staged)
     result.native_applied = True
+    result.ownership_path = str(ownership_path)
+    result.token_path = new_settings.token_path
+    result.instructions.append(
+        "A nova conexão foi preparada. Entre no novo Velide para iniciar a sincronização; "
+        "a sessão da conexão legada foi preservada.")
 
 
 def _cds_observation_options(result):
@@ -394,8 +430,12 @@ def upgrade_installation(config_path, bundle_dir=None, package_path=None):
         if not database.is_absolute():
             database = bundle_dir / database
         database = database.resolve()
-        result = UpgradeResult(settings, str(database), "", token_path=str(bundle_dir / "resources" / "token.txt"))
+        from backend_profiles import absolute, prepare_profile_state
+        result = UpgradeResult(settings, str(database), "", token_path=str(absolute(settings.token_path or "resources/token.txt", bundle_dir)))
+        result.bundle_dir = str(bundle_dir)
         result.installation_id = _adopt(database, settings, result)
+        registry, _ = prepare_profile_state(settings, bundle_dir)
+        result.ownership_path = registry.path
         package_path = Path(package_path) if package_path else config_path.with_name("native-upgrade.json")
         if package_path.exists():
             try:

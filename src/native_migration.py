@@ -240,6 +240,8 @@ def main():
     parser.add_argument("database", nargs="?")
     parser.add_argument("manifest", nargs="?")
     parser.add_argument("--automatic", action="store_true", help="Automatic local adoption and optional provisioned native cutover")
+    parser.add_argument("--select-backend", choices=("legacy", "native"),
+                        help="Select NEW-order intake only; keep existing orders with their owner (application must be stopped)")
     parser.add_argument("--export-upgrade-inventory", action="store_true", help="Export credential-free retained work for centralized native migration; never applies a package")
     parser.add_argument("--output", help="New inventory JSON output file; default is stdout (export mode only)")
     parser.add_argument("--config", help="Installed config.yml (required for --automatic)")
@@ -250,11 +252,11 @@ def main():
     args = parser.parse_args()
     if args.output and not args.export_upgrade_inventory:
         parser.error("--output is only valid with --export-upgrade-inventory")
-    if args.automatic or args.export_upgrade_inventory:
-        if not args.config or args.database or args.manifest or args.apply or args.prepare or (args.automatic and args.export_upgrade_inventory):
-            parser.error("Choose --automatic or --export-upgrade-inventory with --config, without offline manifest arguments")
-        if args.export_upgrade_inventory and args.package:
-            parser.error("Inventory export does not consume packages")
+    if args.automatic or args.export_upgrade_inventory or args.select_backend:
+        if not args.config or args.database or args.manifest or args.apply or args.prepare or sum(bool(value) for value in (args.automatic, args.export_upgrade_inventory, args.select_backend)) != 1:
+            parser.error("Choose one of --automatic, --export-upgrade-inventory or --select-backend with --config")
+        if (args.export_upgrade_inventory or args.select_backend) and args.package:
+            parser.error("Inventory export/backend selection does not consume packages")
         os.environ["VELIDE_CONFIG_PATH"] = os.path.abspath(args.config)
         from local_upgrade import upgrade_installation
         from utils import instance_lock
@@ -262,6 +264,11 @@ def main():
         instance_lock.LOCK_FILE_PATH = str(root / "resources" / "velide.lock")
         instance_lock.acquire_lock()
         try:
+            if args.select_backend:
+                from backend_profiles import select_backend
+                selected = select_backend(args.config, root, args.select_backend)
+                print(json.dumps({"active_backend": selected.active_backend, "existing_orders_transferred": False}))
+                return 0
             if args.export_upgrade_inventory:
                 from upgrade_inventory import export_upgrade_inventory
                 inventory = export_upgrade_inventory(args.config, root)

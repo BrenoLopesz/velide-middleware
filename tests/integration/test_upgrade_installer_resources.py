@@ -32,7 +32,8 @@ def test_freezer_and_inno_asset_allowlists_agree_and_reject_local_data(tmp_path)
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"fixture asset")
-    for unwanted in ("velide.db", "test_config.yml", "token.txt", "native-upgrade.json", "customer-inventory.json"):
+    for unwanted in ("velide.db", "legacy.db", "native.db", "native.db.ownership.db",
+                     "native.db.token.txt", "test_config.yml", "token.txt", "native-upgrade.json", "customer-inventory.json"):
         (tmp_path / unwanted).write_bytes(b"private fixture")
     selected = {dest for _, dest in release.resource_files(tmp_path)}
     assert selected == {"resources/" + name for name in release.MAIN_RESOURCES}
@@ -85,6 +86,8 @@ def test_real_inno_compiler_keeps_runtime_dependencies_and_excludes_installation
         middleware / "config.yml",
         middleware / "resources" / "config.yml", middleware / "resources" / "token.txt",
         middleware / "resources" / "velide.db", middleware / "resources" / "velide.db-wal",
+        middleware / "legacy.db", middleware / "native.db",
+        middleware / "native.db.ownership.db", middleware / "native.db.token.txt",
         middleware / "resources" / "native-upgrade.json",
         middleware / "resources" / "must-not-ship-store-inventory.json",
         middleware / "tests" / "must-not-ship-test-data.json",
@@ -101,7 +104,7 @@ def test_real_inno_compiler_keeps_runtime_dependencies_and_excludes_installation
     for name in ("migrate-native.exe", "sqlite3.dll", "_sqlite3.pyd", "dbapi2.pyc", "library.zip",
                  "nested-runtime-resource.bin", "runtime-tz-proof", "qaxcontainer.py", "config_example.yml", "private_public.pem"):
         assert name.lower() in log.lower(), log
-    for name in ("velide.db", "token.txt", "native-upgrade.json", "must-not-ship"):
+    for name in ("velide.db", "legacy.db", "native.db", "token.txt", "native-upgrade.json", "must-not-ship"):
         assert name not in log.lower(), log
     normalized = log.replace("/", "\\").lower()
     assert "middleware\\resources\\config.yml" not in normalized

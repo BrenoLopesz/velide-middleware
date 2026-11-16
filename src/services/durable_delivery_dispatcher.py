@@ -28,6 +28,7 @@ class DurableDeliveryDispatcher(QObject):
         self._busy_ticket = None
         self._validating = False
         self._validation_ticket = None
+        self._blocked_epoch = None
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._pump)
@@ -42,6 +43,7 @@ class DurableDeliveryDispatcher(QObject):
         self._generation += 1
         self._running = True
         self._authorized = self._validating = False
+        self._blocked_epoch = None
         self._timer.start()
         self._validate_scope()
 
@@ -51,13 +53,27 @@ class DurableDeliveryDispatcher(QObject):
         self._timer.stop()
         self.scope_invalidated.emit()
 
+    def invalidate_auth(self):
+        self._generation += 1
+        self._authorized = self._validating = self._busy = False
+        self._busy_ticket = None
+        self.scope_invalidated.emit()
+
     def _validate_scope(self):
         if not self._running or self._validating or not self.gateway.is_ready():
+            return
+        if self._blocked_epoch == self.gateway.generation:
             return
         self._validating = True
         ticket = self._ticket()
         self._validation_ticket = ticket
         if not self.native:
+            if self.gateway.__dict__.get("ownership"):
+                worker = NativeApiWorker(freeze_gateway(self.gateway), "get_deliverymen")
+                worker.signals.result.connect(lambda _: self._validated(ticket))
+                worker.signals.failed.connect(lambda error: self._validation_failed(ticket, error))
+                QThreadPool.globalInstance().start(worker)
+                return
             # Legacy uses its installed endpoint/source and current credentials.
             # Local journal restoration verifies the installed source binding;
             # no undeployed store-ID endpoint is required.
@@ -73,6 +89,15 @@ class DurableDeliveryDispatcher(QObject):
             if self._validation_ticket == ticket:
                 self._validating = False
             return
+        ownership = self.gateway.__dict__.get("ownership")
+        if ownership:
+            try:
+                from backend_profiles import token_principal
+                token = self.gateway.snapshot().token
+                ownership.registry.bind_principal(ownership.name, token_principal(token))
+            except ValueError as error:
+                self._validation_failed(ticket, {"message": str(error), "retryable": False})
+                return
         self.journal.submit("restore", success=lambda rows: self._restored(rows, ticket),
                             failure=lambda error: self._storage_error(error, ticket))
 
@@ -84,7 +109,11 @@ class DurableDeliveryDispatcher(QObject):
         self._validating = False
         self.task_failed.emit("", error["message"])
         if not error["retryable"]:
-            self.stop()
+            # Park this credential generation, not the whole service lifetime.
+            # A successful login with another token must be able to revalidate.
+            self._blocked_epoch = ticket[1]
+            self._authorized = False
+            self.scope_invalidated.emit()
 
     def _restored(self, rows, ticket):
         if not self._current(ticket):
@@ -151,6 +180,10 @@ class DurableDeliveryDispatcher(QObject):
         if not self._current(ticket):
             self._release(ticket)
             return
+        if row.get("payload"):
+            recovered = Order.model_validate(json.loads(row["payload"]))
+            recovered.ui_status_hint = sync_row_status(row)
+            self.order_restored.emit(recovered, row["external_id"])
         if row["operation"] == "ADD" and row["request"] is None:
             try:
                 client = gateway.get_client()

@@ -36,8 +36,8 @@ def read_bundle(path):
     return json.loads(base64.b64decode(path.read_bytes()).decode("utf-8"))
 
 
-def worker_signals(auth):
-    worker = StoredTokenRetrieverWorker(auth)
+def worker_signals(auth, token_path=None):
+    worker = StoredTokenRetrieverWorker(auth, token_path)
     result = {"token": [], "expired": [], "error": [], "finished": []}
     worker.signals.token.connect(lambda *values: result["token"].append(values))
     worker.signals.expired.connect(result["expired"].append)
@@ -193,16 +193,20 @@ def test_failed_config_publication_keeps_old_context_binding_usable_and_retry_is
     assert len(list(token_file.parent.glob("token.txt.pre-native-auth-*.bak"))) == 1
     signals = worker_signals(retried.settings.auth)
     assert signals["error"] and not signals["token"] and not signals["expired"]
-    # A later real native login must not be relabelled by replaying the package.
+    # A later native login uses its independent cache, never the legacy grant.
+    legacy_bytes = token_file.read_bytes()
     native_bundle = dict(legacy_bundle(retried.settings.auth), middleware_auth=auth_context(retried.settings.auth))
-    native_bytes = write_bundle(token_file, native_bundle)
+    native_file = Path(retried.settings.token_path)
+    native_bytes = write_bundle(native_file, native_bundle)
     repeated = upgrade_installation(config, tmp_path)
     assert not repeated.native_applied and not repeated.package_error
-    assert token_file.read_bytes() == native_bytes
-    assert_old_session_usable(repeated.settings.auth, native_bundle)
+    assert native_file.read_bytes() == native_bytes and token_file.read_bytes() == legacy_bytes
+    assert worker_signals(repeated.settings.auth, str(native_file))["token"] == [
+        (native_bundle["access_token"], native_bundle["refresh_token"])]
+    assert_old_session_usable(adopted.settings.auth, bundle, expired)
 
 
-def test_native_cutover_with_unchanged_auth_preserves_session_eligibility(tmp_path, qtbot, monkeypatch):
+def test_native_cutover_with_unchanged_auth_preserves_only_legacy_session(tmp_path, qtbot, monkeypatch):
     config, adopted, package = installation_with_package(tmp_path, monkeypatch)
     del package["configuration"]["auth"]
     supply(config, package)
@@ -211,6 +215,8 @@ def test_native_cutover_with_unchanged_auth_preserves_session_eligibility(tmp_pa
     result = upgrade_installation(config, tmp_path)
     assert result.native_applied, result.package_error
     assert_old_session_usable(result.settings.auth, bundle)
+    assert worker_signals(result.settings.auth, result.settings.token_path)["error"] == ["Nenhum token encontrado."]
+    assert not Path(result.settings.token_path).exists()
 
 
 @pytest.mark.parametrize("content", [b"not-base64", base64.b64encode(b"[]"), base64.b64encode(b"{}")])

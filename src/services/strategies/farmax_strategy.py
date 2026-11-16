@@ -50,6 +50,7 @@ class FarmaxStrategy(IConnectableStrategy):
         self._thread_pool = None  # Initialized by globalInstance usually, or in workers
         self._listening = False
         self._scope_verified = False
+        self._source_ready = False
 
         # --- Initialize Sub-Services ---
 
@@ -172,6 +173,8 @@ class FarmaxStrategy(IConnectableStrategy):
 
     def start_listening(self):
         """Starts the polling services."""
+        if self._listening:
+            return
         self._logger.debug("Iniciando o rastreamento Farmax...")
 
         self._listening = True
@@ -179,6 +182,10 @@ class FarmaxStrategy(IConnectableStrategy):
         self._persistence.initialize()
 
     def _start_remote_services(self):
+        self._source_ready = True
+        ownership = self._persistence.journal.journal.__dict__.get("ownership") if self._persistence.journal else None
+        if ownership and not self._scope_verified:
+            return
         if self._listening:
             self._reconciliation.start_service()
             self._websockets.start_service()
@@ -187,10 +194,19 @@ class FarmaxStrategy(IConnectableStrategy):
         self._scope_verified = True
         if self._listening:
             self._updater.start()
+            if self._source_ready:
+                self._start_remote_services()
 
     def on_scope_invalidated(self):
         self._scope_verified = False
         self._updater.stop()
+        ownership = self._persistence.journal.journal.__dict__.get("ownership") if self._persistence.journal else None
+        if ownership:
+            if hasattr(self._reconciliation, "stop_service"):
+                self._reconciliation.stop_service()
+            else:
+                self._reconciliation.timer.stop()
+            self._websockets.stop_service()
 
     def _source_review(self, internal_id, message, evidence):
         # Incomplete source polls are retried. Partial-item changes must never

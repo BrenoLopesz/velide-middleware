@@ -46,6 +46,7 @@ class DeliveriesService(QObject):
         self._target_system = target_system
         self._active_strategy: Optional[IConnectableStrategy] = None
         self._cancellation_intents = set()
+        self._listening = False
 
         # 3. CONNECT INTERNAL DISPATCHER SIGNALS
         # This bridges the gap between the Worker -> Dispatcher -> Service
@@ -80,11 +81,14 @@ class DeliveriesService(QObject):
         self._active_strategy.synchronization_failed.connect(self._on_delivery_request_failure)
 
     def start_listening(self):
+        if self._listening:
+            return
         if self._active_strategy is None:
             self.logger.critical(
                 "Nenhum sistema conectado! Entregas não serão processadas."
             )
             return
+        self._listening = True
         if self._journal:
             self._dispatcher.start()
         self._active_strategy.start_listening()
@@ -269,6 +273,7 @@ class DeliveriesService(QObject):
             self.delivery_update.emit(internal_id, DeliveryRowStatus.PROCESSING)
 
     def stop_listening(self):
+        self._listening = False
         if self._journal:
             self._dispatcher.stop()
         if self._active_strategy:

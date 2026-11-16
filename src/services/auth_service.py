@@ -19,16 +19,19 @@ class AuthService(QObject):
     access_token = pyqtSignal(str)
     error = pyqtSignal(str, str)
     device_code_requested = pyqtSignal() 
+    session_invalidated = pyqtSignal()
 
     def __init__(
         self, 
         auth_config: AuthenticationConfig, 
         velide_gateway: VelideGateway,
-        parent=None
+        parent=None,
+        token_path=None,
     ):
         super().__init__(parent)
         self._auth_config = auth_config
         self._gateway = velide_gateway
+        self._token_path = token_path
 
         self._thread_pool = QThreadPool.globalInstance()
         self._authorization_flow_worker = None
@@ -56,15 +59,27 @@ class AuthService(QObject):
             if self._authorization_flow_worker:
                 self._authorization_flow_worker.stop()
             self._gateway.invalidate_session()
+        self.session_invalidated.emit()
 
     def _commit_token(self, generation, bundle, credential_revision=None):
         with self._session_lock:
             if generation != self._session_generation or (credential_revision is not None and credential_revision != self._credential_revision):
                 return False
-            store_token_at_file(dict(bundle, middleware_auth=auth_context(self._auth_config)))
+            self._check_profile_principal(bundle["access_token"])
+            stored = dict(bundle, middleware_auth=auth_context(self._auth_config))
+            if self._token_path is None:
+                store_token_at_file(stored)
+            else:
+                store_token_at_file(stored, self._token_path)
             # Fence already-running disk readers before queuing publication to Qt.
             self._credential_revision += 1
             return True
+
+    def _check_profile_principal(self, token):
+        ownership = self._gateway.__dict__.get("ownership")
+        if ownership:
+            from backend_profiles import token_principal
+            ownership.registry.check_principal(ownership.name, token_principal(token))
 
     def request_device_code_screen(self):
         """ Emits a signal to start the auth flow. """
@@ -93,7 +108,7 @@ class AuthService(QObject):
             return
         generation = self._session_generation
         revision = self._credential_revision
-        worker = StoredTokenRetrieverWorker(self._auth_config)
+        worker = StoredTokenRetrieverWorker(self._auth_config, self._token_path) if self._token_path is not None else StoredTokenRetrieverWorker(self._auth_config)
         # If stored token is expired, try to refresh it immediately
         worker.signals.expired.connect(lambda token: self._manual_refresh_token(token) if generation == self._session_generation and revision == self._credential_revision else None)
         worker.signals.token.connect(lambda access, refresh: self._on_access_token_received(access, refresh, generation, revision))
@@ -120,6 +135,13 @@ class AuthService(QObject):
             if generation is not None and generation != self._session_generation:
                 return
             if credential_revision is not None and credential_revision != self._credential_revision:
+                return
+            try:
+                self._check_profile_principal(access_token)
+            except ValueError as error:
+                self.invalidate_session()
+                self._interactive_flow = False
+                self.error.emit("Conta da conexão não confirmada", str(error))
                 return
             self._interactive_flow = False
             if access_token != self._bundle_access_token or (refresh_token and refresh_token != self._current_refresh_token):

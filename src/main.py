@@ -20,7 +20,6 @@ from services.reconciliation_service import ReconciliationService
 from services.sqlite_service import SQLiteService
 from services.strategies.cds_strategy import CdsStrategy
 from services.auth_service import AuthService
-from presenters.app_presenter import AppPresenter
 from services.strategies.connectable_strategy import IConnectableStrategy
 from services.strategies.farmax_strategy import FarmaxStrategy
 from services.tracking_persistence_service import TrackingPersistenceService
@@ -223,7 +222,7 @@ def create_strategy(
     raise ValueError(f"Sistema alvo não suportado: {app_config.target_system}")
 
 
-def build_services(app_config: Settings, upgrade=None) -> Services:
+def build_services(app_config: Settings, upgrade=None, ownership=None) -> Services:
     """Creates and wires together all core application services."""
     if app_config.target_system == TargetSystem.FARMAX and app_config.farmax and not app_config.api.source_timezone:
         app_config.api.source_timezone = app_config.farmax.timezone
@@ -232,7 +231,8 @@ def build_services(app_config: Settings, upgrade=None) -> Services:
         app_config.target_system,
         app_config.reconciliation,
     )
-    auth_service = AuthService(app_config.auth, velide_gateway)
+    velide_gateway.ownership = ownership
+    auth_service = AuthService(app_config.auth, velide_gateway, token_path=app_config.token_path)
     delivery_repository = DeliveryRepository()
     velide_action_handler = VelideActionHandler(delivery_repository)
     from services.sync_journal_service import SyncJournalService
@@ -242,7 +242,8 @@ def build_services(app_config: Settings, upgrade=None) -> Services:
         scope += "|" + app_config.api.native.merchant_id + "|" + app_config.api.native.connection_id
     from utils.source_identity import configured_source_identity
     journal = SyncJournalService(db_path, scope, configured_source_identity(app_config),
-                                 app_config.api.native.timezone if app_config.api.native else app_config.api.source_timezone)
+                                 app_config.api.native.timezone if app_config.api.native else app_config.api.source_timezone,
+                                 ownership)
     if upgrade:
         journal.cds_baseline_path = upgrade.cds_baseline_path
     deliveries_service = DeliveriesService(
@@ -258,6 +259,10 @@ def build_services(app_config: Settings, upgrade=None) -> Services:
         app_config.sqlite_days_retention,
         journal=journal,
     )
+    auth_service.session_invalidated.connect(deliveries_service._dispatcher.invalidate_auth)
+    if ownership is not None and app_config.target_system == TargetSystem.FARMAX:
+        deliveries_service.delivery_acknowledged.connect(
+            lambda internal, order: tracking_persistance_service.reserve_id(internal))
     reconciliation_service = ReconciliationService(
         gateway=velide_gateway,
         tracking_service=tracking_persistance_service,
@@ -275,9 +280,14 @@ def build_services(app_config: Settings, upgrade=None) -> Services:
         websockets_service.refresh_requested.connect(reconciliation_service.trigger_reconciliation)
         deliveries_service._dispatcher.import_accepted.connect(lambda *_: reconciliation_service.trigger_reconciliation())
         deliveries_service._dispatcher.mutation_changed.connect(reconciliation_service.invalidate_pending_reads)
-        if app_config.target_system == TargetSystem.CDS:
+        if app_config.target_system == TargetSystem.CDS and ownership is None:
             deliveries_service.listening_started.connect(reconciliation_service.start_service)
             deliveries_service.listening_started.connect(websockets_service.start_service)
+    if ownership is not None and app_config.target_system == TargetSystem.CDS:
+        deliveries_service._dispatcher.scope_ready.connect(reconciliation_service.start_service)
+        deliveries_service._dispatcher.scope_ready.connect(websockets_service.start_service)
+        deliveries_service._dispatcher.scope_invalidated.connect(reconciliation_service.stop_service if hasattr(reconciliation_service, "stop_service") else reconciliation_service.timer.stop)
+        deliveries_service._dispatcher.scope_invalidated.connect(websockets_service.stop_service)
     deliverymen_retriever_service = DeliverymenRetrieverService(
         velide_gateway,
         app_config.api, 
@@ -346,20 +356,11 @@ def main():
     for message in upgrade.instructions:
         logging.getLogger(__name__).info(message)
 
-    # Build services (Dependency Injection)
-    services = build_services(config, upgrade)
-
-    setup_tray_icon(app, view, services)
-
-    # Setup strategy
-    strategy = setup_strategy(config, services)
-
-    # Initialize the presenter to connect view and services
-    presenter = AppPresenter(view, services, strategy)
-
-    # Start the application logic
-    presenter.run()
-    services.auth.load_stored_token()
+    # Each profile owns its auth, services and ERP obligations. The selector
+    # changes new intake only; the other profile remains available for recovery.
+    from services.profile_application import ProfileApplication
+    runtime = ProfileApplication(app, config, upgrade, config_path, BUNDLE_DIR, view)
+    runtime.start()
 
     # Run the application event loop
     sys.exit(app.exec_())

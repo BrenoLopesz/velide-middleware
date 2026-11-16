@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import binascii
+import tempfile
 from typing import Optional
 from utils.access_token import AccessTokenDict
 from utils.bundle_dir import BUNDLE_DIR
@@ -36,7 +37,7 @@ def _decode_string_base64(encoded_string: str) -> str:
 # --- TOKEN STORAGE FUNCTIONS ---
 
 
-def store_token_at_file(token: AccessTokenDict):
+def store_token_at_file(token: AccessTokenDict, path=None):
     """
     Encodes and saves the token dictionary to a file.
     Raises TokenStorageError on failure.
@@ -45,14 +46,22 @@ def store_token_at_file(token: AccessTokenDict):
         token_json_string = json.dumps(token)
         encoded_token = _encode_string_base64(token_json_string)
 
-        file_path = os.path.join(BUNDLE_DIR, "resources", "token.txt")
-        file_dir = os.path.dirname(file_path)
+        file_path = os.fspath(path) if path is not None else os.path.join(BUNDLE_DIR, "resources", "token.txt")
+        file_dir = os.path.dirname(os.path.abspath(file_path))
 
         # Ensure the directory exists
         os.makedirs(file_dir, exist_ok=True)
 
-        with open(file_path, "w") as file:
-            file.write(encoded_token)
+        descriptor, temporary = tempfile.mkstemp(dir=file_dir, prefix=os.path.basename(file_path) + ".", suffix=".tmp")
+        try:
+            with os.fdopen(descriptor, "w") as file:
+                file.write(encoded_token)
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temporary, file_path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
     except (IOError, OSError) as e:
         # Catch file system errors (e.g., permissions, disk full)
@@ -64,7 +73,7 @@ def store_token_at_file(token: AccessTokenDict):
         ) from e
 
 
-def read_token_from_file() -> Optional[dict]:
+def read_token_from_file(path=None) -> Optional[dict]:
     """
     Reads, decodes, and returns the token dictionary from a file.
 
@@ -75,7 +84,7 @@ def read_token_from_file() -> Optional[dict]:
     Raises:
         TokenStorageError on failure to read, decode, or parse the file content.
     """
-    file_path = os.path.join(BUNDLE_DIR, "resources", "token.txt")
+    file_path = os.fspath(path) if path is not None else os.path.join(BUNDLE_DIR, "resources", "token.txt")
 
     try:
         with open(file_path, "r") as file:

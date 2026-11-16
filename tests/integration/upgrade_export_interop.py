@@ -64,7 +64,18 @@ def main():
         repeated = upgrade_installation(config, root)
         assert not repeated.package_error and not repeated.native_applied
         assert rows(database, "SELECT * FROM DeliveryMapping") == before
-        print(json.dumps({"native_applied": True, "unchanged_legacy_database": True, "repeatable": True}))
+        from backend_profiles import select_backend, prepare_profile_state
+        assert set(result.settings.backend_profiles) == {"legacy", "native"}
+        selected = select_backend(config, root, "legacy")
+        registry, profiles = prepare_profile_state(selected, root)
+        assert registry.owner("123") == "native" and registry.selected() == "legacy"
+        assert profiles["legacy"].sqlite_path != profiles["native"].sqlite_path
+        assert profiles["legacy"].token_path != profiles["native"].token_path
+        rollback_update = upgrade_installation(config, root)
+        assert not rollback_update.package_error and not rollback_update.native_applied
+        assert rows(database, "SELECT * FROM DeliveryMapping") == before
+        print(json.dumps({"native_applied": True, "unchanged_legacy_database": True, "repeatable": True,
+                          "dual_profiles": True, "rollback_preserves_native_owner": True}))
     else:
         raise ValueError("Unknown test bridge operation")
 

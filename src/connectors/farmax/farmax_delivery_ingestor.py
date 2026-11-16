@@ -198,12 +198,21 @@ class FarmaxDeliveryIngestor(QObject):
 
     def _on_pending_scan(self, ids):
         self._scan_cursor = max(ids) if len(ids) == 100 else 0
-        unknown = [sale_id for sale_id in ids if not self._persistence.is_tracked(sale_id)]
+        unknown = [sale_id for sale_id in ids if not self._known_source_id(sale_id)]
         self._pending_sale_ids = sorted(set(self._pending_sale_ids + unknown))
         observations = [("farmax:" + normalize_farmax_id(sale_id),
                          {"sale_id": normalize_farmax_id(sale_id)}) for sale_id in unknown]
         self._journal.submit("observe_source", observations, success=self._guard(lambda _: self._poll_logs()),
                              failure=self._guard(self._on_poll_error))
+
+    def _known_source_id(self, sale_id):
+        if self._persistence.is_tracked(sale_id):
+            return True
+        ownership = self._journal.journal.__dict__.get("ownership") if self._journal else None
+        if ownership:
+            owner = ownership.registry.owner(normalize_farmax_id(sale_id))
+            return owner is not None and owner != ownership.name
+        return False
 
     def _poll_logs(self):
         if not self._is_running:
@@ -269,7 +278,7 @@ class FarmaxDeliveryIngestor(QObject):
         # 1. Identify relevant IDs (INSERT + Not Tracked)
         # It just asks the mapper: "Give me the IDs I don't know about."
         ids_to_fetch = FarmaxMapper.filter_new_insert_ids(
-            logs, is_tracked_check=self._persistence.is_tracked
+            logs, is_tracked_check=self._known_source_id
         )
 
         # 2. Update the pending cursor (Highest ID found in logs)

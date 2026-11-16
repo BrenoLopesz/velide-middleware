@@ -147,6 +147,8 @@ class NativeReconciliationService(QObject):
 
     def _publish(self, states, rows):
         for state in states:
+            if not self.journal.journal.owns(state["externalOrderId"]):
+                continue
             row = next((row for row in rows if row["internal_id"] == state["externalOrderId"]), None)
             if row and row["remote_state"]:
                 accepted = json.loads(row["remote_state"])

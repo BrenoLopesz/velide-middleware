@@ -26,11 +26,33 @@ def encode(value):
 
 
 class SyncJournal:
-    def __init__(self, path, scope, source_identity=None, source_timezone=None):
+    def __init__(self, path, scope, source_identity=None, source_timezone=None, ownership=None):
         self.path, self.scope = path, scope
         self.source_identity = source_identity
         self.source_timezone = source_timezone
+        self.ownership = ownership
         self._effect_lock = _source_lock(path)
+
+    def owns(self, internal):
+        return self.ownership is None or self.ownership.owns(internal)
+
+    def _executable(self, internal):
+        return self.ownership is None or self.ownership.executable(internal)
+
+    def _owned_rows(self, rows, executable=False):
+        if self.ownership is None:
+            return rows
+        owned = self.ownership.registry.owned_ids(self.ownership.name, executable)
+        return [row for row in rows if row["internal_id"] in owned]
+
+    def _drain_intake(self):
+        if self.ownership is None:
+            return
+        for receipt in self.ownership.registry.receipts(self.ownership.name):
+            self.accept(receipt["internal_id"], receipt["payload"], receipt["source_file"])
+            if receipt["conflict"]:
+                self.source_review(receipt["internal_id"], {"kind": "SOURCE_CONFLICT", "message": receipt["conflict"]})
+            self.ownership.registry.recorded(self.ownership.name, receipt["internal_id"], receipt["conflict"])
 
     @contextmanager
     def _db(self):
@@ -96,6 +118,7 @@ class SyncJournal:
             conn.execute("UPDATE SyncScope SET farmax_branch=? WHERE id=1",(branch,))
 
     def restore(self):
+        self._drain_intake()
         with self._db() as db:
             conn = db._get_conn()
             # Preserve pre-upgrade identities, including unresolved MISSING/FAILED.
@@ -110,10 +133,19 @@ class SyncJournal:
                 conn.execute("""INSERT OR IGNORE INTO SyncOrders
                     (scope, internal_id, external_id, submission) VALUES (?, ?, ?, ?)""",
                              (self.scope, internal, external, state))
-            return self._rows(conn, "SELECT * FROM SyncOrders WHERE scope=?")
+            return self._owned_rows(self._rows(conn, "SELECT * FROM SyncOrders WHERE scope=?"))
 
     def accept(self, internal_id, payload, source_file=None):
         conflict = False
+        normalized = canonical_payload(payload, self.source_timezone, len(self.scope.split("|")) == 2)
+        if self.ownership:
+            owner = self.ownership.registry.intake(internal_id, normalized, source_file)
+            if owner != self.ownership.name:
+                # The receipt is durable in the common ledger and will be
+                # drained by its owner's dispatcher, even if it is logged out.
+                return {"internal_id": internal_id, "submission": "TERMINAL",
+                        "cancellation": "NONE", "external_id": None, "source_review": None,
+                        "skipped_backend": True}
         with self._db() as db:
             conn = db._get_conn()
             zone = conn.execute("SELECT source_timezone FROM SyncScope WHERE id=1").fetchone()[0]
@@ -149,14 +181,16 @@ class SyncJournal:
         # inside the transaction would roll back the very protection required.
         if conflict:
             raise ValueError("Source payload conflicts with an already accepted order; durable review hold recorded")
+        if self.ownership:
+            self.ownership.registry.recorded(self.ownership.name, internal_id)
         return row
 
     def active_orders(self):
         with self._db() as db:
             # Linked terminal deliveries remain observable: native undo/redo can
             # change them after an ERP match was acknowledged.
-            return self._rows(db._get_conn(), """SELECT internal_id FROM SyncOrders WHERE scope=?
-                AND (external_id IS NOT NULL OR (submission<>'TERMINAL' AND cancellation<>'ACKNOWLEDGED')) ORDER BY internal_id""")
+            return self._owned_rows(self._rows(db._get_conn(), """SELECT internal_id FROM SyncOrders WHERE scope=?
+                AND (external_id IS NOT NULL OR (submission<>'TERMINAL' AND cancellation<>'ACKNOWLEDGED')) ORDER BY internal_id"""))
 
     def get_order(self, internal):
         with self._db() as db:
@@ -182,6 +216,7 @@ class SyncJournal:
             return self._rows(conn, "SELECT * FROM SyncOrders WHERE scope=? AND internal_id=?", (internal_id,))[0]
 
     def claim(self, native=False):
+        self._drain_intake()
         with self._db() as db:
             conn = db._get_conn()
             rows = self._rows(conn, """SELECT * FROM SyncOrders WHERE scope=? AND retry_at<=?
@@ -189,7 +224,8 @@ class SyncJournal:
                 AND ((cancellation='REQUESTED' AND (external_id IS NOT NULL OR ? OR
                      (request IS NOT NULL AND payload IS NOT NULL AND submission IN ('SUBMITTING','RETRY','NEEDS_REVIEW'))))
                      OR (submission IN ('QUEUED','SUBMITTING','RETRY') AND payload IS NOT NULL AND source_review IS NULL))
-                ORDER BY rowid LIMIT 1""", (time.time(), native))
+                ORDER BY rowid""", (time.time(), native))
+            rows = self._owned_rows(rows, executable=True)
             if not rows:
                 return None
             row = rows[0]
@@ -203,6 +239,8 @@ class SyncJournal:
             return row
 
     def dispatch_is_current(self, internal, attempt, operation):
+        if not self._executable(internal):
+            return False
         with self._db() as db:
             rows = self._rows(db._get_conn(),"SELECT * FROM SyncOrders WHERE scope=? AND internal_id=?",(internal,))
             if not rows or rows[0]["attempts"] != attempt:
@@ -255,6 +293,8 @@ class SyncJournal:
             conn = db._get_conn()
             for state in states:
                 internal = state["externalOrderId"]
+                if self.ownership and not self.ownership.registry.adopt_remote(self.ownership.name, internal):
+                    continue
                 known = conn.execute("SELECT remote_revision FROM SyncOrders WHERE scope=? AND internal_id=?", (self.scope, internal)).fetchone()
                 revision = state.get("revision")
                 if revision is not None and (not isinstance(revision, str) or not revision or any(c not in "0123456789" for c in revision)):
@@ -441,6 +481,8 @@ class SyncJournal:
             AND E.generation=O.effect_generation AND O.cancellation='NONE' AND O.source_review IS NULL""", (self.scope, internal)).fetchone() is not None
 
     def cancel(self, internal_id, external_id=None):
+        if not self.owns(internal_id):
+            raise ValueError("O cancelamento deve usar a conexão proprietária do pedido.")
         with self._db() as db:
             conn = db._get_conn()
             conn.execute("""INSERT OR IGNORE INTO SyncOrders(scope,internal_id,external_id,submission)
@@ -506,6 +548,16 @@ class SyncJournal:
             checkpoint = conn.execute("SELECT cursor FROM SyncCheckpoints WHERE scope=?", (self.scope,)).fetchone()
             pending = self._rows(conn, """SELECT * FROM SyncSource WHERE scope=? AND resolved=0
                 AND source_id LIKE 'farmax:%' AND retry_at<=? ORDER BY attempts,rowid LIMIT 100""", (time.time(),))
+            if self.ownership:
+                retained = []
+                for row in pending:
+                    internal = json.loads(row["payload"])["sale_id"]
+                    owner = self.ownership.registry.owner(internal)
+                    if owner is not None and owner != self.ownership.name:
+                        conn.execute("UPDATE SyncSource SET resolved=1 WHERE scope=? AND source_id=?", (self.scope, row["source_id"]))
+                    else:
+                        retained.append(row)
+                pending = retained
             # Reserve a bounded retry turn, even if a worker crashes or the ERP
             # returns no detail rows. An unresolved prefix cannot starve later IDs.
             for row in pending:
@@ -519,6 +571,8 @@ class SyncJournal:
                                   (0 if error else 1, error, self.scope, source_id))
 
     def enqueue_effect(self, internal_id, key, operation, payload, remote_state=None):
+        if not self._executable(internal_id):
+            return False
         with self._db() as db:
             conn = db._get_conn()
             if len(self.scope.split("|")) != 2:
@@ -569,7 +623,8 @@ class SyncJournal:
                 AND O.cancellation='NONE' AND O.source_review IS NULL
                 AND NOT EXISTS (SELECT 1 FROM SyncEffects P WHERE P.scope=E.scope AND P.internal_id=E.internal_id
                     AND P.generation=E.generation AND P.operation='IN_ROUTE' AND P.state='PENDING' AND E.operation='DONE')
-                ORDER BY E.sequence LIMIT 1""", (time.time(),))
+                 ORDER BY E.sequence""", (time.time(),))
+            rows = self._owned_rows(rows, executable=True)
             return rows[0] if rows else None
 
     def prepare_effect(self, sequence, generation):
@@ -581,6 +636,8 @@ class SyncJournal:
             if not rows:
                 return None
             effect = rows[0]
+            if not self._executable(effect["internal_id"]):
+                return None
             payload = json.loads(effect["payload"])
             order = self._rows(conn, "SELECT payload,source_context,farmax_progress FROM SyncOrders WHERE scope=? AND internal_id=?", (effect["internal_id"],))[0]
             source = (json.loads(order["source_context"]) if order["source_context"] else
@@ -603,6 +660,10 @@ class SyncJournal:
 
     def effect_is_current(self, sequence, generation):
         with self._db() as db:
+            if self.ownership:
+                row = db._get_conn().execute("SELECT internal_id FROM SyncEffects WHERE sequence=?", (sequence,)).fetchone()
+                if not row or not self._executable(row[0]):
+                    return False
             return db._get_conn().execute("""SELECT 1 FROM SyncEffects E JOIN SyncOrders O
                 ON O.scope=E.scope AND O.internal_id=E.internal_id
                 WHERE E.scope=? AND E.sequence=? AND E.generation=? AND O.effect_generation=?
@@ -635,6 +696,8 @@ class SyncJournal:
                 FROM SyncEffects E JOIN SyncOrders O ON O.scope=E.scope AND O.internal_id=E.internal_id
                 WHERE E.scope=? AND E.sequence=?""", (self.scope, sequence)).fetchone()
             if not row or generation is None or row[1] != generation or row[2] != generation or row[3] != "NONE" or row[4] is not None or row[5] != "PENDING":
+                return False
+            if not self._executable(row[0]):
                 return False
             if error is not None and error_kind == "SOURCE_CONFLICT":
                 self._latch_source_review(conn, row[0], {"kind": error_kind, "message": error, "effect_sequence": sequence})
@@ -671,6 +734,8 @@ class SyncJournal:
             return True
 
     def retry_work(self, internal_id):
+        if not self._executable(internal_id):
+            raise ValueError("A sincronização deve usar a conexão proprietária e resolver a revisão do pedido.")
         with self._db() as db:
             conn = db._get_conn()
             rows = self._rows(conn, "SELECT * FROM SyncOrders WHERE scope=? AND internal_id=?", (internal_id,))

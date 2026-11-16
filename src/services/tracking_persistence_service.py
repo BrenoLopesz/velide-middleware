@@ -95,8 +95,12 @@ class TrackingPersistenceService(QObject):
         """
         count_active = 0
         # count_archived = 0
+        ownership = self.journal.journal.__dict__.get("ownership") if self.journal else None
+        owned = ownership.registry.owned_ids(ownership.name) if ownership else None
 
         for external_id, internal_id, status in rows:
+            if owned is not None and internal_id not in owned:
+                continue
             norm_id = self._normalize_id(internal_id)
 
             is_terminal = (

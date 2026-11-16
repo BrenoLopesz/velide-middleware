@@ -1,5 +1,42 @@
 # Middleware reliability and native integration
 
+Production prerequisites, package contents and exact operator commands are in
+[Native rollout and `native-upgrade.json`](docs/NATIVE_ROLLOUT.md). A binary update
+alone does not convert the server's business data or deliver a store package.
+
+## Follow-up: reversible intake profiles
+
+The updated automatic consumer retains legacy and native connection profiles,
+separate journals/tokens/mappings, and a common durable ERP-order ownership ledger.
+The existing installation-bound package supplies native endpoints, IDs and changed
+authentication; no customer-side YAML editing is required.
+
+Use the tray's **Novos pedidos: legado / novo Velide** selector to change future
+intake. Existing queued/imported orders, cancellations and ERP effects stay with
+their owner and both provisioned connections continue recovery. Open either
+connection from the tray to sign in or inspect its work. Native outages do not
+authorize resending native-owned work to legacy. This switches API intake within
+the new Middleware, not a downgrade to the old executable.
+
+Stopped-installation support equivalent:
+
+```powershell
+.\migrate-native.exe --select-backend legacy --config "$InstallRoot\resources\config.yml" --bundle-dir "$InstallRoot"
+```
+
+Use `native` to select native intake again. The CLI takes the application instance
+lock; the tray can select at runtime. Neither path changes ownership. An explicit
+validated migration package may transfer pre-existing orders during cutover; that
+transfer is not repeated when selecting a backend or re-running the installer.
+
+Keep both backend services and legacy authentication available during the rollback
+window. Initial native cutover requires its own login even with unchanged Auth0
+settings, so both live profiles never rotate the same refresh grant. Work and the
+legacy session are retained. See [Auth0 verification and administrator
+checklist](docs/AUTH0_TRANSITION.md) for verified local differences and remaining
+production inputs. Address-importer and Farmax accounting changes are not part of
+this follow-up. No release is published by these changes.
+
 ## Current status — user-directed restoration (2026-11-14)
 
 **Automatic native and legacy imports and Velide-led Farmax departure/completion are restored.** Ordinary updates automatically adopt the installed database and configuration. The earlier observer-only reduction was rejected by the user and is superseded; it is not the current operating contract.

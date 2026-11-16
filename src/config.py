@@ -2,7 +2,7 @@ from enum import Enum
 from copy import deepcopy
 import os
 from pathlib import Path
-from typing import Optional, Type, TypeVar
+from typing import Dict, Optional, Type, TypeVar
 from pydantic import BaseModel, Field, field_validator, model_validator
 import yaml
 
@@ -205,6 +205,14 @@ class AuthenticationConfig(BaseModel):
     )
 
 
+class BackendProfile(BaseModel):
+    """Installation-owned state for one API; never share journals or tokens."""
+    auth: AuthenticationConfig
+    api: ApiConfig
+    sqlite_path: str
+    token_path: str
+
+
 class Settings(BaseModel):
     target_system: TargetSystem = Field(
         default=TargetSystem.FARMAX, description="Application to integrate with."
@@ -220,6 +228,11 @@ class Settings(BaseModel):
         default="resources/velide.db",
         description="Relative path to SQLite database file.",
     )
+    token_path: Optional[str] = None
+    backend_profiles: Dict[str, BackendProfile] = Field(default_factory=dict)
+    active_backend: Optional[str] = None
+    backend_ownership_path: Optional[str] = None
+    backend_ownership_id: Optional[str] = None
     sqlite_days_retention: int = Field(
         default=30,
         description=(
@@ -233,9 +246,38 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def matching_source_timezone(self):
+        if self.backend_profiles:
+            if set(self.backend_profiles) - {"legacy", "native"} or self.active_backend not in self.backend_profiles:
+                raise ValueError("Select a configured legacy/native backend profile")
+            databases, tokens = set(), set()
+            for name, profile in self.backend_profiles.items():
+                if bool(profile.api.native) != (name == "native"):
+                    raise ValueError("Backend profile name does not match its API contract")
+                database = os.path.normcase(os.path.abspath(profile.sqlite_path))
+                token = os.path.normcase(os.path.abspath(profile.token_path))
+                if database in databases or token in tokens or database == token:
+                    raise ValueError("Backend profiles must have separate databases and token caches")
+                databases.add(database)
+                tokens.add(token)
+                if self.target_system == TargetSystem.FARMAX and self.farmax and profile.api.native and self.farmax.timezone != profile.api.native.timezone:
+                    raise ValueError("Farmax and native merchant timezones must agree")
+            if databases & tokens:
+                raise ValueError("Token paths cannot point at backend databases")
+            selected = self.backend_profiles[self.active_backend]
+            self.auth, self.api = selected.auth, selected.api
+            self.sqlite_path, self.token_path = selected.sqlite_path, selected.token_path
         if self.target_system == TargetSystem.FARMAX and self.api.native and self.farmax and self.farmax.timezone != self.api.native.timezone:
             raise ValueError("Farmax and native merchant timezones must agree")
         return self
+
+    def for_backend(self, name):
+        """A nonrecursive service configuration; the ERP source stays unchanged."""
+        profile = self.backend_profiles[name]
+        return self.model_copy(deep=True, update={
+            "auth": profile.auth.model_copy(deep=True), "api": profile.api.model_copy(deep=True),
+            "sqlite_path": profile.sqlite_path, "token_path": profile.token_path,
+            "backend_profiles": {}, "active_backend": name,
+        })
 
     @classmethod
     def from_yaml(cls: Type[T], path: str) -> T:

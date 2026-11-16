@@ -72,7 +72,7 @@ class StoredTokenRetrieverWorker(QRunnable):
     Results are communicated via a separate 'signals' object.
     """
 
-    def __init__(self, auth_config=None):
+    def __init__(self, auth_config=None, token_path=None):
         """
         Initializes the runnable worker.
         """
@@ -80,6 +80,7 @@ class StoredTokenRetrieverWorker(QRunnable):
         self.logger = logging.getLogger(__name__)
         self.signals = StoredTokenRetrieverSignals()
         self.auth_config = auth_config
+        self.token_path = token_path
 
     def _is_token_expired(self, access_token: str) -> bool:
         """
@@ -113,7 +114,7 @@ class StoredTokenRetrieverWorker(QRunnable):
         the self.signals object.
         """
         try:
-            token = read_token_from_file()
+            token = read_token_from_file(self.token_path) if self.token_path is not None else read_token_from_file()
 
             if token is None:
                 self.signals.error.emit("Nenhum token encontrado.")

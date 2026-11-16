@@ -1,5 +1,33 @@
 # Automatic upgrade integration contract
 
+## Reversible-profile follow-up
+
+The updated `--automatic` consumer also prepares an installation-wide ownership
+ledger. On validated native cutover, it retains actual legacy API/auth/database/
+token settings as the `legacy` profile and provisions the `native` profile from
+the package. The new database, private ledger copy, profile configuration and
+selection are published through the existing atomic config replacement. Failed
+publication retains the original ledger/configuration; no transfer is made there.
+
+`active_backend` selects **new orders only**. The profile paths and
+`backend_ownership_path` / `backend_ownership_id` are installation state, not
+release defaults. Existing
+manifest transfers remain explicit authoritative cutover actions. The old package
+is a no-op even after selecting legacy, and ordinary future updates preserve both
+profiles and all of their files.
+
+Both profile stacks remain available for jobs, cancellation and ERP write-back.
+The common ledger prevents cross-profile import and effect ownership; accepted
+intake is retained there if the owning profile has not yet written its journal.
+Native starts with a separate empty token cache, even when auth settings match.
+It must obtain its own login/refresh grant: cloning a rotating refresh token into
+two live profiles could revoke both sessions. Legacy's original cache stays intact.
+
+The packaged `migrate-native.exe --select-backend legacy|native --config ...`
+command is supported with the application stopped; it never migrates an order.
+Customers can use the tray selector instead of editing configuration. See
+`docs/AUTH0_TRANSITION.md` for the administrator's production-auth checklist.
+
 ## Startup wiring contract
 
 Run after the application instance lock, before `build_services`, source scans,

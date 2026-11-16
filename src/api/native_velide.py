@@ -50,7 +50,13 @@ class NativeVelide:
             if body.get("errors"):
                 error = body["errors"][0]
                 code = error.get("extensions", {}).get("code", "GRAPHQL_ERROR")
-                raise NativeApiError(error.get("message", "GraphQL error"), code, code in ("UNAUTHENTICATED", "TOKEN_EXPIRED"))
+                # HTTP 200 does not mean a permanent business rejection. Yoga
+                # may mask a temporary resolver/DB outage as an internal error.
+                retryable = error.get("extensions", {}).get("retryable") is True or code in (
+                    "UNAUTHENTICATED", "TOKEN_EXPIRED", "INTERNAL_SERVER_ERROR", "INTERNAL_ERROR",
+                    "AUTHORIZATION_UNAVAILABLE", "SERVICE_UNAVAILABLE", "TEMPORARY_FAILURE",
+                ) or code == "GRAPHQL_ERROR" and error.get("message") == "Unexpected error."
+                raise NativeApiError(error.get("message", "GraphQL error"), code, retryable)
             result = body["data"][field]
         except (ValueError, KeyError, TypeError) as error:
             raise NativeApiError("Invalid native API response", "INVALID_RESPONSE", True) from error
