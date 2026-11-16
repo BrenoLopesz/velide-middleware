@@ -43,6 +43,24 @@ def test_pre_upgrade_request_retries_server_legacy_receipt(tmp_path, farmax_stac
     assert not journal.dispatch_is_current("123", claimed["attempts"], "DELETE")
 
 
+@pytest.mark.parametrize("remote_request", ["older-request", None])
+def test_another_requests_supersession_cannot_reopen_acknowledged_request(
+        tmp_path, farmax_stack, remote_state, remote_request):
+    repo, _ = farmax_stack
+    journal = seeded(tmp_path, repo)
+    journal.native_states([remote_state("PENDING", execution=None)])
+    journal.cancel("123")
+    request = journal.claim(native=True)
+    assert journal.cancelled("123", request["attempts"], request["cancellation_request_id"])
+    journal.native_states([remote_state("PENDING", revision="2", execution=None,
+        cancellation="SUPERSEDED", cancellationRequestId=remote_request)])
+    assert journal.get_order("123")["cancellation"] == "ACKNOWLEDGED"
+    assert journal.get_order("123")["remote_revision"] == "1"
+    assert journal.next_effect() is None
+    with sqlite3.connect(journal.path) as conn:
+        assert conn.execute("SELECT disposition FROM SyncCancellationReceipts").fetchall() == [("ACKNOWLEDGED",)]
+
+
 @pytest.mark.parametrize("disposition", ["REQUESTED", "CONFLICT", "ACKNOWLEDGED", "SUPERSEDED"])
 def test_inventory_restores_original_request_and_suppresses_unknown_history(
         tmp_path, farmax_stack, remote_state, disposition):

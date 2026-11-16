@@ -280,8 +280,11 @@ class SyncJournal:
         with self._db() as db:
             conn = db._get_conn()
             now = time.time()
-            rows = self._rows(conn, """SELECT internal_id,invalidation FROM SyncDirtyOrders WHERE scope=?
-                AND retry_at<=? ORDER BY queue_position,internal_id LIMIT 100""", (now,))
+            rows = self._rows(conn, """SELECT D.internal_id,D.invalidation,
+                O.cancellation,O.cancellation_request_id,O.effect_generation
+                FROM SyncDirtyOrders D LEFT JOIN SyncOrders O
+                ON O.scope=D.scope AND O.internal_id=D.internal_id WHERE D.scope=?
+                AND D.retry_at<=? ORDER BY D.queue_position,D.internal_id LIMIT 100""", (now,))
             tail = self._dirty_tail(conn)
             for position, row in enumerate(rows, tail+1):
                 # Move a served order to the tail independently of wake-up time.
@@ -387,7 +390,7 @@ class SyncJournal:
 
     def native_states(self, states, farmax=True, dirty_claim=None):
         """Commit accepted remote facts and their ERP obligations in one transaction."""
-        read_fences = {row["internal_id"]: row["invalidation"] for row in dirty_claim or []}
+        read_fences = {row["internal_id"]: row for row in dirty_claim or []}
         with self._db() as db:
             conn = db._get_conn()
             for state in states:
@@ -400,8 +403,9 @@ class SyncJournal:
                     raise ValueError("Invalid authoritative revision")
                 if known and known[0] is not None and (revision is None or int(revision) < int(known[0])):
                     continue
+                read_fence = read_fences.get(internal, {})
                 dirty = conn.execute("SELECT revision,invalidation FROM SyncDirtyOrders WHERE scope=? AND internal_id=?", (self.scope, internal)).fetchone()
-                if dirty and (read_fences.get(internal) != dirty[1]
+                if dirty and (read_fence.get("invalidation") != dirty[1]
                               or revision is None or int(revision) < int(dirty[0])):
                     # Only the reader started for this invalidation can consume it.
                     # Periodic/bootstrap reads leave notified orders to the feed.
@@ -451,9 +455,27 @@ class SyncJournal:
                     submission = "NEEDS_REVIEW" if state["retainedOutcome"] == "UNKNOWN" else "TERMINAL"
                 remote_terminal = state.get("deliveryStatus") == "CANCELLED" or state["deleted"]
                 if farmax:
-                    if (state["cancellation"] == "SUPERSEDED" and same_request) or consumed or (
-                            cancellation == "ACKNOWLEDGED" and external and not remote_terminal
-                            and revision is not None and int(revision) > int(row["remote_revision"] or "0")):
+                    superseded = (state["cancellation"] == "SUPERSEDED" and same_request) or consumed
+                    # V5 also acknowledged remote-only cancellation/deletion.
+                    # Such rows migrate as "legacy", but have no server request
+                    # receipt. Recover them only from a read started after the
+                    # retained ACK, with no intervening local invalidation/ACK.
+                    legacy_restored = (cancellation == "ACKNOWLEDGED"
+                        and row["cancellation_request_id"] == "legacy"
+                        and state["cancellation"] == "NONE" and remote_request is None
+                        and external and not remote_terminal and revision is not None
+                        and state.get("deliveryStatus") in ("PENDING", "IN_TRANSIT", "COMPLETED")
+                        and read_fence.get("cancellation") == "ACKNOWLEDGED"
+                        and read_fence.get("cancellation_request_id") == "legacy"
+                        and read_fence.get("effect_generation") == row["effect_generation"])
+                    superseded = superseded or legacy_restored
+                    if cancellation == "ACKNOWLEDGED" and external and not remote_terminal and not superseded:
+                        # An ACK carries no history revision. A read newer than
+                        # our last snapshot can still have started before that
+                        # ACK. Keep the request closed without a matching receipt
+                        # or the legacy post-ACK fence, retaining dirty work.
+                        continue
+                    if superseded:
                         self._cancellation_receipt(conn, row, "SUPERSEDED", revision)
                         if cancellation != "NONE":
                             # Fence a response that was already on its way.

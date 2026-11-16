@@ -97,7 +97,7 @@ class FarmaxRepository:
         return context
 
     @staticmethod
-    def _ordinary_sale(sales):
+    def _ordinary_sale(sales, wait_for_active=False):
         # C/D/I rows remain in identity/progress snapshots but are never revived.
         # CONCLUIDO and HORAFINAL are checkout-owned, independent of courier return.
         # SP_RETORNA_ENTREGAS excludes type D; it does not whitelist V/P/R/M.
@@ -107,6 +107,8 @@ class FarmaxRepository:
             raise FarmaxEvidenceError("Unknown sale item status")
         active = [row for row in sales if row["status"] in ("S", "V") and row["tipo_venda"] != "D"]
         if not active:
+            if wait_for_active:
+                raise FarmaxWaitingError("Sale has no active delivery items; awaiting source eligibility")
             raise FarmaxEvidenceError("Sale has no active delivery items; reconcile cancellation")
         return active
 
@@ -260,7 +262,9 @@ class FarmaxRepository:
             if authority_check is not None and not authority_check():
                 raise FarmaxWaitingError("Projection superseded before application")
             self._check_source_context(sale_id, context, payload.get("source_context"), payload.get("legacy_adopted"))
-            active = self._ordinary_sale(sales)
+            # A restored Velide delivery can precede commercial restoration in
+            # Farmax. Wait without writing or latching an identity-review hold.
+            active = self._ordinary_sale(sales, wait_for_active=True)
             if delivery["status"] not in ("S", "R", "V"):
                 raise FarmaxEvidenceError("Unsupported delivery lifecycle state")
             before = {field: self._field_value(delivery, field) for field in desired}

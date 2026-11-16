@@ -1,9 +1,14 @@
+import asyncio
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import event, text
 
 from api.sync_journal import SyncJournal
+from connectors.farmax.cancellation import cancellation_progress
 from services.native_change_feed_service import NativeFeedWorker
+from test_restored_write_fences import seeded
 
 
 def page(after="0", end="1", head="1", revision="10", internal="123"):
@@ -89,6 +94,147 @@ async def test_same_revision_notification_during_read_cannot_be_consumed(tmp_pat
     await worker(journal, client).reconcile()
     assert not journal.dirty_orders()
     assert journal.next_effect()["operation"] == "WAITING"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_request", [False, True])
+async def test_delayed_feed_read_cannot_reopen_acknowledged_cancellation(
+        tmp_path, farmax_stack, remote_state, legacy_request):
+    repo, engine = farmax_stack
+    journal = seeded(tmp_path, repo)
+    journal.native_states([remote_state("IN_TRANSIT", revision="1")])
+    selected = journal.next_effect()
+    journal.accept_change_page(page(after="0", end="0", head="0"))
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE VENDAS SET STATUS='C'"))
+    journal.record_farmax_progress("123", cancellation_progress(repo.fetch_sales_statuses_by_id((123,))))
+    if legacy_request:
+        # A recovered pre-request-ID intent must retain the reserved receipt.
+        with sqlite3.connect(journal.path) as conn:
+            conn.execute("UPDATE SyncOrders SET cancellation_request_id=NULL,cancellation_evidence=NULL")
+    request = journal.claim(native=True)
+    request_id = request["cancellation_request_id"]
+    if legacy_request:
+        assert request_id == "legacy"
+
+    started, release = asyncio.Event(), asyncio.Event()
+    class DelayedClient(Client):
+        async def order_states(self, refs):
+            self.calls.append(("states", refs))
+            snapshot = self.states
+            started.set()
+            await release.wait()
+            return snapshot
+    client = DelayedClient(page(revision="2"), [remote_state("PENDING", revision="2", execution=None)])
+    read = asyncio.create_task(worker(journal, client).reconcile())
+    try:
+        await asyncio.wait_for(started.wait(), 5)
+        # The worker has persisted its cursor/claim and started the state read.
+        # A cancellation ACK now wins the race with that older HTTP response.
+        assert client.calls == [("changes", "0"), ("states", ["123"])]
+        assert journal.feed_status()["cursor"] == "1" and journal.dirty_orders()
+        assert journal.cancelled("123", request["attempts"], request_id)
+        # Restore commercial eligibility independently. A wrongly authorized
+        # stale WAITING target could now actually change the ERP's R fields.
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE VENDAS SET STATUS='S'"))
+    finally:
+        release.set()
+        await read
+
+    writes = []
+    def capture(conn, cursor, statement, *args):
+        if statement.lstrip().upper().startswith(("INSERT ", "UPDATE ", "DELETE ")):
+            writes.append(statement)
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        assert journal.apply_effect(selected["sequence"], selected["generation"], repo,
+                                    "America/Sao_Paulo", lambda: True) is None
+        stale = journal.next_effect()
+        if stale:
+            journal.apply_effect(stale["sequence"], stale["generation"], repo,
+                                 "America/Sao_Paulo", lambda: True)
+        assert writes == []
+        assert stale is None
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    journal = SyncJournal(journal.path, journal.scope, source_timezone="America/Sao_Paulo")
+    retained = journal.get_order("123")
+    assert (retained["cancellation"], retained["submission"], retained["remote_revision"]) == (
+        "ACKNOWLEDGED", "TERMINAL", "1")
+    assert journal.dirty_orders() == [{"internal_id": "123"}]
+    with sqlite3.connect(journal.path) as conn:
+        assert conn.execute("SELECT disposition FROM SyncCancellationReceipts").fetchall() == [("ACKNOWLEDGED",)]
+
+    # A later notification wakes the retained dirty order; the real cancellation
+    # state remains acknowledged instead of being poisoned by a local receipt.
+    client.response = page(after="1", end="2", head="2", revision="3")
+    client.states = [remote_state("CANCELLED", revision="3", execution=None,
+        cancellation="ACKNOWLEDGED", cancellationRequestId=request_id)]
+    await worker(journal, client).reconcile()
+    assert journal.get_order("123")["cancellation"] == "ACKNOWLEDGED"
+    assert not journal.dirty_orders() and journal.next_effect() is None
+
+    # Explicit same-request supersession still restores projection, including
+    # the legacy receipt whose optional request ID may be absent in recovery.
+    client.response = page(after="2", end="3", head="3", revision="4")
+    client.states = [remote_state("PENDING", revision="4", execution=None,
+        cancellation="SUPERSEDED", cancellationRequestId=None if legacy_request else request_id)]
+    await worker(journal, client).reconcile()
+    restored = journal.next_effect()
+    assert restored["operation"] == "WAITING"
+    observation = journal.apply_effect(restored["sequence"], restored["generation"], repo,
+                                       "America/Sao_Paulo", lambda: True)
+    assert journal.effect_result(restored["sequence"], generation=restored["generation"], observation=observation)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT STATUS,CD_ENTREGADOR,HORA_SAIDA,HORA_CHEGADA FROM ENTREGAS")).fetchone() == (
+            "S", None, None, None)
+    with sqlite3.connect(journal.path) as conn:
+        assert conn.execute("SELECT disposition FROM SyncCancellationReceipts ORDER BY disposition").fetchall() == [
+            ("ACKNOWLEDGED",), ("SUPERSEDED",)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached_status", ["CANCELLED", "PENDING"])
+async def test_post_ack_feed_read_recovers_migrated_remote_only_cancellation(
+        tmp_path, farmax_stack, remote_state, cached_status):
+    repo, _ = farmax_stack
+    journal = seeded(tmp_path, repo)
+    # V5 marked remote-only terminal states ACKNOWLEDGED too, and could then
+    # cache an active snapshot without clearing that old cancellation latch.
+    journal.native_states([remote_state(cached_status, revision="1", execution=None)])
+    with sqlite3.connect(journal.path) as conn:
+        conn.execute("""UPDATE SyncOrders SET cancellation='ACKNOWLEDGED',
+            cancellation_request_id='legacy',cancellation_evidence='RECOVERED_UNKNOWN'""")
+    restored = remote_state("PENDING", revision="2", execution=None)
+    journal.native_states([restored])
+    assert journal.get_order("123")["cancellation"] == "ACKNOWLEDGED"  # No read-start fence.
+    client = Client(page(revision="2"), [restored])
+    await worker(journal, client).reconcile()
+    assert journal.get_order("123")["cancellation"] == "NONE"
+    assert journal.next_effect()["operation"] == "WAITING"
+    assert not journal.dirty_orders()
+
+
+@pytest.mark.asyncio
+async def test_post_ack_legacy_read_fence_rejects_intervening_local_ack(tmp_path, farmax_stack, remote_state):
+    repo, _ = farmax_stack
+    journal = seeded(tmp_path, repo)
+    journal.native_states([remote_state("PENDING", execution=None)])
+    journal.cancel("123")
+    with sqlite3.connect(journal.path) as conn:
+        conn.execute("UPDATE SyncOrders SET cancellation_request_id=NULL,cancellation_evidence=NULL")
+    request = journal.claim(native=True)
+    assert journal.cancelled("123", request["attempts"], "legacy")
+    client = Client(page(revision="2"), [remote_state("PENDING", revision="2", execution=None)])
+    # Legacy callback paths can repeat an ACK without changing its request ID.
+    # The read must match the local generation as well as the ACK disposition.
+    client.after_read = lambda: journal.cancelled("123")
+    await worker(journal, client).reconcile()
+    assert journal.get_order("123")["cancellation"] == "ACKNOWLEDGED"
+    assert journal.dirty_orders() and journal.next_effect() is None
+    with sqlite3.connect(journal.path) as conn:
+        assert conn.execute("SELECT disposition FROM SyncCancellationReceipts").fetchall() == [("ACKNOWLEDGED",)]
 
 
 @pytest.mark.asyncio
