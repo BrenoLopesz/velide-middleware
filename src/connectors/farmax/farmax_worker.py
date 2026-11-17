@@ -26,6 +26,7 @@ class FarmaxWorkerSignals(QObject):
 
     finished = pyqtSignal()
     error = pyqtSignal(str)
+    failure = pyqtSignal(dict)
     success = pyqtSignal(object)
 
 
@@ -101,10 +102,11 @@ class FarmaxWorker(QRunnable):
             # 3. Emit the success signal with the result
             self.signals.success.emit(result)
 
-        except Exception:
-            error_msg = f"Falha ao executar '{self.method_name}' no Farmax."
+        except Exception as error:
+            error_msg = f"Falha ao executar '{self.method_name}' no Farmax: {error}"
             self.logger.exception(error_msg)
             self.signals.error.emit(error_msg)
+            self.signals.failure.emit({"message": error_msg, "kind": getattr(error, "kind", "TRANSIENT")})
 
         finally:
             # 4. Always emit finished
@@ -155,6 +157,7 @@ class FarmaxWorker(QRunnable):
         sale_id: float,
         driver_id: float,
         left_at: time,
+        historical: bool = False,
     ) -> "FarmaxWorker":
         """Creates a worker to update a delivery to 'In Route'."""
         return cls(
@@ -163,6 +166,7 @@ class FarmaxWorker(QRunnable):
             sale_id=sale_id,
             driver_id=driver_id,
             left_at=left_at,
+            historical=historical,
         )
 
     @classmethod

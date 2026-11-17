@@ -79,14 +79,15 @@ class AppPresenter(QObject):
             self._view, self._services, self._machine
         )
 
-    def run(self):
+    def run(self, show=True):
         """
         Starts the application logic.
 
         This method starts the state machine and shows the main application window.
         """
         self._machine.start()
-        self._view.show()
+        if show:
+            self._view.show()
         self._connect_actions()
 
     def _connect_actions(self):

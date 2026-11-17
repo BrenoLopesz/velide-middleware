@@ -1,7 +1,8 @@
 from enum import Enum
+from copy import deepcopy
 import os
 from pathlib import Path
-from typing import Optional, Type, TypeVar
+from typing import Dict, Optional, Type, TypeVar
 from pydantic import BaseModel, Field, field_validator, model_validator
 import yaml
 
@@ -105,9 +106,32 @@ class FarmaxConfig(BaseModel):
     file: str = Field(..., description="Firebird database file.")
     user: str = Field(..., description="Firebird user.")
     password: str = Field(..., description="Firebird password.")
+    timezone: str = Field(default="America/Sao_Paulo", description="IANA timezone used by this Farmax database.")
+
+
+class NativeApiConfig(BaseModel):
+    merchant_id: str
+    connection_id: str
+    timezone: str
+    reconcile_interval_ms: int = Field(default=15000, ge=1000)
+
+    @field_validator("merchant_id", "connection_id")
+    @classmethod
+    def valid_uuid(cls, value):
+        import uuid
+        return str(uuid.UUID(value))
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value):
+        import pytz
+        pytz.timezone(value)
+        return value
 
 
 class ApiConfig(BaseModel):
+    native: Optional[NativeApiConfig] = None
+    source_timezone: Optional[str] = None
     velide_server: str = Field(description="API URL to make requests to.")
     use_neighbourhood: bool = Field(
         default=False, description="Enables sending neighbourhood details."
@@ -142,6 +166,12 @@ class ApiConfig(BaseModel):
         description="Websockets server to receive updates from."
     )
 
+    @model_validator(mode="after")
+    def native_endpoint(self):
+        if self.native and not self.velide_server.rstrip("/").endswith("/graphql"):
+            raise ValueError("Native API endpoint must end in /graphql")
+        return self
+
 
 class AuthenticationConfig(BaseModel):
     """
@@ -175,12 +205,31 @@ class AuthenticationConfig(BaseModel):
     )
 
 
+class BackendProfile(BaseModel):
+    """Installation-owned state for one API; never share journals or tokens."""
+    auth: AuthenticationConfig
+    api: ApiConfig
+    sqlite_path: str
+    token_path: str
+
+
 class Settings(BaseModel):
+    onboarding: Optional[str] = None
+    native_recovery_required: bool = False
+    installation_id: Optional[str] = None
+
+    @field_validator("installation_id")
+    @classmethod
+    def valid_installation_id(cls, value):
+        if value is not None:
+            import uuid
+            return str(uuid.UUID(value))
+        return None
     target_system: TargetSystem = Field(
         default=TargetSystem.FARMAX, description="Application to integrate with."
     )
-    auth: AuthenticationConfig
-    api: ApiConfig
+    auth: Optional[AuthenticationConfig] = None
+    api: Optional[ApiConfig] = None
     farmax: Optional[FarmaxConfig] = None
     reconciliation: ReconciliationConfig = Field(
         default_factory=ReconciliationConfig,
@@ -190,6 +239,11 @@ class Settings(BaseModel):
         default="resources/velide.db",
         description="Relative path to SQLite database file.",
     )
+    token_path: Optional[str] = None
+    backend_profiles: Dict[str, BackendProfile] = Field(default_factory=dict)
+    active_backend: Optional[str] = None
+    backend_ownership_path: Optional[str] = None
+    backend_ownership_id: Optional[str] = None
     sqlite_days_retention: int = Field(
         default=30,
         description=(
@@ -200,6 +254,47 @@ class Settings(BaseModel):
     folder_to_watch: Optional[str] = Field(
         default=None, description="Used to listen for new files when using CDS."
     )
+
+    @model_validator(mode="after")
+    def matching_source_timezone(self):
+        if self.onboarding is not None:
+            if self.onboarding != "native_required" or self.backend_profiles or self.api or self.auth:
+                raise ValueError("Native setup marker cannot coexist with an installed connection")
+            return self
+        if self.auth is None or self.api is None:
+            raise ValueError("Installed configuration requires auth and api; restore the configuration backup")
+        if self.backend_profiles:
+            if set(self.backend_profiles) - {"legacy", "native"} or self.active_backend not in self.backend_profiles:
+                raise ValueError("Select a configured legacy/native backend profile")
+            databases, tokens = set(), set()
+            for name, profile in self.backend_profiles.items():
+                if bool(profile.api.native) != (name == "native"):
+                    raise ValueError("Backend profile name does not match its API contract")
+                database = os.path.normcase(os.path.abspath(profile.sqlite_path))
+                token = os.path.normcase(os.path.abspath(profile.token_path))
+                if database in databases or token in tokens or database == token:
+                    raise ValueError("Backend profiles must have separate databases and token caches")
+                databases.add(database)
+                tokens.add(token)
+                if self.target_system == TargetSystem.FARMAX and self.farmax and profile.api.native and self.farmax.timezone != profile.api.native.timezone:
+                    raise ValueError("Farmax and native merchant timezones must agree")
+            if databases & tokens:
+                raise ValueError("Token paths cannot point at backend databases")
+            selected = self.backend_profiles[self.active_backend]
+            self.auth, self.api = selected.auth, selected.api
+            self.sqlite_path, self.token_path = selected.sqlite_path, selected.token_path
+        if self.target_system == TargetSystem.FARMAX and self.api.native and self.farmax and self.farmax.timezone != self.api.native.timezone:
+            raise ValueError("Farmax and native merchant timezones must agree")
+        return self
+
+    def for_backend(self, name):
+        """A nonrecursive service configuration; the ERP source stays unchanged."""
+        profile = self.backend_profiles[name]
+        return self.model_copy(deep=True, update={
+            "auth": profile.auth.model_copy(deep=True), "api": profile.api.model_copy(deep=True),
+            "sqlite_path": profile.sqlite_path, "token_path": profile.token_path,
+            "backend_profiles": {}, "active_backend": name,
+        })
 
     @classmethod
     def from_yaml(cls: Type[T], path: str) -> T:
@@ -228,5 +323,43 @@ class Settings(BaseModel):
             return cls(**config_data)
 
 
-config_path = os.path.join(BUNDLE_DIR, "resources", "config.yml")
+def install_effective_settings(current, effective):
+    """Refresh pre-imported config references before constructing any services/UI."""
+    for name in Settings.model_fields:
+        setattr(current, name, deepcopy(getattr(effective, name)))
+    return current
+
+
+def native_upgrade_document(document, patch, sqlite_path):
+    """Apply only server-owned cutover settings to the original YAML document.
+
+    Do not round-trip through model_dump(): that drops unknown installation
+    settings and materializes defaults over the operator's original choices.
+    The caller publishes the returned document only after migrating a DB copy.
+    """
+    if not isinstance(patch, dict) or set(patch) - {"api", "auth"}:
+        raise ValueError("Cutover may change only native API/auth configuration")
+    api = patch.get("api", {})
+    allowed = {"native", "velide_server", "velide_websockets_server", "source_timezone", "use_ssl"}
+    if not isinstance(api, dict) or set(api) - allowed:
+        raise ValueError("Cutover cannot override local API preferences or retries")
+    if not all(api.get(key) for key in ("native", "velide_server", "velide_websockets_server")):
+        raise ValueError("Authoritative native endpoints and merchant/connection settings are required")
+    if "use_ssl" in api and api["use_ssl"] is not True:
+        raise ValueError("Native cutover cannot disable TLS verification")
+    result = deepcopy(document)
+    result["api"].update(deepcopy(api))
+    if "auth" in patch:
+        # An omitted auth section retains the installed issuer/client/audience.
+        # A changed one must be complete, never filled from example deployment values.
+        AuthenticationConfig.model_validate(patch["auth"])
+        result["auth"] = deepcopy(patch["auth"])
+    result["sqlite_path"] = str(sqlite_path)
+    Settings.model_validate(result)
+    return result
+
+
+config_path = os.environ.get(
+    "VELIDE_CONFIG_PATH", os.path.join(BUNDLE_DIR, "resources", "config.yml")
+)
 config = Settings.from_yaml(config_path)

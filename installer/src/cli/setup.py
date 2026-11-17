@@ -1,6 +1,10 @@
 import sys
 from pathlib import Path
 from cx_Freeze import Executable, setup
+from qt_compat import install_qt_glob_compat
+from release_resources import generate_service_resource, resource_files
+
+install_qt_glob_compat()
 
 # --- 1. ROBUST PATH SETUP ---
 # Determine the absolute path to the folder containing THIS file
@@ -12,6 +16,10 @@ ROOT_DIR = CURRENT_DIR.parent.parent.parent  # Go up 3 levels to velide-middlewa
 SRC_DIR = ROOT_DIR / "src"
 OUTPUT_DIR = ROOT_DIR / "output" / "middleware"
 RESOURCES_DIR = ROOT_DIR / "resources"
+# Never freeze the checked-in .invalid placeholder or reuse a previous build's URL.
+SERVICE_RESOURCE = generate_service_resource(
+    ROOT_DIR / "output" / "release-resources" / "middleware-service.json"
+)
 
 # Add src to python path so cx_Freeze can find imports
 sys.path.insert(0, str(SRC_DIR))
@@ -36,6 +44,10 @@ build_exe_options = {
         "jwt", 
         "fdb", 
         "httpx", 
+        "pytz",
+        "certifi",
+        "gql",
+        "websockets",
         "tqdm", 
         "screeninfo",
         "sqlalchemy", 
@@ -51,9 +63,7 @@ build_exe_options = {
         "xml", 
         "pydoc"
     ],
-    "include_files": [
-        (str(RESOURCES_DIR), "resources"),
-    ],
+    "include_files": resource_files(RESOURCES_DIR, service_resource=SERVICE_RESOURCE),
     "build_exe": str(OUTPUT_DIR),
     
     # --- FIX FOR [WinError 123] ---
@@ -70,11 +80,16 @@ target = Executable(
     copyright="Velide"
 )
 
+migration_target = Executable(
+    script=str(SRC_DIR / "native_migration.py"),
+    target_name="migrate-native.exe",
+)
+
 setup(
     name="Velide Middleware",
     version="4.1.0",
     description="Middleware do Velide para realizar " \
     "integrações com ERPs e sistemas locais.",
     options={"build_exe": build_exe_options},
-    executables=[target],
+    executables=[target, migration_target],
 )

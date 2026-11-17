@@ -23,22 +23,25 @@ class VelideWebsocketsService(QObject):
 
     # Data Signal
     action_received = pyqtSignal(LatestAction)
+    refresh_requested = pyqtSignal()
     
     # Lifecycle Signals
     started = pyqtSignal()
     service_stopped = pyqtSignal()
 
-    def __init__(self, api_config: ApiConfig, auth_service: AuthService):
+    def __init__(self, api_config: ApiConfig, auth_service: AuthService, journal=None):
         """
         Initializes the service with configuration and authentication dependencies.
         """
         super().__init__()
         self.api_config = api_config
         self.auth_service = auth_service 
+        self.journal = journal
         
         self._worker: Optional[VelideWebsocketsWorker] = None
         self._thread_pool = QThreadPool.globalInstance()
         self.logger = logging.getLogger(__name__)
+        self._rollout_paused = False
 
     @property
     def is_running(self) -> bool:
@@ -49,7 +52,9 @@ class VelideWebsocketsService(QObject):
         """
         Creates and starts a new WebSocket worker if one is not already running.
         """
-        if self.is_running: 
+        if self._rollout_paused:
+            return
+        if self.is_running:
             self.logger.warning(
                 "Tentativa de iniciar o WebSocket Service, mas ele já foi iniciado."
             )
@@ -59,16 +64,22 @@ class VelideWebsocketsService(QObject):
         self.started.emit()
         
         # Inject AuthService and Config into Worker
-        self._worker = VelideWebsocketsWorker(self.api_config, self.auth_service)
+        self._worker = VelideWebsocketsWorker(self.api_config, self.auth_service, self.journal)
         
         # Connect Data & Lifecycle Signals
-        self._worker.signals.action_received.connect(self.action_received.emit)
+        worker = self._worker
+        self._worker.signals.action_received.connect(
+            lambda action: self.action_received.emit(action)
+            if not self._rollout_paused and worker is self._worker else None)
+        self._worker.signals.refresh_requested.connect(
+            lambda: self.refresh_requested.emit()
+            if not self._rollout_paused and worker is self._worker else None)
         self._worker.signals.finished.connect(self._on_worker_finished)
         
         # Connect Status & Error Signals
         self._worker.signals.connection_state_changed.connect(self._dispatch_status_signal)
         # CHANGED: Connect directly to the signal that accepts string
-        self._worker.signals.error_occurred.connect(self.sig_error.emit)
+        self._worker.signals.error_occurred.connect(lambda _: self.sig_error.emit())
         
         # Launch in background thread
         self._thread_pool.start(self._worker)
@@ -88,7 +99,9 @@ class VelideWebsocketsService(QObject):
         """
         Translates internal ConnectionState enum to specific FSM signals.
         """
-        if state == ConnectionState.CONNECTING: 
+        if self._rollout_paused:
+            return
+        if state == ConnectionState.CONNECTING:
             self.sig_connecting.emit()
         elif state == ConnectionState.CONNECTED: 
             self.sig_connected.emit()
@@ -104,3 +117,13 @@ class VelideWebsocketsService(QObject):
         self.logger.debug("Worker WebSocket encerrado completamente.")
         self._worker = None
         self.service_stopped.emit()
+
+    def pause_for_rollout(self):
+        self._resume_running = self.is_running
+        self._rollout_paused = True
+        self.stop_service()
+
+    def resume_after_rollout(self):
+        self._rollout_paused = False
+        if self._resume_running:
+            self.start_service()

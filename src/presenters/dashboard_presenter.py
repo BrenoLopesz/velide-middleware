@@ -40,8 +40,11 @@ class DashboardPresenter(QObject):
 
         self._machine.logged_in_state.entered.connect(self.on_authenticate)
         self._machine.logged_in_state.dashboard_state.entered.connect(self.start)
+        self._machine.logged_in_state.exited.connect(self.stop)
 
         self._connect_signals()
+        self._dashboard_view.deliveries_table.retry_enabled = services.deliveries.supports_retry
+        self._dashboard_view.deliveries_table.retry_requested.connect(services.deliveries.retry_native_order)
 
     def start(self) -> None:
         """Called when the dashboard becomes active."""
@@ -59,8 +62,6 @@ class DashboardPresenter(QObject):
             )
 
     def on_authenticate(self):
-        access_token = self._machine.logged_in_state.property("access_token")
-
         if self._main_view.tray_icon is not None:
             app = QApplication.instance()
             # Prevents the app from exiting after closing the UI now.
@@ -79,6 +80,16 @@ class DashboardPresenter(QObject):
                 "Não foi possível configurar o aplicativo para rodar em segundo plano! "
                 "Caso feche essa janela, a integração irá desligar"
             )
+
+    def stop(self):
+        self._is_started = False
+        self._services.auth.invalidate_session()
+        self._services.deliveries.stop_listening()
+        self._services.websockets.stop_service()
+        if hasattr(self._services.reconciliation, "stop_service"):
+            self._services.reconciliation.stop_service()
+        else:
+            self._services.reconciliation.timer.stop()
 
     def _connect_signals(self):
         ws_fsm = self._machine.websockets_state
@@ -120,9 +131,6 @@ class DashboardPresenter(QObject):
         self._services.deliveries.delivery_update.connect(
             self._on_delivery_status_update
         )
-        self._services.websockets.action_received.connect(
-            self._services.velide_action_handler.handle_action
-        )
         self._services.velide_action_handler.delivery_deleted.connect(
             self._services.deliveries.on_delivery_deleted_in_velide
         )
@@ -134,6 +142,9 @@ class DashboardPresenter(QObject):
         )
         self._services.reconciliation.delivery_in_route.connect(
             self._services.deliveries.on_reconciliation_detects_route_start
+        )
+        self._services.reconciliation.delivery_route_fact.connect(
+            self._services.deliveries.on_reconciliation_route_fact
         )
         self._services.reconciliation.delivery_missing.connect(
             self._services.deliveries.on_reconciliation_misses_delivery

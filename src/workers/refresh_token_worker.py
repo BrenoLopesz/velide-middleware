@@ -46,7 +46,7 @@ class RefreshTokenWorker(QRunnable):
     Results are communicated via a separate 'signals' object.
     """
 
-    def __init__(self, refresh_token: str, auth_config: AuthenticationConfig):
+    def __init__(self, refresh_token: str, auth_config: AuthenticationConfig, commit_token=None, is_current=None):
         """
         Initializes the runnable worker.
 
@@ -60,6 +60,8 @@ class RefreshTokenWorker(QRunnable):
 
         # Store dependencies
         self._refresh_token = refresh_token
+        self._commit_token = commit_token
+        self._is_current = is_current or (lambda: True)
         self.signals = RefreshTokenSignals()
 
         # Prepare request details
@@ -82,8 +84,10 @@ class RefreshTokenWorker(QRunnable):
         when the task is complete.
         """
         try:
+            if not self._is_current():
+                return
             response = requests.post(
-                self.url, headers=self.headers, data=self.data, verify=False
+                self.url, headers=self.headers, data=self.data, verify=True, timeout=15
             )
 
             # If the refresh token is revoked or the user was deleted, 
@@ -105,37 +109,45 @@ class RefreshTokenWorker(QRunnable):
             # The response for a refresh token grant might not include a
             # new refresh token. We must re-add the one we just used
             # to ensure it's stored correctly for future use.
-            jsonResponse["refresh_token"] = self._refresh_token
+            jsonResponse["refresh_token"] = jsonResponse.get("refresh_token") or self._refresh_token
             jsonResponse = cast(AccessTokenDict, jsonResponse)
 
             access_token = jsonResponse["access_token"]
 
-            # Emit success signal
-            self.signals.token.emit(access_token, self._refresh_token)
-
             # Store the new token bundle
-            store_token_at_file(jsonResponse)
+            if self._commit_token is not None:
+                if not self._commit_token(jsonResponse):
+                    return
+            else:
+                store_token_at_file(jsonResponse)
+            self.signals.token.emit(access_token, jsonResponse["refresh_token"])
         except requests.HTTPError:
+            self.signals.error.emit("Servidor recusou a renovação do token.")
             # Catches non-2xx responses from raise_for_status()
             self.logger.exception(
                 "Ocorreu um erro no servidor during a solitação " \
                 "para recarregar token de acesso."
             )
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            self.signals.error.emit("Falha de conexão ao renovar token.")
             # Catches network-level errors
             self.logger.exception(
                 "Falha ao conectar com o servidor para recarregar token de acesso."
             )
         except requests.RequestException:
+            self.signals.error.emit("Falha ao renovar token.")
             # A catch-all for other 'requests' library errors
             self.logger.exception(
                 "Falha ao solicitar recarregamento do token de acesso."
             )
         except json.JSONDecodeError:
+            self.signals.error.emit("Resposta de autenticação inválida.")
             self.logger.exception("Servidor não retornou um JSON válido.")
         except TokenStorageError:
+            self.signals.error.emit("Falha ao armazenar token renovado.")
             self.logger.exception("Falha ao armazenar token de acesso.")
         except Exception:
+            self.signals.error.emit("Erro inesperado ao renovar token.")
             self.logger.exception("Erro inesperado ao recarregar o token de acesso.")
         finally:
             # Always emit the 'finished' signal

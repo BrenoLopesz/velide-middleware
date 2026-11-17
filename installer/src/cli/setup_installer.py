@@ -1,6 +1,10 @@
 import sys
 from pathlib import Path
 from cx_Freeze import Executable, setup
+from release_resources import resource_files
+from qt_compat import install_qt_glob_compat
+
+install_qt_glob_compat()
 
 # --- 1. PATH CONFIGURATION ---
 # File location: installer/src/cli/setup_installer.py
@@ -51,10 +55,7 @@ build_exe_options = {
         "screeninfo",
         # "msvcrt",  <-- REMOVED: Do not include this in packages
     ],
-    "include_files": [
-        # Copies 'installer/resources' -> 'output/installer/resources'
-        (str(RESOURCES_DIR), "resources") 
-    ],
+    "include_files": resource_files(RESOURCES_DIR, updater=True),
     "excludes": [
         "PyQt5.QtQml", 
         "PyQt5.QtQuick", 

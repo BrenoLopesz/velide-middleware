@@ -4,9 +4,10 @@ from PyQt5.QtWidgets import (
     QHeaderView,
     QToolTip,
     QStyledItemDelegate,
+    QMenu,
 )
 
-from PyQt5.QtCore import Qt, QEvent
+from PyQt5.QtCore import Qt, QEvent, pyqtSignal
 from PyQt5.QtGui import QFontMetrics
 from models.velide_delivery_models import Order
 from models.delivery_table_model import DeliveryRowStatus, DeliveryTableModel
@@ -57,11 +58,25 @@ class ElidingTooltipDelegate(QStyledItemDelegate):
 
 
 class DeliveriesTable(QTableView):
+    retry_requested = pyqtSignal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.fonts = get_fonts()
         self._model = DeliveryTableModel()
         self.configure_table()
+        self.retry_enabled = False
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._retry_menu)
+
+    def _retry_menu(self, position):
+        index = self.indexAt(position)
+        if not self.retry_enabled or not index.isValid():
+            return
+        menu = QMenu(self)
+        action = menu.addAction("Tentar sincronização novamente")
+        if menu.exec_(self.viewport().mapToGlobal(position)) == action:
+            self.retry_requested.emit(self.model().data(index, Qt.UserRole))
 
     def configure_table(self):
         """Sets up the visual properties and behavior of the table."""

@@ -9,6 +9,7 @@ main PyQt5 application thread.
 import logging
 import os
 import subprocess
+import sys
 
 from PyQt5.QtCore import QObject, QRunnable, pyqtSignal
 
@@ -88,6 +89,11 @@ class InstallerRunnableWorker(QRunnable):
                 "/NOCANCEL",
                 "/UPDATE=1",
             ]
+            if getattr(sys, "frozen", False):
+                # Update the installation that launched this updater, including
+                # portable/custom paths, instead of relying on registry defaults.
+                app_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))
+                command.append("/DIR=" + app_dir)
 
             # Step 3: Execute the installer process
             # We use subprocess.run with check=True, which will raise

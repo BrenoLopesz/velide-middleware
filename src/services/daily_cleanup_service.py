@@ -29,6 +29,7 @@ class DailyCleanupService(QObject):
         self.sqlite_service = sqlite_service
         self.days_retention = days_retention
         self.logger = logging.getLogger(__name__)
+        self._rollout_paused = False
 
         # Setup the Timer
         self.timer = QTimer(self)
@@ -49,6 +50,9 @@ class DailyCleanupService(QObject):
         It runs the cleanup IMMEDIATELY upon calling, 
         and then schedules it to repeat every 24 hours.
         """
+        if self._rollout_paused:
+            self._resume_running = True  # Hydration completed during the drain.
+            return
         if self.timer.isActive():
             self.logger.warning("Rotina de limpeza já está ativa.")
             return
@@ -66,9 +70,21 @@ class DailyCleanupService(QObject):
         self.timer.stop()
         self.logger.info("Rotina de limpeza parada.")
 
+    def pause_for_rollout(self):
+        self._resume_running = self.timer.isActive()
+        self._rollout_paused = True
+        self.stop_routine()
+
+    def resume_after_rollout(self):
+        self._rollout_paused = False
+        if self._resume_running:
+            self.start_routine()
+
     @pyqtSlot()
     def _trigger_cleanup(self):
         """Internal slot called by Timer or start_routine."""
+        if self._rollout_paused:
+            return
         self.logger.debug("Disparando solicitação de limpeza agendada...")
         self.sqlite_service.request_prune_old_data(self.days_retention)
 

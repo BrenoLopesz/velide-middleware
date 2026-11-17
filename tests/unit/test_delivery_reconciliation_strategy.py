@@ -92,7 +92,9 @@ class TestDeliveryReconciliationStrategyCheckExists:
     @pytest.fixture
     def velide_real_instance(self):
         """Returns a REAL Velide instance with mocked HTTP client."""
-        mock_config = MagicMock()
+        from config import ApiConfig
+        mock_config = ApiConfig(velide_server="https://api.invalid/",
+                                velide_websockets_server="wss://api.invalid/")
         recon_config = ReconciliationConfig(
             retry_reconciliation_enabled=True,
             retry_reconciliation_delay_seconds=0

@@ -62,7 +62,7 @@ class AuthorizationFlowWorker(QRunnable):
     ERROR_UNEXPECTED = "Ocorreu um erro inesperado."
     MISSING_REFRESH_TOKEN = "Erro: Token de atualização não recebido."
 
-    def __init__(self, config: AuthenticationConfig):
+    def __init__(self, config: AuthenticationConfig, commit_token=None):
         """
         Initializes the runnable worker.
 
@@ -73,6 +73,7 @@ class AuthorizationFlowWorker(QRunnable):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.config = config
+        self._commit_token = commit_token
         self.signals = AuthorizationFlowSignals()
         self._is_running = True  # Flag to allow for cancellation
 
@@ -141,7 +142,11 @@ class AuthorizationFlowWorker(QRunnable):
             try:
                 token_data = access_token_handler.request()
                 # SUCCESS! We got the token.
-                store_token_at_file(token_data)  # Store it securely
+                if self._commit_token is not None:
+                    if not self._commit_token(token_data):
+                        return None
+                else:
+                    store_token_at_file(token_data)
                 return token_data
 
             except TokenPollingError as e:
@@ -196,6 +201,8 @@ class AuthorizationFlowWorker(QRunnable):
         """
         try:
             # Step 1: Get device code
+            if not self._is_running:
+                return
             device_code_info = self._get_device_code()
             if not self._is_running:  # Check for cancellation after first network call
                 return

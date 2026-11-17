@@ -79,8 +79,8 @@
 ;
 ;    - /SILENT shows installation progress but no wizard pages.
 ;    - /VERYSILENT shows nothing at all.
-;    NOTE: Silent install skips custom pages; config.yml will not be generated
-;    unless you implement custom command-line parameter handling for it.
+;    Fresh installations require interactive ERP configuration and are rejected
+;    in silent mode. Existing installations preserve config and skip these pages.
 ;
 ; 3. UPGRADE MODE (FOR APPLICATION AUTO-UPDATER):
 ;    --------------------------------------------
@@ -90,6 +90,8 @@
 ;    Designed to be called BY YOUR APPLICATION for self-updates:
 ;    - SKIPS WIZARD PAGES: User is not asked to select system or paths.
 ;    - PRESERVES CONFIGURATION: It will NOT overwrite an existing 'config.yml'.
+;      Missing config aborts before files are installed. Manual reinstalls with
+;      installation evidence receive the same protection.
 ;    - TEMP DIRECTORY: It installs to a temporary folder to ensure the update
 ;      process doesn't conflict with running files.
 ;

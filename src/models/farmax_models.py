@@ -21,10 +21,27 @@ class FarmaxDeliveryman(BaseLocalDeliveryman):
 
 class FarmaxSale(BaseModel):
     id: float = Field(alias="cd_venda")  # Firebird uses DOUBLE PRECISION
-    status: str = Field(alias="status")
+    branch_id: Optional[float] = Field(default=None, alias="cd_filial")
+    item_id: Optional[float] = Field(default=None, alias="id_produto")
+    item_order: Optional[float] = Field(default=None, alias="ordem")
+    customer_id: Optional[float] = Field(default=None, alias="cd_cliente")
+    sale_date: Optional[date] = Field(default=None, alias="data_caixa")
+    status: Optional[str] = Field(default=None, alias="status")
+    sale_type: Optional[str] = Field(default=None, alias="tipo_venda")
+    # Only a repository full-sale read may assert completeness. A delta or an
+    # old caller supplying just CD_VENDA/STATUS cannot cancel an entire order.
+    evidence_complete: bool = False
+    snapshot_item_count: Optional[int] = None
+    item_present: bool = True
+    source_context: Optional[dict] = None
+    removal_evidence: list = Field(default_factory=list)
+    concluded: Optional[str] = Field(default=None, alias="concluido")
+    delivery_exists: Optional[bool] = None
+    delivery_deleted: bool = False
 
 
 class FarmaxDelivery(BaseModel):
+    source_context: Optional[dict] = None
     # We use aliases to map the database's uppercase names
     # to clean, Pythonic lowercase names.
     sale_id: float = Field(..., alias="cd_venda")

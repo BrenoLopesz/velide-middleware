@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QThreadPool
 from sqlalchemy import create_engine
 
-from config import Settings, TargetSystem, config
+from config import Settings, TargetSystem, config, config_path, install_effective_settings
 from connectors.farmax.farmax_repository import FarmaxRepository
 from connectors.farmax.farmax_setup import FarmaxSetup
 from models.app_context_model import Services
@@ -20,7 +20,6 @@ from services.reconciliation_service import ReconciliationService
 from services.sqlite_service import SQLiteService
 from services.strategies.cds_strategy import CdsStrategy
 from services.auth_service import AuthService
-from presenters.app_presenter import AppPresenter
 from services.strategies.connectable_strategy import IConnectableStrategy
 from services.strategies.farmax_strategy import FarmaxStrategy
 from services.tracking_persistence_service import TrackingPersistenceService
@@ -187,7 +186,8 @@ def create_strategy(
                 "é obrigatório para o sistema CDS."
             )
 
-        return CdsStrategy(app_config.api, app_config.folder_to_watch)
+        return CdsStrategy(app_config.api, app_config.folder_to_watch, tracking_persistence_service.journal,
+                           baseline_path=getattr(tracking_persistence_service.journal, "cds_baseline_path", None))
 
     elif app_config.target_system == TargetSystem.FARMAX:
         if not app_config.farmax:
@@ -203,8 +203,11 @@ def create_strategy(
             pool_pre_ping=True,
         )
         farmax_setup = FarmaxSetup(engine)
-        farmax_setup.initial_setup()
-        farmax_repository = FarmaxRepository(engine)
+        capabilities = farmax_setup.initial_setup()
+        farmax_repository = FarmaxRepository(
+            engine, journal=tracking_persistence_service.journal.journal,
+            log_available=capabilities["log_available"],
+        )
         return FarmaxStrategy(
             farmax_config=app_config.farmax,
             # farmax_setup=farmax_setup,
@@ -219,27 +222,49 @@ def create_strategy(
     raise ValueError(f"Sistema alvo não suportado: {app_config.target_system}")
 
 
-def build_services(app_config: Settings) -> Services:
+def build_services(app_config: Settings, upgrade=None, ownership=None) -> Services:
     """Creates and wires together all core application services."""
+    if app_config.onboarding:
+        raise ValueError("Conclua a configuração nativa antes de iniciar a sincronização")
+    if app_config.target_system == TargetSystem.FARMAX and app_config.farmax and not app_config.api.source_timezone:
+        app_config.api.source_timezone = app_config.farmax.timezone
     velide_gateway = VelideGateway(
         app_config.api,
         app_config.target_system,
         app_config.reconciliation,
     )
-    auth_service = AuthService(app_config.auth, velide_gateway)
+    velide_gateway.ownership = ownership
+    auth_service = AuthService(app_config.auth, velide_gateway, token_path=app_config.token_path)
     delivery_repository = DeliveryRepository()
     velide_action_handler = VelideActionHandler(delivery_repository)
+    from services.sync_journal_service import SyncJournalService
+    db_path = os.path.join(BUNDLE_DIR, app_config.sqlite_path)
+    scope = app_config.api.velide_server + "|" + app_config.target_system.value
+    if app_config.api.native:
+        scope += "|" + app_config.api.native.merchant_id + "|" + app_config.api.native.connection_id
+    from utils.source_identity import configured_source_identity
+    journal = SyncJournalService(db_path, scope, configured_source_identity(app_config),
+                                 app_config.api.native.timezone if app_config.api.native else app_config.api.source_timezone,
+                                 ownership)
+    if upgrade:
+        journal.cds_baseline_path = upgrade.cds_baseline_path
     deliveries_service = DeliveriesService(
         gateway=velide_gateway,
         api_config=app_config.api,
         target_system=app_config.target_system,
         delivery_repository=delivery_repository,
+        journal=journal,
     )
     sqlite_service = SQLiteService(os.path.join(BUNDLE_DIR, app_config.sqlite_path))
     tracking_persistance_service = TrackingPersistenceService(
         sqlite_service,
-        app_config.sqlite_days_retention
+        app_config.sqlite_days_retention,
+        journal=journal,
     )
+    auth_service.session_invalidated.connect(deliveries_service._dispatcher.invalidate_auth)
+    if ownership is not None and app_config.target_system == TargetSystem.FARMAX:
+        deliveries_service.delivery_acknowledged.connect(
+            lambda internal, order: tracking_persistance_service.reserve_id(internal))
     reconciliation_service = ReconciliationService(
         gateway=velide_gateway,
         tracking_service=tracking_persistance_service,
@@ -247,12 +272,39 @@ def build_services(app_config: Settings) -> Services:
         target_system=app_config.target_system,
         reconciliation_config=app_config.reconciliation
     )
-    websockets_service = VelideWebsocketsService(app_config.api, auth_service)
+    if app_config.api.native:
+        from services.native_reconciliation_service import NativeReconciliationService
+        reconciliation_service = NativeReconciliationService(velide_gateway, journal, app_config.target_system)
+        deliveries_service.set_recovery_service(reconciliation_service)
+        reconciliation_service.order_restored.connect(deliveries_service._on_order_restored)
+        reconciliation_service.order_state.connect(deliveries_service.on_native_state)
+    native_farmax = app_config.api.native and app_config.target_system == TargetSystem.FARMAX
+    websockets_service = VelideWebsocketsService(app_config.api, auth_service, journal.journal if native_farmax else None)
+    if native_farmax:
+        from services.native_change_feed_service import NativeChangeFeedService
+        reconciliation_service.change_feed = NativeChangeFeedService(velide_gateway, journal, reconciliation_service)
+        reconciliation_service.change_feed.progressed.connect(reconciliation_service.check_recovery)
+        websockets_service.refresh_requested.connect(reconciliation_service.change_feed.trigger)
+    if app_config.api.native:
+        if not native_farmax:
+            websockets_service.refresh_requested.connect(reconciliation_service.trigger_reconciliation)
+        deliveries_service._dispatcher.import_accepted.connect(lambda *_: reconciliation_service.trigger_reconciliation())
+        deliveries_service._dispatcher.mutation_changed.connect(reconciliation_service.invalidate_pending_reads)
+        if app_config.target_system == TargetSystem.CDS and ownership is None:
+            deliveries_service.listening_started.connect(reconciliation_service.start_service)
+            deliveries_service.listening_started.connect(websockets_service.start_service)
+    if ownership is not None and app_config.target_system == TargetSystem.CDS:
+        deliveries_service._dispatcher.scope_ready.connect(reconciliation_service.start_service)
+        deliveries_service._dispatcher.scope_ready.connect(websockets_service.start_service)
+        deliveries_service._dispatcher.scope_invalidated.connect(reconciliation_service.stop_service if hasattr(reconciliation_service, "stop_service") else reconciliation_service.timer.stop)
+        deliveries_service._dispatcher.scope_invalidated.connect(websockets_service.stop_service)
     deliverymen_retriever_service = DeliverymenRetrieverService(
         velide_gateway,
         app_config.api, 
         app_config.target_system
     )
+    sqlite_service.add_many_mappings_result.connect(lambda _: sqlite_service.request_get_all_mappings())
+    sqlite_service.all_mappings_found.connect(deliverymen_retriever_service.update_mapping_cache)
 
     return Services(
         auth=auth_service,
@@ -306,20 +358,49 @@ def main():
     # Set up logging
     configure_logging(view)
 
-    # Build services (Dependency Injection)
-    services = build_services(config)
+    if config.onboarding:
+        from visual.screens.native_onboarding_screen import NativeOnboardingDialog
+        setup = NativeOnboardingDialog(config_path, BUNDLE_DIR)
+        if setup.exec_() != setup.Accepted:
+            return
+        install_effective_settings(config, Settings.from_yaml(config_path))
 
-    setup_tray_icon(app, view, services)
+    # Keep the installed source/configuration while adopting old local storage.
+    # A centrally provisioned native package is applied atomically, when present.
+    from local_upgrade import upgrade_installation
+    upgrade = upgrade_installation(config_path, BUNDLE_DIR)
+    install_effective_settings(config, upgrade.settings)
+    for message in upgrade.instructions:
+        logging.getLogger(__name__).info(message)
 
-    # Setup strategy
-    strategy = setup_strategy(config, services)
-
-    # Initialize the presenter to connect view and services
-    presenter = AppPresenter(view, services, strategy)
-
-    # Start the application logic
-    presenter.run()
-    services.auth.load_stored_token()
+    # Each profile owns its auth, services and ERP obligations. The selector
+    # changes new intake only; the other profile remains available for recovery.
+    from services.profile_application import ProfileApplication
+    runtime = ProfileApplication(app, config, upgrade, config_path, BUNDLE_DIR, view)
+    # Keep retired Qt receivers alive after their drained shutdown; a queued
+    # presentation-only signal must never target a destroyed object.
+    retired = []
+    from services.rollout_controller import RolloutController
+    def attach(current):
+        current.rollout = RolloutController(current, config_path, BUNDLE_DIR)
+        current.rollout.activated.connect(rebuild)
+    def rebuild(_result):
+        nonlocal runtime
+        old = runtime
+        old.shutdown()
+        for profile in old.runtimes.values():
+            profile.presenter._machine.stop()
+            profile.view.hide()
+        retired.append(old)
+        effective = upgrade_installation(config_path, BUNDLE_DIR)
+        install_effective_settings(config, effective.settings)
+        replacement_view = MainView()
+        configure_logging(replacement_view)
+        runtime = ProfileApplication(app, config, effective, config_path, BUNDLE_DIR, replacement_view)
+        attach(runtime)
+        runtime.start()
+    attach(runtime)
+    runtime.start()
 
     # Run the application event loop
     sys.exit(app.exec_())
