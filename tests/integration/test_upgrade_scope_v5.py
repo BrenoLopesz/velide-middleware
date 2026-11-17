@@ -41,7 +41,7 @@ def test_schema_v5_native_cutover_preserves_and_rescopes_farmax_event_history(tm
     scope = configured_scope(adopted.settings)
     evidence = json.dumps({"accepted": True, "source_context": {"branch_id": "7", "sale_id": "123"}, "cancelled_items": 1, "total_items": 2})
     with sqlite3.connect(str(database)) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
         conn.execute("INSERT INTO SyncFarmaxEvents(scope,internal_id,evidence) VALUES(?,'123',?)", (scope, evidence))
         conn.execute("UPDATE SyncOrders SET add_attempts=3,delete_attempts=1,farmax_progress=?", (evidence,))
     original = rows(database, "SELECT sequence,internal_id,evidence,observed_at FROM SyncFarmaxEvents")

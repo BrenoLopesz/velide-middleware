@@ -77,6 +77,8 @@ class DeliveriesService(QObject):
         # Connect Strategy Signals
         self._active_strategy.order_normalized.connect(self._on_order_normalized)
         self._active_strategy.order_cancelled.connect(self._on_internal_order_cancelled)
+        if self._journal:
+            self._active_strategy.cancellation_committed.connect(self._dispatcher.resume_cancellation)
         self._active_strategy.order_restored.connect(self._on_order_restored)
         self._active_strategy.synchronization_failed.connect(self._on_delivery_request_failure)
 
@@ -246,6 +248,11 @@ class DeliveriesService(QObject):
 
     def on_native_state(self, state):
         internal_id = state["externalOrderId"]
+        if state.get("cancellation") == "SUPERSEDED" or (
+                state.get("deliveryId") and not state.get("deleted")
+                and state.get("deliveryStatus") in ("PENDING", "IN_TRANSIT", "COMPLETED")
+                and state.get("cancellation") == "NONE"):
+            self._cancellation_intents.discard(internal_id)
         if state.get("_sync_review"):
             self._on_delivery_request_failure(internal_id,state["_sync_review"].get("message") or "Source review is required")
             return
@@ -258,6 +265,11 @@ class DeliveriesService(QObject):
             return
         if not state["found"]:
             self.on_reconciliation_misses_delivery(internal_id)
+            return
+        if state.get("_projection_outcome") in ("PARTIAL", "UNSUPPORTED"):
+            if state.get("deliveryId"):
+                self._repository.link_ids(internal_id, state["deliveryId"])
+            self.delivery_update.emit(internal_id, DeliveryRowStatus[state["_projection_outcome"]])
             return
         if state.get("deliveryId"):
             self._on_add_delivery_request_success(internal_id, state["deliveryId"])
@@ -351,6 +363,10 @@ class DeliveriesService(QObject):
         self._apply_deletion_outcome(internal_id,external_id,None)
 
     def _apply_deletion_outcome(self, internal_id, external_id, row):
+        if row and self._api_config.native and row.get("cancellation") != "ACKNOWLEDGED":
+            # The server may already have restored this order while an earlier
+            # acknowledgement was queued for presentation.
+            return
         if row and row.get("source_review"):
             import json
             self._on_delivery_request_failure(internal_id,json.loads(row["source_review"]).get("message") or "Source review is required")

@@ -4,6 +4,7 @@ Delivery writes are atomic and deliberately exclude cashier transfer/settlement.
 Matching fields acknowledges this projection, not the entire native ERP workflow.
 """
 import logging
+import uuid
 from datetime import date, datetime, time
 from typing import List, Tuple
 
@@ -96,7 +97,7 @@ class FarmaxRepository:
         return context
 
     @staticmethod
-    def _ordinary_sale(sales):
+    def _ordinary_sale(sales, wait_for_active=False):
         # C/D/I rows remain in identity/progress snapshots but are never revived.
         # CONCLUIDO and HORAFINAL are checkout-owned, independent of courier return.
         # SP_RETORNA_ENTREGAS excludes type D; it does not whitelist V/P/R/M.
@@ -106,6 +107,8 @@ class FarmaxRepository:
             raise FarmaxEvidenceError("Unknown sale item status")
         active = [row for row in sales if row["status"] in ("S", "V") and row["tipo_venda"] != "D"]
         if not active:
+            if wait_for_active:
+                raise FarmaxWaitingError("Sale has no active delivery items; awaiting source eligibility")
             raise FarmaxEvidenceError("Sale has no active delivery items; reconcile cancellation")
         return active
 
@@ -192,6 +195,8 @@ class FarmaxRepository:
             raise FarmaxEvidenceError("Invalid source provenance: " + str(error)) from error
 
     def _execute_delivery_effect(self, sale_id, payload, source_timezone, apply, authority_check=None):
+        if payload.get("authoritative_projection"):
+            return self._execute_projection(sale_id, payload, source_timezone, apply, authority_check)
         sale_id = int(normalize_farmax_id(sale_id))
         expected = payload.get("source_context")
         zone = pytz.timezone(source_timezone)
@@ -220,6 +225,126 @@ class FarmaxRepository:
             if authority_check is not None and not authority_check():
                 raise FarmaxWaitingError("A situação da rota mudou. A atualização do Farmax será refeita com os dados atuais.")
             return result
+
+    def _execute_projection(self, sale_id, payload, source_timezone, apply, authority_check):
+        """Native latest-state projection; legacy clock-only callers keep their contract."""
+        from connectors.farmax.projection_ledger import ProjectionLedger, KEYS
+        sale_id = int(normalize_farmax_id(sale_id))
+        operation = payload.get("operation")
+        if operation not in ("WAITING", "IN_ROUTE", "DONE"):
+            raise FarmaxEvidenceError("Unsupported authoritative projection")
+        desired = dict(status={"WAITING": "S", "IN_ROUTE": "R", "DONE": "V"}[operation],
+                       cd_entregador=None, hora_saida=None, hora_chegada=None)
+        if operation != "WAITING":
+            courier = int(normalize_farmax_id(payload.get("courier_local_id")))
+            if courier <= 0:
+                raise FarmaxMappingMissing("A positive courier mapping is required")
+            zone = pytz.timezone(source_timezone)
+            def instant(value):
+                result = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if result.tzinfo is None:
+                    raise FarmaxEvidenceError("Occurrence time must be timezone-aware")
+                return result.astimezone(zone)
+            started = instant(payload["started_at"])
+            completed = instant(payload["completed_at"]) if operation == "DONE" else None
+            if completed and completed < started:
+                raise FarmaxEvidenceError("Completion precedes departure")
+            desired.update(cd_entregador=courier, hora_saida=self._stored_clock(started.time()),
+                           hora_chegada=self._stored_clock(completed.time()) if completed else None)
+        ledger = ProjectionLedger(self._engine)
+        # Startup metadata is committed before preparing dependent writes.
+        ledger.ensure(install=apply)
+        application = payload["application_id"]
+        scope = payload["source_scope"]
+        generation = payload["generation"]
+        with self._engine.begin() as conn:
+            delivery, sales, context = self._snapshot(conn, sale_id, lock=apply)
+            if authority_check is not None and not authority_check():
+                raise FarmaxWaitingError("Projection superseded before application")
+            self._check_source_context(sale_id, context, payload.get("source_context"), payload.get("legacy_adopted"))
+            # A restored Velide delivery can precede commercial restoration in
+            # Farmax. Wait without writing or latching an identity-review hold.
+            active = self._ordinary_sale(sales, wait_for_active=True)
+            if delivery["status"] not in ("S", "R", "V"):
+                raise FarmaxEvidenceError("Unsupported delivery lifecycle state")
+            before = {field: self._field_value(delivery, field) for field in desired}
+            changed = {field: value for field, value in desired.items() if before[field] != value}
+            history = ledger.history(conn, scope, sale_id)
+            owned = {}
+            for receipt in history:
+                for item in receipt["item_changes"]:
+                    key = tuple(item[key] for key in KEYS)
+                    if key not in owned or item["version"] > owned[key]["version"]:
+                        owned[key] = item
+            item_changes, partial = [], []
+            for row in active:
+                key = tuple(row[key] for key in KEYS)
+                if operation == "DONE" and row["status"] == "S":
+                    item_changes.append(dict(row, before="S", after="V"))
+                elif operation != "DONE" and row["status"] == "V":
+                    previous = owned.get(key)
+                    if (previous and previous["after"] == "V" and previous["before"] == "S"
+                            and ledger.version(conn, row) == previous["version"]):
+                        item_changes.append(dict(row, before="V", after="S", expected_version=previous["version"]))
+                    else:
+                        partial.append("Item return has no exclusive integration provenance")
+            if not apply and (changed or item_changes):
+                raise FarmaxWaitingError("Delivery projection is pending Velide-led source writes")
+            if apply and changed:
+                # Compare every managed field, including NULLs, under the row lock.
+                params = dict(changed, id=sale_id, branch=int(context["branch_id"]))
+                predicates = []
+                for field, value in before.items():
+                    params["old_" + field] = value
+                    predicates.append(field.upper() + (" IS NULL" if value is None else "=:old_" + field))
+                result = conn.execute(text("UPDATE ENTREGAS SET " + ", ".join(
+                    field.upper() + "=:" + field for field in changed) +
+                    " WHERE CD_VENDA=:id AND CD_FILIAL=:branch AND " + " AND ".join(predicates)), params)
+                if result.rowcount != 1:
+                    raise FarmaxEvidenceError("Delivery changed concurrently or has ambiguous identity")
+            deltas = []
+            for row in item_changes if apply else []:
+                if "expected_version" in row and ledger.version(conn, row) != row["expected_version"]:
+                    partial.append("Item changed during delivery projection; native status preserved")
+                    continue
+                prior_version = ledger.watch(conn, row)
+                params = {key: row[key] for key in KEYS}
+                params.update(before=row["before"], after=row["after"])
+                from connectors.farmax.projection_ledger import WHERE
+                result = conn.execute(text("UPDATE VENDAS SET STATUS=:after WHERE " + WHERE +
+                                           " AND STATUS=:before AND (TIPO_VENDA IS NULL OR TIPO_VENDA<>'D')"), params)
+                if result.rowcount != 1:
+                    raise FarmaxEvidenceError("Sale item changed concurrently or has ambiguous identity")
+                written_version = ledger.version(conn, row)
+                if written_version is None or written_version <= prior_version:
+                    raise FarmaxEvidenceError("Item provenance trigger did not record the write")
+                deltas.append(dict({key: row[key] for key in KEYS}, before=row["before"],
+                                   after=row["after"], version=written_version))
+            final, final_sales, final_context = self._snapshot(conn, sale_id)
+            if final_context != context or any(self._field_value(final, key) != value for key, value in desired.items()):
+                raise FarmaxEvidenceError("Persisted delivery projection does not match the requested effect")
+            for delta in deltas:
+                matching = [row for row in final_sales if all(row[key] == delta[key] for key in KEYS)]
+                if len(matching) != 1 or matching[0]["status"] != delta["after"]:
+                    raise FarmaxEvidenceError("Persisted sale-item projection does not match the requested effect")
+            observation = {"WAITING": "WAITING_FIELDS_MATCH", "IN_ROUTE": "DEPARTURE_FIELDS_MATCH",
+                           "DONE": "COMPLETED_FIELDS_MATCH"}[operation]
+            receipt = dict(observation=observation, outcome="PARTIAL" if partial else "MATCHED",
+                           reason="; ".join(sorted(set(partial))) or None, before=before,
+                           after=desired, item_changes=deltas, source_context=context,
+                           execution_id=payload.get("execution_id"), execution_revision=payload.get("execution_revision"),
+                           started_at=payload.get("started_at"), completed_at=payload.get("completed_at"),
+                           revision=payload.get("revision"), projection_version=1)
+            if apply and (changed or deltas):
+                # A retried committed application may encounter newer ERP drift.
+                # Preserve its original receipt and record the repair separately.
+                if ledger.get(conn, application):
+                    receipt["recovery_of"] = application
+                    application = str(uuid.uuid4())
+                ledger.save(conn, application, scope, sale_id, generation, receipt)
+            if authority_check is not None and not authority_check():
+                raise FarmaxWaitingError("Projection superseded during application")
+            return dict(receipt, application_id=application)
 
     @staticmethod
     def _stored_clock(value):

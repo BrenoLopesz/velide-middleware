@@ -78,9 +78,12 @@ def test_effects_retry_in_order_and_deduplicate(journal, remote_state):
     first = journal.next_effect()
     assert json.loads(first["payload"])["started_at"] == "2026-11-11T15:00:00Z"
     journal.effect_result(first["sequence"], "Firebird offline", first["generation"])
-    assert journal.next_effect() is None  # completion cannot overtake departure
-    journal.effect_result(first["sequence"], generation=first["generation"], observation="DEPARTURE_FIELDS_MATCH")
-    assert journal.next_effect()["operation"] == "DONE"
+    assert journal.next_effect() is None  # failed current target observes backoff
+    assert first["operation"] == "DONE"
+    assert not journal.effect_result(first["sequence"], generation=first["generation"], observation="DEPARTURE_FIELDS_MATCH")
+    journal.effect_result(first["sequence"], generation=first["generation"], observation="COMPLETED_FIELDS_MATCH")
+    journal.native_states([remote_state()])
+    assert journal.next_effect() is None
 
 
 def test_unversioned_event_never_authorizes_source_work(journal, remote_state):
@@ -89,7 +92,8 @@ def test_unversioned_event_never_authorizes_source_work(journal, remote_state):
     journal.enqueue_effect("123", "old:IN_ROUTE", "IN_ROUTE", {"occurred_at": "2026-11-10T15:00Z"})
     assert journal.next_effect() == original  # Unversioned input cannot replace native authority.
     journal.native_states([remote_state()])
-    assert journal.next_effect()["effect_key"] == "route:IN_ROUTE"
+    assert journal.next_effect()["effect_key"] == "projection"
+    assert json.loads(journal.next_effect()["payload"])["execution_id"] == "route"
 
 
 def test_existing_mappings_survive_upgrade_and_cleanup(journal):

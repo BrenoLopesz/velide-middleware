@@ -54,7 +54,7 @@ async def test_native_partial_lookup_and_graphql_error_are_not_success():
             await api.order_states(["123"])
 
 
-def test_offline_start_and_complete_produces_ordered_durable_effects(tmp_path):
+def test_offline_start_and_complete_coalesces_to_latest_target(tmp_path):
     journal = SyncJournal(str(tmp_path / "native.db"), "native")
     with SQLiteManager(journal.path) as db:
         db.add_mapping("courier","5")
@@ -65,11 +65,9 @@ def test_offline_start_and_complete_produces_ordered_durable_effects(tmp_path):
              "execution": {"id": "route", "courierId": "courier", "startedAt": "2026-01-01T15:00:00Z", "completedAt": "2026-01-01T16:00:00Z"}}
     journal.native_states([state])
     first = journal.next_effect()
-    assert first["operation"] == "IN_ROUTE"
-    journal.effect_result(first["sequence"], generation=first["generation"], observation="DEPARTURE_FIELDS_MATCH")
-    second = journal.next_effect()
-    assert json.loads(second["payload"])["occurred_at"] == state["execution"]["completedAt"]
-    journal.effect_result(second["sequence"], generation=second["generation"], observation="COMPLETED_FIELDS_MATCH")
+    assert first["operation"] == "DONE"
+    assert json.loads(first["payload"])["completed_at"] == state["execution"]["completedAt"]
+    journal.effect_result(first["sequence"], generation=first["generation"], observation="COMPLETED_FIELDS_MATCH")
     journal.native_states([state])
     assert journal.next_effect() is None
     assert journal.restore()[0]["submission"] == "TERMINAL"

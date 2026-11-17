@@ -3,6 +3,8 @@ import json
 import time
 import logging
 import os
+import uuid
+from hashlib import sha256
 from threading import RLock, Lock
 from contextlib import contextmanager
 
@@ -23,6 +25,14 @@ def _source_lock(path):
 
 def encode(value):
     return json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def projection_facts(state):
+    facts = {key: state.get(key) for key in ("deliveryId", "deliveryStatus", "deleted", "heldAt", "retainedOutcome")}
+    execution = state.get("execution")
+    facts["execution"] = ({key: execution.get(key) for key in
+                          ("id", "courierId", "startedAt", "completedAt")} if execution else None)
+    return facts
 
 
 class SyncJournal:
@@ -208,6 +218,91 @@ class SyncJournal:
                 ON CONFLICT(scope,source_id) DO UPDATE SET payload=excluded.payload""",
                 (self.scope, encode({"after": after, "complete": complete})))
 
+    def feed_status(self):
+        with self._db() as db:
+            rows = self._rows(db._get_conn(), "SELECT * FROM SyncRemoteFeed WHERE scope=?")
+            return dict(rows[0], initialized=True) if rows else {
+                "cursor": "0", "resync_after": None, "resync_boundary": None, "initialized": False}
+
+    def accept_change_page(self, page):
+        """Advance only with durable work. Transport delivery is not an ACK."""
+        from api.native_change_contract import validate_change_page
+        validate_change_page(page)
+        with self._db() as db:
+            conn = db._get_conn()
+            conn.execute("INSERT OR IGNORE INTO SyncRemoteFeed(scope) VALUES(?)", (self.scope,))
+            cursor, boundary = conn.execute("SELECT cursor,resync_boundary FROM SyncRemoteFeed WHERE scope=?", (self.scope,)).fetchone()
+            initial = page["afterSequence"] is None and cursor == "0" and page["resyncRequired"]
+            if boundary is not None or (page["afterSequence"] != cursor and not initial):
+                return False
+            if page["resyncRequired"]:
+                conn.execute("UPDATE SyncRemoteFeed SET resync_after='',resync_boundary=? WHERE scope=?",
+                             (page["headSequence"], self.scope))
+                # Include retained local identities missing from enumeration.
+                # Unknown absence is reconciled explicitly, never cancellation.
+                invalidation = "resync:" + str(uuid.uuid4())
+                tail = self._dirty_tail(conn)
+                conn.execute("""INSERT OR IGNORE INTO SyncDirtyOrders(scope,internal_id,revision,invalidation,queue_position)
+                    SELECT scope,internal_id,COALESCE(remote_revision,'0'),?,rowid+? FROM SyncOrders
+                    WHERE scope=? AND external_id IS NOT NULL""", (invalidation, tail, self.scope))
+                conn.execute("UPDATE SyncDirtyOrders SET invalidation=?,retry_at=0 WHERE scope=?",
+                             (invalidation, self.scope))
+                conn.execute("""UPDATE SyncOrders SET effect_generation=effect_generation+1,effect_authority=NULL,
+                    projection_outcome='PENDING',projection_reason=NULL WHERE scope=?""",
+                             (self.scope,))
+                conn.execute("UPDATE SyncEffects SET state='SUPERSEDED' WHERE scope=? AND state='PENDING'", (self.scope,))
+                return True
+            for event in page["events"]:
+                internal, revision = event["externalOrderId"], event["revision"]
+                # Source/job bookkeeping can change without a history revision
+                # bump. A new feed cursor still requires a read in that case.
+                conn.execute("""INSERT INTO SyncDirtyOrders(scope,internal_id,revision,invalidation,queue_position) VALUES(?,?,?,?,?)
+                    ON CONFLICT(scope,internal_id) DO UPDATE SET
+                    revision=CAST(MAX(CAST(SyncDirtyOrders.revision AS INTEGER),CAST(excluded.revision AS INTEGER)) AS TEXT),
+                    invalidation=excluded.invalidation,retry_at=0""",
+                    (self.scope, internal, revision, "event:" + event["sequence"], self._dirty_tail(conn)+1))
+                self._invalidate_effects(conn, internal)
+            conn.execute("UPDATE SyncRemoteFeed SET cursor=? WHERE scope=?", (page["eventSequence"], self.scope))
+            return bool(page["events"])
+
+    def dirty_orders(self, due_only=False):
+        with self._db() as db:
+            return self._rows(db._get_conn(), "SELECT internal_id FROM SyncDirtyOrders WHERE scope=?" +
+                              (" AND retry_at<=?" if due_only else "") + " ORDER BY queue_position,internal_id LIMIT 100",
+                              (time.time(),) if due_only else ())
+
+    def _dirty_tail(self, conn):
+        return conn.execute("SELECT COALESCE(MAX(queue_position),0) FROM SyncDirtyOrders WHERE scope=?",
+                            (self.scope,)).fetchone()[0]
+
+    def claim_dirty_orders(self):
+        """Reserve a fair retry turn before HTTP, including missing/failed reads."""
+        with self._db() as db:
+            conn = db._get_conn()
+            now = time.time()
+            rows = self._rows(conn, """SELECT D.internal_id,D.invalidation,
+                O.cancellation,O.cancellation_request_id,O.effect_generation
+                FROM SyncDirtyOrders D LEFT JOIN SyncOrders O
+                ON O.scope=D.scope AND O.internal_id=D.internal_id WHERE D.scope=?
+                AND D.retry_at<=? ORDER BY D.queue_position,D.internal_id LIMIT 100""", (now,))
+            tail = self._dirty_tail(conn)
+            for position, row in enumerate(rows, tail+1):
+                # Move a served order to the tail independently of wake-up time.
+                # Repeated notifications retain its place instead of jumping ahead.
+                conn.execute("""UPDATE SyncDirtyOrders SET retry_at=?,attempts=attempts+1,queue_position=?
+                    WHERE scope=? AND internal_id=?""", (now+30, position, self.scope, row["internal_id"]))
+            return rows
+
+    def resync_progress(self, boundary, after, complete):
+        with self._db() as db:
+            conn = db._get_conn()
+            if complete:
+                conn.execute("""UPDATE SyncRemoteFeed SET cursor=?,resync_after=NULL,resync_boundary=NULL
+                    WHERE scope=? AND resync_boundary=?""", (boundary, self.scope, boundary))
+            else:
+                conn.execute("UPDATE SyncRemoteFeed SET resync_after=? WHERE scope=? AND resync_boundary=?",
+                             (after, self.scope, boundary))
+
     def freeze_request(self, internal_id, request):
         with self._db() as db:
             conn = db._get_conn()
@@ -230,6 +325,12 @@ class SyncJournal:
                 return None
             row = rows[0]
             row["operation"] = "DELETE" if row["cancellation"] == "REQUESTED" and (row["external_id"] or native) else "ADD"
+            if native and row["operation"] == "DELETE" and not row["cancellation_request_id"]:
+                row["cancellation_request_id"] = "legacy"
+                row["cancellation_evidence"] = row["cancellation_evidence"] or "RECOVERED_UNKNOWN"
+                conn.execute("""UPDATE SyncOrders SET cancellation_request_id=?,cancellation_evidence=?
+                    WHERE scope=? AND internal_id=?""",
+                    (row["cancellation_request_id"], row["cancellation_evidence"], self.scope, row["internal_id"]))
             conn.execute("""UPDATE SyncOrders SET attempts=attempts+1,
                 submission=CASE WHEN ?='ADD' THEN 'SUBMITTING' ELSE submission END
                 WHERE scope=? AND internal_id=?""", (row["operation"], self.scope, row["internal_id"]))
@@ -287,8 +388,9 @@ class SyncJournal:
                 (error, operation, operation, operation, self.scope, internal_id, attempt, attempt, operation))
             return result.rowcount == 1
 
-    def native_states(self, states, farmax=True):
+    def native_states(self, states, farmax=True, dirty_claim=None):
         """Commit accepted remote facts and their ERP obligations in one transaction."""
+        read_fences = {row["internal_id"]: row for row in dirty_claim or []}
         with self._db() as db:
             conn = db._get_conn()
             for state in states:
@@ -300,6 +402,13 @@ class SyncJournal:
                 if revision is not None and (not isinstance(revision, str) or not revision or any(c not in "0123456789" for c in revision)):
                     raise ValueError("Invalid authoritative revision")
                 if known and known[0] is not None and (revision is None or int(revision) < int(known[0])):
+                    continue
+                read_fence = read_fences.get(internal, {})
+                dirty = conn.execute("SELECT revision,invalidation FROM SyncDirtyOrders WHERE scope=? AND internal_id=?", (self.scope, internal)).fetchone()
+                if dirty and (read_fence.get("invalidation") != dirty[1]
+                              or revision is None or int(revision) < int(dirty[0])):
+                    # Only the reader started for this invalidation can consume it.
+                    # Periodic/bootstrap reads leave notified orders to the feed.
                     continue
                 if not state["found"]:
                     self._invalidate_effects(conn, internal)
@@ -323,16 +432,63 @@ class SyncJournal:
                 submission = "IMPORTED" if external else "ACCEPTED"
                 error = state.get("error")
                 cancellation = row["cancellation"]
-                if cancellation == "NONE" and state["cancellation"] in ("REQUESTED", "CONFLICT"):
+                remote_request = state.get("cancellationRequestId")
+                if farmax and state["cancellation"] != "NONE" and not row["cancellation_request_id"]:
+                    # Local loss/recovery must retry the original receipt, including
+                    # older requests that used the server's reserved legacy key.
+                    row["cancellation_request_id"] = remote_request or "legacy"
+                    row["cancellation_evidence"] = row["cancellation_evidence"] or "RECOVERED_UNKNOWN"
+                    conn.execute("""UPDATE SyncOrders SET cancellation_request_id=?,cancellation_evidence=?
+                        WHERE scope=? AND internal_id=?""",
+                        (row["cancellation_request_id"], row["cancellation_evidence"], self.scope, internal))
+                same_request = (not row["cancellation_request_id"] or
+                                (remote_request or "legacy") == row["cancellation_request_id"])
+                consumed = farmax and conn.execute("""SELECT 1 FROM SyncCancellationReceipts
+                    WHERE scope=? AND internal_id=? AND request_id=? AND disposition='SUPERSEDED'""",
+                    (self.scope, internal, row["cancellation_request_id"])).fetchone() is not None
+                if (cancellation == "NONE" and state["cancellation"] in ("REQUESTED", "CONFLICT")
+                        and (not farmax or (same_request and not consumed))):
                     cancellation = state["cancellation"]
                 if state.get("importStatus") == "FAILED" and not external:
                     submission = "NEEDS_REVIEW"
                 if state.get("retainedOutcome"):
                     submission = "NEEDS_REVIEW" if state["retainedOutcome"] == "UNKNOWN" else "TERMINAL"
-                if (state["cancellation"] == "ACKNOWLEDGED" and not external) or state.get("deliveryStatus") == "CANCELLED" or state["deleted"]:
+                remote_terminal = state.get("deliveryStatus") == "CANCELLED" or state["deleted"]
+                if farmax:
+                    superseded = (state["cancellation"] == "SUPERSEDED" and same_request) or consumed
+                    # V5 also acknowledged remote-only cancellation/deletion.
+                    # Such rows migrate as "legacy", but have no server request
+                    # receipt. Recover them only from a read started after the
+                    # retained ACK, with no intervening local invalidation/ACK.
+                    legacy_restored = (cancellation == "ACKNOWLEDGED"
+                        and row["cancellation_request_id"] == "legacy"
+                        and state["cancellation"] == "NONE" and remote_request is None
+                        and external and not remote_terminal and revision is not None
+                        and state.get("deliveryStatus") in ("PENDING", "IN_TRANSIT", "COMPLETED")
+                        and read_fence.get("cancellation") == "ACKNOWLEDGED"
+                        and read_fence.get("cancellation_request_id") == "legacy"
+                        and read_fence.get("effect_generation") == row["effect_generation"])
+                    superseded = superseded or legacy_restored
+                    if cancellation == "ACKNOWLEDGED" and external and not remote_terminal and not superseded:
+                        # An ACK carries no history revision. A read newer than
+                        # our last snapshot can still have started before that
+                        # ACK. Keep the request closed without a matching receipt
+                        # or the legacy post-ACK fence, retaining dirty work.
+                        continue
+                    if superseded:
+                        self._cancellation_receipt(conn, row, "SUPERSEDED", revision)
+                        if cancellation != "NONE":
+                            # Fence a response that was already on its way.
+                            conn.execute("UPDATE SyncOrders SET attempts=attempts+1 WHERE scope=? AND internal_id=?", (self.scope, internal))
+                        cancellation = "NONE"
+                    if remote_terminal or (state["cancellation"] == "ACKNOWLEDGED" and not external):
+                        submission = "TERMINAL"
+                    if state["cancellation"] == "ACKNOWLEDGED" and row["cancellation_request_id"] and same_request and not consumed:
+                        self._cancellation_receipt(conn, row, "ACKNOWLEDGED", revision)
+                        if remote_terminal or not external:
+                            cancellation = "ACKNOWLEDGED"
+                elif (state["cancellation"] == "ACKNOWLEDGED" and not external) or remote_terminal:
                     submission, cancellation = "TERMINAL", "ACKNOWLEDGED"
-                elif cancellation == "ACKNOWLEDGED" and external:
-                    error = "Current remote delivery contradicts an acknowledged cancellation; review the subsequent action"
                 if external:
                     existing = db.get_delivery_by_internal_id(internal)
                     if existing and existing[0] != external:
@@ -350,9 +506,14 @@ class SyncJournal:
                 conn.execute("""UPDATE SyncOrders SET submission=?,cancellation=?,external_id=COALESCE(?,external_id),
                     job_id=COALESCE(?,job_id),payload=COALESCE(payload,?),remote_state=?,remote_revision=COALESCE(?,remote_revision),last_error=? WHERE scope=? AND internal_id=?""",
                     (submission, cancellation, external, state.get("jobId"), payload, encode(state), revision, error, self.scope, internal))
-                if cancellation == "ACKNOWLEDGED" and submission == "TERMINAL":
+                if (remote_terminal or cancellation == "ACKNOWLEDGED") and submission == "TERMINAL":
                     conn.execute("UPDATE DeliveryMapping SET status=? WHERE internal_delivery_id=?",
                                  (DeliveryStatus.CANCELLED.value, internal))
+                elif farmax and external and state.get("deliveryStatus") == "PENDING":
+                    conn.execute("UPDATE DeliveryMapping SET status=? WHERE internal_delivery_id=?",
+                                 (DeliveryStatus.ADDED.value, internal))
+                conn.execute("DELETE FROM SyncDirtyOrders WHERE scope=? AND internal_id=? AND CAST(revision AS INTEGER)<=?",
+                             (self.scope, internal, int(revision or "0")))
             references = [state["externalOrderId"] for state in states]
             if not references:
                 return []
@@ -360,7 +521,8 @@ class SyncJournal:
             return self._rows(conn, "SELECT * FROM SyncOrders WHERE scope=? AND internal_id IN (" + placeholders + ")", references)
 
     def _invalidate_effects(self, conn, internal):
-        conn.execute("UPDATE SyncOrders SET effect_generation=effect_generation+1,effect_authority=NULL WHERE scope=? AND internal_id=?", (self.scope, internal))
+        conn.execute("""UPDATE SyncOrders SET effect_generation=effect_generation+1,effect_authority=NULL,
+            projection_outcome='PENDING',projection_reason=NULL WHERE scope=? AND internal_id=?""", (self.scope, internal))
         conn.execute("UPDATE SyncEffects SET state='SUPERSEDED' WHERE scope=? AND internal_id=? AND state='PENDING'", (self.scope, internal))
 
     def source_review(self, internal, evidence):
@@ -403,14 +565,29 @@ class SyncJournal:
                     conn.execute("UPDATE SyncOrders SET payload=? WHERE scope=? AND internal_id=?", (encode(payload), self.scope, internal))
             request_cancel = False
             if evidence["accepted"] and evidence["decision"] == "CANCEL":
-                if row["cancellation"] == "NONE":
+                fingerprint = sha256(encode({"ledger": evidence.get("ledger"),
+                    "incarnation": {key: evidence["source_context"].get(key) for key in
+                                    ("branch_id", "sale_id", "customer_id", "sale_date", "sale_time")},
+                    "removed": any(item.get("delivery_deleted") for item in evidence.get("items", []))}).encode("utf-8")).hexdigest()
+                # One cancellation per observed source lifetime. Metadata or item
+                # churn within a cancelled lifetime cannot override user restoration.
+                if row["cancellation"] == "NONE" and row["cancellation_evidence"] is None:
                     unsent = (row["submission"] == "QUEUED" and row["attempts"] == 0 and not row["request"] and not row["job_id"] and not row["external_id"])
-                    conn.execute("UPDATE SyncOrders SET cancellation=?,retry_at=0,add_attempts=CASE WHEN external_id IS NULL AND request IS NOT NULL THEN 0 ELSE add_attempts END WHERE scope=? AND internal_id=?",
-                                 ("ACKNOWLEDGED" if unsent else "REQUESTED", self.scope, internal))
+                    conn.execute("""UPDATE SyncOrders SET cancellation=?,cancellation_request_id=?,cancellation_evidence=?,
+                        retry_at=0,add_attempts=CASE WHEN external_id IS NULL AND request IS NOT NULL THEN 0 ELSE add_attempts END
+                        WHERE scope=? AND internal_id=?""",
+                        ("ACKNOWLEDGED" if unsent else "REQUESTED", str(uuid.uuid4()), fingerprint, self.scope, internal))
                     self._invalidate_effects(conn, internal)
                     request_cancel = True
                 elif row["cancellation"] == "REQUESTED":
                     request_cancel = True
+            elif evidence["accepted"] and evidence["decision"] == "ACTIVE":
+                # A genuinely new cancellation after an observed active source
+                # starts a new evidence lifetime; repeated C snapshots do not.
+                conn.execute("UPDATE SyncOrders SET cancellation_evidence=NULL WHERE scope=? AND internal_id=? AND cancellation='NONE'",
+                             (self.scope, internal))
+            current_request = conn.execute("""SELECT cancellation_request_id,cancellation_evidence
+                FROM SyncOrders WHERE scope=? AND internal_id=?""", (self.scope, internal)).fetchone()
         if changed:
             logger = logging.getLogger(__name__)
             if evidence["accepted"] and evidence.get("cancelled_items"):
@@ -419,7 +596,8 @@ class SyncJournal:
                             "Solicitando cancelamento da entrega." if evidence["decision"] == "CANCEL" else "A entrega permanece ativa.")
             elif evidence.get("decision") in ("UNRESOLVED", "REMOVAL_CANDIDATE") or not evidence["accepted"]:
                 logger.warning("Pedido %s: %s", internal, evidence.get("reason"))
-        return dict(evidence, changed=changed, request_cancel=request_cancel, external_id=row["external_id"])
+        return dict(evidence, changed=changed, request_cancel=request_cancel, external_id=row["external_id"],
+                    cancellation_request_id=current_request[0], cancellation_evidence=current_request[1])
 
     def _latch_source_review(self, conn, internal, evidence):
         row = conn.execute("SELECT source_review FROM SyncOrders WHERE scope=? AND internal_id=?", (self.scope, internal)).fetchone()
@@ -431,13 +609,14 @@ class SyncJournal:
 
     def _accept_effect_authority(self, conn, row, state, cancellation, restored_payload):
         internal, route = row["internal_id"], state.get("execution")
-        facts = {key: state.get(key) for key in ("deliveryId", "deliveryStatus", "deleted", "execution", "retainedOutcome")}
-        old = json.loads(row["effect_authority"]) if row["effect_authority"] else None
+        facts = projection_facts(state)
+        previous_state = json.loads(row["remote_state"] or "{}")
+        previous_facts = projection_facts(previous_state)
         blocked = cancellation != "NONE" or state.get("deleted") or state.get("deliveryStatus") == "CANCELLED" or bool(row["source_review"])
         error = "Source/cancellation conflict requires review" if row["source_review"] or cancellation == "CONFLICT" else None
         if state.get("revision") is None:
             blocked, error = True, "Versioned authoritative state is required"
-        elif ((old and old["facts"] != facts and row["remote_revision"] == state["revision"])
+        elif ((previous_state.get("found") and previous_facts != facts and row["remote_revision"] == state["revision"])
               or row["authority_conflict_revision"] == state["revision"]):
             blocked, error = True, "Conflicting lifecycle facts at the same revision"
             conn.execute("UPDATE SyncOrders SET authority_conflict_revision=? WHERE scope=? AND internal_id=?", (state["revision"], self.scope, internal))
@@ -448,45 +627,86 @@ class SyncJournal:
             self._invalidate_effects(conn, internal)
             conn.execute("UPDATE SyncOrders SET effect_authority=? WHERE scope=? AND internal_id=?", (authority, self.scope, internal))
         if blocked:
+            outcome = "UNSUPPORTED" if state.get("deleted") or state.get("deliveryStatus") == "CANCELLED" else "PENDING"
+            reason = ("Farmax não representa exclusão/cancelamento logístico; identidade preservada."
+                      if outcome == "UNSUPPORTED" else error)
+            conn.execute("UPDATE SyncOrders SET projection_outcome=?,projection_reason=? WHERE scope=? AND internal_id=?",
+                         (outcome, reason, self.scope, internal))
             return error
-        if state.get("deliveryStatus") not in ("IN_TRANSIT", "COMPLETED"):
-            if old and old["facts"].get("deliveryStatus") in ("IN_TRANSIT", "COMPLETED"):
-                return "Remote execution was undone/aborted; Farmax reversal is review-only"
+        status = state.get("deliveryStatus")
+        if status not in ("PENDING", "IN_TRANSIT", "COMPLETED"):
             return None
-        if not route or not route.get("id") or not route.get("startedAt") or not route.get("courierId"):
+        if status != "PENDING" and (not route or not route.get("id") or not route.get("startedAt") or not route.get("courierId")):
             return "Authoritative route/courier/time is missing"
-        if state["deliveryStatus"] == "COMPLETED" and not route.get("completedAt"):
+        if status == "COMPLETED" and not route.get("completedAt"):
             return "Authoritative completion time is missing"
         generation = conn.execute("SELECT effect_generation FROM SyncOrders WHERE scope=? AND internal_id=?", (self.scope, internal)).fetchone()[0]
         order = json.loads(row["payload"] or restored_payload or "{}")
-        mapping = conn.execute("SELECT local_id FROM DeliverymenMapping WHERE velide_id=?", (route["courierId"],)).fetchone()
-        operations = ["IN_ROUTE"] + (["DONE"] if state["deliveryStatus"] == "COMPLETED" else [])
-        for operation in operations:
-            effect = {"execution_id": route["id"], "operation": operation, "started_at": route["startedAt"],
-                      "completed_at": route.get("completedAt") if state["deliveryStatus"] == "COMPLETED" else None,
-                      "occurred_at": route["startedAt"] if operation == "IN_ROUTE" else route["completedAt"],
-                      "courier": route["courierId"], "courier_local_id": mapping[0] if mapping else None,
-                      "source_context": order.get("source_context")}
-            conn.execute("""INSERT INTO SyncEffects(scope,internal_id,effect_key,operation,payload,generation)
-                VALUES(?,?,?,?,?,?) ON CONFLICT(scope,internal_id,effect_key) DO UPDATE SET
-                payload=excluded.payload,generation=excluded.generation,state='PENDING',retry_at=0,last_error=NULL
-                ,observation=NULL,observed_at=NULL
-                WHERE SyncEffects.generation<>excluded.generation""",
-                (self.scope, internal, route["id"]+":"+operation, operation, encode(effect), generation))
+        route = route if status != "PENDING" else {}
+        mapping = conn.execute("SELECT local_id FROM DeliverymenMapping WHERE velide_id=?", (route.get("courierId"),)).fetchone()
+        operation = {"PENDING": "WAITING", "IN_TRANSIT": "IN_ROUTE", "COMPLETED": "DONE"}[status]
+        effect = {"execution_id": route.get("id"), "operation": operation, "started_at": route.get("startedAt"),
+                  "execution_revision": route.get("revision"),
+                  "completed_at": route.get("completedAt") if status == "COMPLETED" else None,
+                  "courier": route.get("courierId"), "courier_local_id": mapping[0] if mapping else None,
+                  "source_context": order.get("source_context"), "authoritative_projection": True,
+                  "revision": state["revision"], "generation": generation,
+                  "source_scope": sha256(encode([self.scope, self.source_identity]).encode("utf-8")).hexdigest()}
+        # One target, not departure followed by completion. Reaudit acknowledged
+        # fields every minute even when the remote facts have not changed.
+        existing = conn.execute("SELECT generation,state,verified_at FROM SyncEffects WHERE scope=? AND internal_id=? AND effect_key='projection'",
+                                (self.scope, internal)).fetchone()
+        if not existing or existing[0] != generation or (existing[1] == "ACKNOWLEDGED" and (existing[2] or 0) <= time.time()-60):
+            if existing and existing[0] == generation:
+                generation += 1
+                conn.execute("UPDATE SyncOrders SET effect_generation=? WHERE scope=? AND internal_id=?",
+                             (generation, self.scope, internal))
+                effect["generation"] = generation
+            application = str(uuid.uuid4())
+            effect["application_id"] = application
+            conn.execute("""INSERT INTO SyncEffects(scope,internal_id,effect_key,operation,payload,generation,application_id)
+                VALUES(?,?,'projection',?,?,?,?) ON CONFLICT(scope,internal_id,effect_key) DO UPDATE SET
+                operation=excluded.operation,payload=excluded.payload,generation=excluded.generation,
+                application_id=excluded.application_id,state='PENDING',retry_at=0,last_error=NULL,
+                observation=NULL,observed_at=NULL""",
+                (self.scope, internal, operation, encode(effect), generation, application))
+            conn.execute("UPDATE SyncOrders SET projection_outcome='PENDING',projection_reason=NULL WHERE scope=? AND internal_id=?",
+                         (self.scope, internal))
         return None
+
+    def _cancellation_receipt(self, conn, row, disposition, revision=None):
+        request = row.get("cancellation_request_id")
+        if request:
+            conn.execute("""INSERT OR IGNORE INTO SyncCancellationReceipts
+                (scope,internal_id,request_id,disposition,evidence,revision) VALUES(?,?,?,?,?,?)""",
+                (self.scope, row["internal_id"], request, disposition, row.get("cancellation_evidence"), revision))
 
     def _completion_observed(self, conn, internal):
         return conn.execute("""SELECT 1 FROM SyncEffects E JOIN SyncOrders O ON O.scope=E.scope AND O.internal_id=E.internal_id
             WHERE E.scope=? AND E.internal_id=? AND E.operation='DONE' AND E.state='ACKNOWLEDGED'
             AND E.generation=O.effect_generation AND O.cancellation='NONE' AND O.source_review IS NULL""", (self.scope, internal)).fetchone() is not None
 
-    def cancel(self, internal_id, external_id=None):
+    def cancel(self, internal_id, external_id=None, request_id=None, evidence=None):
         if not self.owns(internal_id):
             raise ValueError("O cancelamento deve usar a conexão proprietária do pedido.")
         with self._db() as db:
             conn = db._get_conn()
+            rows = self._rows(conn, "SELECT * FROM SyncOrders WHERE scope=? AND internal_id=?", (internal_id,))
+            if request_id is not None:
+                # Source intent already committed. A queued callback can only
+                # resume that exact request; it has no authority to create another.
+                return rows[0] if (rows and rows[0]["cancellation_request_id"] == request_id
+                    and rows[0]["cancellation_evidence"] == evidence
+                    and rows[0]["cancellation"] in ("REQUESTED", "ACKNOWLEDGED")) else None
+            if rows and rows[0]["cancellation_request_id"] and rows[0]["cancellation"] == "NONE":
+                # Older unfenced callbacks cannot reopen consumed intent. A new
+                # Farmax lifetime is created only by record_farmax_progress.
+                return None
             conn.execute("""INSERT OR IGNORE INTO SyncOrders(scope,internal_id,external_id,submission)
                 VALUES(?,?,?,?)""", (self.scope, internal_id, external_id, "IMPORTED" if external_id else "UNKNOWN"))
+            conn.execute("""UPDATE SyncOrders SET cancellation_request_id=? WHERE scope=? AND internal_id=?
+                AND (cancellation_request_id IS NULL OR cancellation='NONE')""",
+                (str(uuid.uuid4()), self.scope, internal_id))
             conn.execute("""UPDATE SyncOrders SET external_id=COALESCE(external_id,?),
                 retry_at=CASE WHEN cancellation='NONE' THEN 0 ELSE retry_at END,
                 add_attempts=CASE WHEN cancellation='NONE' AND external_id IS NULL AND request IS NOT NULL THEN 0 ELSE add_attempts END,
@@ -497,14 +717,31 @@ class SyncJournal:
             self._invalidate_effects(conn, internal_id)
             return self._rows(conn, "SELECT * FROM SyncOrders WHERE scope=? AND internal_id=?", (internal_id,))[0]
 
-    def cancelled(self, internal_id):
+    def cancelled(self, internal_id, attempt=None, request_id=None):
         with self._db() as db:
             conn = db._get_conn()
+            row = self._rows(conn, "SELECT * FROM SyncOrders WHERE scope=? AND internal_id=?", (internal_id,))[0]
+            if attempt is not None and (row["attempts"] != attempt or row["cancellation"] != "REQUESTED"
+                                        or row["cancellation_request_id"] != request_id):
+                return False
+            self._cancellation_receipt(conn, row, "ACKNOWLEDGED", row["remote_revision"])
             conn.execute("""UPDATE SyncOrders SET cancellation='ACKNOWLEDGED', submission='TERMINAL',
                 last_error=NULL WHERE scope=? AND internal_id=?""", (self.scope, internal_id))
             conn.execute("UPDATE DeliveryMapping SET status=? WHERE internal_delivery_id=?",
                          (DeliveryStatus.CANCELLED.value, internal_id))
             self._invalidate_effects(conn, internal_id)
+            return True
+
+    def cancellation_superseded(self, internal_id, attempt, request_id):
+        with self._db() as db:
+            conn = db._get_conn()
+            row = self._rows(conn, "SELECT * FROM SyncOrders WHERE scope=? AND internal_id=?", (internal_id,))[0]
+            if row["attempts"] != attempt or row["cancellation_request_id"] != request_id:
+                return False
+            self._cancellation_receipt(conn, row, "SUPERSEDED", row["remote_revision"])
+            conn.execute("UPDATE SyncOrders SET cancellation='NONE',last_error=NULL,attempts=attempts+1 WHERE scope=? AND internal_id=?",
+                         (self.scope, internal_id))
+            return True
 
     def failed(self, internal_id, operation, error, attempt=None, max_attempts=None, initial_delay=2, backoff_factor=2):
         with self._db() as db:
@@ -647,6 +884,8 @@ class SyncJournal:
                 payload["source_context"] = source
             payload["legacy_adopted"] = self._legacy_adopted(conn)
             effect["payload"] = encode(payload)
+            if effect["operation"] == "WAITING":
+                return effect
             mapping = conn.execute("SELECT local_id FROM DeliverymenMapping WHERE velide_id=?", (payload["courier"],)).fetchone()
             if mapping and payload.get("courier_local_id") is None:
                 payload["courier_local_id"] = normalize_farmax_id(mapping[0])
@@ -676,6 +915,17 @@ class SyncJournal:
             if not effect or not current():
                 return None
             payload = json.loads(effect["payload"])
+            if payload.get("authoritative_projection"):
+                # Terminal orders are not in the live source-status tracker.
+                # Audits must still refresh their exact item set/cancellation
+                # evidence before comparing managed fields.
+                from connectors.farmax.cancellation import cancellation_progress
+                progress = cancellation_progress(repository.fetch_sales_statuses_by_id((int(effect["internal_id"]),)))
+                self.record_farmax_progress(effect["internal_id"], progress)
+                effect = self.prepare_effect(sequence, generation)
+                if not effect or not current():
+                    return None
+                payload = json.loads(effect["payload"])
             if not payload.get("source_context") and payload.get("legacy_adopted"):
                 # Establish original-installation provenance BEFORE the writer.
                 # A second source read under row locks must match this baseline.
@@ -699,28 +949,46 @@ class SyncJournal:
                 return False
             if not self._executable(row[0]):
                 return False
+            if error is not None:
+                conn.execute("UPDATE SyncOrders SET projection_outcome=?,projection_reason=? WHERE scope=? AND internal_id=?",
+                             ("CONFLICT" if error_kind == "SOURCE_CONFLICT" else "PENDING", error, self.scope, row[0]))
             if error is not None and error_kind == "SOURCE_CONFLICT":
                 self._latch_source_review(conn, row[0], {"kind": error_kind, "message": error, "effect_sequence": sequence})
+                conn.execute("UPDATE SyncOrders SET projection_outcome='CONFLICT',projection_reason=? WHERE scope=? AND internal_id=?",
+                             (error, self.scope, row[0]))
                 conn.execute("UPDATE SyncEffects SET last_error=? WHERE scope=? AND sequence=?", (error, self.scope, sequence))
                 return True
-            if error is None and observation not in ("COMPLETED_FIELDS_MATCH", "DEPARTURE_FIELDS_MATCH"):
+            receipt = observation if isinstance(observation, dict) else None
+            observation = receipt.get("observation") if receipt else observation
+            if error is None and observation not in ("COMPLETED_FIELDS_MATCH", "DEPARTURE_FIELDS_MATCH", "WAITING_FIELDS_MATCH"):
                 raise ValueError("A persisted-field observation is required for acknowledgement")
             if error is None:
                 payload = json.loads(row[6])
                 authority = json.loads(row[8] or "{}")
                 if observation == "DEPARTURE_FIELDS_MATCH" and row[7] != "IN_ROUTE":
                     return False
+                if observation == "WAITING_FIELDS_MATCH" and row[7] != "WAITING":
+                    return False
                 if observation == "COMPLETED_FIELDS_MATCH" and (not payload.get("completed_at") or authority.get("facts", {}).get("deliveryStatus") != "COMPLETED"):
                     return False
                 mapping = conn.execute("SELECT local_id FROM DeliverymenMapping WHERE velide_id=?", (payload.get("courier"),)).fetchone()
-                if not mapping or payload.get("courier_local_id") is None or normalize_farmax_id(mapping[0]) != normalize_farmax_id(payload["courier_local_id"]):
+                if row[7] != "WAITING" and (not mapping or payload.get("courier_local_id") is None or normalize_farmax_id(mapping[0]) != normalize_farmax_id(payload["courier_local_id"])):
                     self._latch_source_review(conn,row[0],{"kind":"SOURCE_CONFLICT","message":"Courier mapping changed during observation"})
                     return False
             conn.execute("""UPDATE SyncEffects SET state=?,last_error=?, attempts=attempts+1,retry_at=?
                 WHERE scope=? AND sequence=?""",
                          ("PENDING" if error else "ACKNOWLEDGED", error, time.time()+30 if error else 0, self.scope, sequence))
             if error is None:
-                conn.execute("UPDATE SyncEffects SET observation=?,observed_at=CURRENT_TIMESTAMP WHERE scope=? AND sequence=?", (observation, self.scope, sequence))
+                conn.execute("UPDATE SyncEffects SET observation=?,observed_at=CURRENT_TIMESTAMP,verified_at=? WHERE scope=? AND sequence=?",
+                             (observation, time.time(), self.scope, sequence))
+                outcome, reason = (receipt["outcome"], receipt.get("reason")) if receipt else ("MATCHED", None)
+                remote = json.loads(conn.execute("SELECT remote_state FROM SyncOrders WHERE scope=? AND internal_id=?", (self.scope, row[0])).fetchone()[0] or "{}")
+                if remote.get("heldAt"):
+                    outcome, reason = "PARTIAL", "Farmax não representa o bloqueio de despacho do Velide."
+                conn.execute("UPDATE SyncOrders SET projection_outcome=?,projection_reason=? WHERE scope=? AND internal_id=?",
+                             (outcome, reason, self.scope, row[0]))
+                if observation == "WAITING_FIELDS_MATCH":
+                    conn.execute("UPDATE DeliveryMapping SET status=? WHERE internal_delivery_id=?", (DeliveryStatus.ADDED.value, row[0]))
                 if observation == "DEPARTURE_FIELDS_MATCH":
                     conn.execute("UPDATE DeliveryMapping SET status=? WHERE internal_delivery_id=?", (DeliveryStatus.IN_PROGRESS.value, row[0]))
                 if observation == "COMPLETED_FIELDS_MATCH":

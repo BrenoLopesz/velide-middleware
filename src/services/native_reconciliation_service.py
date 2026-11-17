@@ -36,6 +36,7 @@ class NativeReconciliationService(QObject):
         self._lifecycle = 0
         self._initialized = False
         self._initializing = False
+        self.change_feed = None
 
     def invalidate_pending_reads(self):
         self._generation += 1
@@ -54,6 +55,8 @@ class NativeReconciliationService(QObject):
         self._initialized = self._initializing = False
         # Periodic recovery is owned by the running service, not a read callback.
         self.timer.start()
+        if self.change_feed:
+            self.change_feed.start()
         self._load_bootstrap()
 
     def _load_bootstrap(self):
@@ -89,6 +92,8 @@ class NativeReconciliationService(QObject):
         self._refresh_pending = False
         self._refresh_timer.stop()
         self.timer.stop()
+        if self.change_feed:
+            self.change_feed.stop()
 
     def trigger_reconciliation(self):
         if not self._running:
@@ -210,6 +215,8 @@ class NativeReconciliationService(QObject):
             row = next(
                 (row for row in rows
                  if row["internal_id"] == state["externalOrderId"]), None)
+            if row is None:
+                continue  # An unknown identity's read may have been invalidated.
             if row and row["remote_state"]:
                 accepted = json.loads(row["remote_state"])
                 if accepted != state:
@@ -217,13 +224,22 @@ class NativeReconciliationService(QObject):
                 state = dict(accepted, error=row["last_error"] or accepted.get("error"))
             if row and row.get("source_review"):
                 state = dict(state, _sync_review=json.loads(row["source_review"]))
+            if row:
+                state = dict(state, _projection_outcome=row.get("projection_outcome"),
+                             _projection_reason=row.get("projection_reason"))
             if row and row["payload"] and (
                 (row["submission"] != "TERMINAL"
                  and row["cancellation"] != "ACKNOWLEDGED")
                 or row["last_error"] or row.get("source_review")
+                or row.get("projection_outcome") in ("PARTIAL", "UNSUPPORTED")
             ):
                 order = Order.model_validate(json.loads(row["payload"]))
                 order.ui_status_hint = sync_row_status(row)
+                order.sync_details = "Velide: {}{} | Farmax: {}{}".format(
+                    "DELETED" if state.get("deleted") else state.get("deliveryStatus") or "UNRESOLVED",
+                    " (em espera)" if state.get("heldAt") else "",
+                    row.get("projection_outcome") or "PENDING",
+                    " — " + row["projection_reason"] if row.get("projection_reason") else "")
                 self.order_restored.emit(order, row["external_id"])
             self.order_state.emit(state)
 
