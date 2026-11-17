@@ -74,6 +74,9 @@ class SQLiteService(QObject):
         self.db_path = db_path
         self.thread_pool = QThreadPool.globalInstance()
         self.logger = logging.getLogger(__name__)
+        self._pending = set()
+        self._rollout_sealed = False
+        self.failure_revision = 0
 
     def _create_and_run_worker(self, factory_method, *args, result_signal: Any):
         """
@@ -84,6 +87,8 @@ class SQLiteService(QObject):
             *args: Arguments for the factory method (e.g., velide_id).
             result_signal: The service-level signal to emit the result to.
         """
+        if self._rollout_sealed:
+            raise RuntimeError("SQLite service is sealed for rollout")
         # 1. Create the worker-specific signals
         worker_signals = SQLiteWorkerSignals()
 
@@ -95,9 +100,15 @@ class SQLiteService(QObject):
         #    - Connect the worker's 'error' to the specific error signal
         worker.signals.result.connect(result_signal.emit)
         worker.signals.error.connect(self.error_occurred.emit)
+        worker.signals.error.connect(self._record_failure)
+        self._pending.add(worker)
+        worker.signals.finished.connect(lambda: self._pending.discard(worker))
 
         # 4. Start the worker in the global thread pool
         self.thread_pool.start(worker)
+
+    def _record_failure(self, error):
+        self.failure_revision += 1
 
     @pyqtSlot(str, str)
     def request_add_mapping(self, velide_id: str, local_id: str):

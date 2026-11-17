@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 import os
 
-from PyQt5.QtCore import QObject
+from PyQt5.QtCore import QObject, QTimer
 from PyQt5.QtWidgets import QAction, QActionGroup, QMessageBox
 
 from backend_profiles import prepare_profile_state, ownership_for, select_backend
@@ -59,6 +59,7 @@ class ProfileApplication(QObject):
                 menu.addAction(action)
                 self._selection_actions[name] = action
         self.app.aboutToQuit.connect(self.shutdown)
+        self.rollout = None
 
     def start(self):
         self.app.setQuitOnLastWindowClosed(False)
@@ -79,6 +80,10 @@ class ProfileApplication(QObject):
 
     def select(self, name):
         try:
+            if self.rollout is not None and self.rollout.coordinator is not None and (
+                    self.rollout.coordinator._paused or
+                    getattr(self.rollout.coordinator.graph, "state", "running") != "running"):
+                raise ValueError("Aguarde a conclusão ou cancele a atualização antes de trocar a conexão.")
             from config import install_effective_settings
             selected = select_backend(self.config_path, self.bundle_dir, name,
                                       registry=self.registry, runtime_settings=self.settings)
@@ -90,6 +95,9 @@ class ProfileApplication(QObject):
         self.show_selected()
 
     def shutdown(self):
+        if self.rollout is not None:
+            rollout, self.rollout = self.rollout, None
+            rollout.shutdown()
         for runtime in self.runtimes.values():
             runtime.services.deliveries.stop_listening()
             runtime.services.auth.invalidate_session()
@@ -98,5 +106,12 @@ class ProfileApplication(QObject):
         self.tray.cleanup()
 
     def stop(self):
+        if self.rollout is not None and self.rollout.coordinator is not None and (
+                self.rollout.busy or (
+                    getattr(self.rollout.coordinator.graph, "state", "running") != "running"
+                    and self.rollout.coordinator.state["state"] not in {"ACK_PENDING", "APPLIED"})):
+            self.rollout.cancel()
+            QTimer.singleShot(100, self.stop)
+            return
         self.shutdown()
         self.app.quit()

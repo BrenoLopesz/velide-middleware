@@ -37,6 +37,8 @@ class DeliverymenRetrieverService(QObject):
         self._target_system = target_system
         self._strategy: Optional[IConnectableStrategy] = None
         self._waiting_for_token = False
+        self._rollout_paused = False
+
 
         self._velide_deliverymen: Optional[list] = None
         self._local_deliverymen: Optional[List[BaseLocalDeliveryman]] = None
@@ -168,6 +170,8 @@ class DeliverymenRetrieverService(QObject):
         )
 
     def fetch_deliverymen(self) -> None:
+        if self._rollout_paused:
+            return
         if not self._strategy:
             self.logger.error(
                 "Não há nenhum software conectado para buscar os entregadores!"
@@ -186,3 +190,9 @@ class DeliverymenRetrieverService(QObject):
         self._strategy.fetch_deliverymen(
             self._on_receive_local_deliverymen, self.error.emit
         )
+
+    def pause_for_rollout(self):
+        self._rollout_paused = True
+
+    def resume_after_rollout(self):
+        self._rollout_paused = False

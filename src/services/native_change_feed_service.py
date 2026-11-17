@@ -62,6 +62,8 @@ class NativeFeedWorker(QRunnable):
 
 
 class NativeChangeFeedService(QObject):
+    progressed = pyqtSignal()
+
     def __init__(self, gateway, journal, reconciler):
         super().__init__()
         self.gateway, self.journal, self.reconciler = gateway, journal, reconciler
@@ -116,14 +118,23 @@ class NativeChangeFeedService(QObject):
             return
         if ticket != (self.generation, self.gateway.generation):
             self.pending = True
+            # The obsolete worker has drained; schedule the current lifecycle's
+            # replacement even though its ticket intentionally differs.
+            self.followup.start(100)
+            return
         elif error:
             self.reconciler.sync_error.emit(error)
             # Notification bursts must not cause a retry storm during an outage.
-            self.followup.start(self.timer.interval())
+            if self.running and ticket == (self.generation, self.gateway.generation):
+                self.followup.start(self.timer.interval())
             return
         elif result:
             for states, rows in result["publications"]:
                 self.reconciler._publish(states, rows)
+                if not self.running or ticket != (self.generation, self.gateway.generation):
+                    return
             self.pending = self.pending or result["more"]
-        if self.pending:
+            self.progressed.emit()
+        if (self.running and ticket == (self.generation, self.gateway.generation)
+                and self.pending):
             self.followup.start(100)

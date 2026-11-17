@@ -214,11 +214,22 @@ class BackendProfile(BaseModel):
 
 
 class Settings(BaseModel):
+    onboarding: Optional[str] = None
+    native_recovery_required: bool = False
+    installation_id: Optional[str] = None
+
+    @field_validator("installation_id")
+    @classmethod
+    def valid_installation_id(cls, value):
+        if value is not None:
+            import uuid
+            return str(uuid.UUID(value))
+        return None
     target_system: TargetSystem = Field(
         default=TargetSystem.FARMAX, description="Application to integrate with."
     )
-    auth: AuthenticationConfig
-    api: ApiConfig
+    auth: Optional[AuthenticationConfig] = None
+    api: Optional[ApiConfig] = None
     farmax: Optional[FarmaxConfig] = None
     reconciliation: ReconciliationConfig = Field(
         default_factory=ReconciliationConfig,
@@ -246,6 +257,12 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def matching_source_timezone(self):
+        if self.onboarding is not None:
+            if self.onboarding != "native_required" or self.backend_profiles or self.api or self.auth:
+                raise ValueError("Native setup marker cannot coexist with an installed connection")
+            return self
+        if self.auth is None or self.api is None:
+            raise ValueError("Installed configuration requires auth and api; restore the configuration backup")
         if self.backend_profiles:
             if set(self.backend_profiles) - {"legacy", "native"} or self.active_backend not in self.backend_profiles:
                 raise ValueError("Select a configured legacy/native backend profile")
@@ -323,11 +340,13 @@ def native_upgrade_document(document, patch, sqlite_path):
     if not isinstance(patch, dict) or set(patch) - {"api", "auth"}:
         raise ValueError("Cutover may change only native API/auth configuration")
     api = patch.get("api", {})
-    allowed = {"native", "velide_server", "velide_websockets_server", "source_timezone"}
+    allowed = {"native", "velide_server", "velide_websockets_server", "source_timezone", "use_ssl"}
     if not isinstance(api, dict) or set(api) - allowed:
         raise ValueError("Cutover cannot override local API preferences or retries")
     if not all(api.get(key) for key in ("native", "velide_server", "velide_websockets_server")):
         raise ValueError("Authoritative native endpoints and merchant/connection settings are required")
+    if "use_ssl" in api and api["use_ssl"] is not True:
+        raise ValueError("Native cutover cannot disable TLS verification")
     result = deepcopy(document)
     result["api"].update(deepcopy(api))
     if "auth" in patch:

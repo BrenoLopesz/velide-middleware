@@ -23,11 +23,14 @@ class FarmaxDeliveryUpdater(QObject):
         self._busy = False
         self._running = False
         self._generation = 0
+        self._rollout_paused = False
         self._timer = QTimer(self)
         self._timer.setInterval(5000)
         self._timer.timeout.connect(self._pump)
 
     def start(self):
+        if self._rollout_paused or self._running:
+            return
         self._generation += 1
         self._running = True
         self._timer.start()
@@ -37,6 +40,17 @@ class FarmaxDeliveryUpdater(QObject):
         self._generation += 1
         self._running = False
         self._timer.stop()
+
+    def pause_for_rollout(self):
+        # Unlike stop(), keep generation/current valid through effect_result.
+        self._rollout_paused = True
+        self._timer.stop()
+
+    def resume_after_rollout(self):
+        self._rollout_paused = False
+        if self._running:
+            self._timer.start()
+            self._pump()
 
     def mark_as_in_route(self, order, deliveryman_external_id):
         self._enqueue(order, "IN_ROUTE", deliveryman_external_id)
@@ -61,7 +75,7 @@ class FarmaxDeliveryUpdater(QObject):
                              failure=lambda error: self._on_error(internal_id, operation, error))
 
     def _pump(self):
-        if self._busy or not self._running or not self._journal:
+        if self._rollout_paused or self._busy or not self._running or not self._journal:
             return
         self._busy = True
         self._journal.submit("next_effect", success=self._next, failure=self._storage_error)

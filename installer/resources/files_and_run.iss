@@ -17,19 +17,24 @@
 #endif
 
 ; --- MAIN APPLICATION FILES ---
-; Copy all files AND subdirectories from 'middleware' to the installation folder.
-; This includes the 'resources' folder which contains 'config_example.yml'.
-; Release artifacts must never overwrite installation-owned state, even if a
-; developer accidentally included it in the frozen resources directory.
-; Only the root resources tree is replaced by the allowlist below. Keep nested
-; runtime resources (Qt, certificates, timezone data and SQLite libraries).
+; Allowlist root executables, runtime libraries/directories, and generic assets.
+; Never recursively copy the application root: customer rollout packages, tokens,
+; journals and configuration can exist there as well as under resources.
+; Keep nested runtime resources (Qt, certificates, timezone data and SQLite).
+#define PrivateRuntimeData "*.db*,*.sqlite*,*.lock,*.token.*,token.txt,*native-upgrade.json*,*rollout*.json*,*inventory*.json*,*prepared*token*,tests,tests\*,fixtures,fixtures\*"
 ; Explicit executable entries make an incomplete build fail compilation rather
 ; than silently producing an installer whose automatic-upgrade command is absent.
 Source: "..\..\middleware\main.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\middleware\migrate-native.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\..\middleware\*"; DestDir: "{app}"; Excludes: "\main.exe,\migrate-native.exe,\resources,\resources\*,\tests,\tests\*,\fixtures,\fixtures\*,*.db*,*.sqlite*,*.lock,\native-upgrade.json,\config.yml,\config.yml.*,\token.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\middleware\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\..\middleware\*.pyd"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\..\middleware\frozen_application_license.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\..\middleware\lib\*"; DestDir: "{app}\lib"; Excludes: "{#PrivateRuntimeData}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\middleware\share\*"; DestDir: "{app}\share"; Excludes: "{#PrivateRuntimeData}"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "..\..\middleware\PyQt5.uic.widget-plugins\*"; DestDir: "{app}\PyQt5.uic.widget-plugins"; Excludes: "{#PrivateRuntimeData}"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 ; Keep synchronized with MAIN_RESOURCES in installer/src/cli/release_resources.py.
 Source: "..\..\middleware\resources\config_example.yml"; DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "..\..\middleware\resources\middleware-service.json"; DestDir: "{app}\resources"; Flags: ignoreversion
 Source: "..\..\middleware\resources\error.png"; DestDir: "{app}\resources"; Flags: ignoreversion
 Source: "..\..\middleware\resources\loading.png"; DestDir: "{app}\resources"; Flags: ignoreversion
 Source: "..\..\middleware\resources\style.css"; DestDir: "{app}\resources"; Flags: ignoreversion
@@ -52,7 +57,12 @@ Source: "..\..\middleware\resources\fonts\font_bold.ttf"; DestDir: "{app}\resour
 ; cannot replace it. The batch has not started yet and is safe to overwrite now.
 Source: "apply_update.bat"; DestDir: "{app}\installer\resources"; Flags: ignoreversion
 Source: "..\main.exe"; DestDir: "{code:GetInstallerDestDir}"; Flags: ignoreversion
-Source: "..\*"; DestDir: "{code:GetInstallerDestDir}"; Excludes: "\main.exe,\resources,\resources\*,\tests,\tests\*,\fixtures,\fixtures\*,*.db*,*.sqlite*,*.lock,\native-upgrade.json,\config.yml.*,\token.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\*.dll"; DestDir: "{code:GetInstallerDestDir}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\*.pyd"; DestDir: "{code:GetInstallerDestDir}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\frozen_application_license.txt"; DestDir: "{code:GetInstallerDestDir}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\lib\*"; DestDir: "{code:GetInstallerDestDir}\lib"; Excludes: "{#PrivateRuntimeData}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\share\*"; DestDir: "{code:GetInstallerDestDir}\share"; Excludes: "{#PrivateRuntimeData}"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "..\PyQt5.uic.widget-plugins\*"; DestDir: "{code:GetInstallerDestDir}\PyQt5.uic.widget-plugins"; Excludes: "{#PrivateRuntimeData}"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 ; The updater's own config.yml and verification key ARE required runtime assets.
 ; Keep synchronized with UPDATER_RESOURCES in release_resources.py.
 Source: "config.yml"; DestDir: "{code:GetInstallerDestDir}\resources"; Flags: ignoreversion
@@ -98,10 +108,12 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
       StatusMsg: "Installing Microsoft Visual C++ Redistributable (x86)..."
 #endif
 
-; Runs for silent /UPDATE=1 too. No manifest is needed for an ordinary update.
+; Runs for silent /UPDATE=1 too. Fresh and preserved pending native setup bypass
+; legacy adoption; the application resumes native onboarding after the update.
+; No manifest is needed for an ordinary update.
 ; The helper keeps legacy endpoints and consumes an optional provisioned package.
 ; Startup repeats the same idempotent operation before opening any services.
-Filename: "{app}\migrate-native.exe"; Parameters: "--automatic --config ""{app}\resources\config.yml"" --bundle-dir ""{app}"""; WorkingDir: "{app}"; Check: InstalledConfigExists; Flags: runhidden waituntilterminated; StatusMsg: "Preserving and upgrading local integration data..."
+Filename: "{app}\migrate-native.exe"; Parameters: "--automatic --config ""{app}\resources\config.yml"" --bundle-dir ""{app}"""; WorkingDir: "{app}"; Check: ShouldUpgradeInstalledConfig; Flags: runhidden waituntilterminated; StatusMsg: "Preserving and upgrading local integration data..."
 
 ; --- LAUNCH APPLICATION ---
 ; Run the main executable after installation finishes.

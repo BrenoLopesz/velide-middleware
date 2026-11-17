@@ -51,6 +51,7 @@ class FarmaxStrategy(IConnectableStrategy):
         self._listening = False
         self._scope_verified = False
         self._source_ready = False
+        self._rollout_paused = False
 
         # --- Initialize Sub-Services ---
 
@@ -116,7 +117,7 @@ class FarmaxStrategy(IConnectableStrategy):
         Triggered when TrackingPersistenceService finishes loading from SQLite.
         We must fetch the details of these deliveries to show them in the UI.
         """
-        if not self._listening:
+        if self._rollout_paused or not self._listening:
             return
         self._ingestor.start()
         self._status_tracker.start()
@@ -176,7 +177,7 @@ class FarmaxStrategy(IConnectableStrategy):
 
     def start_listening(self):
         """Starts the polling services."""
-        if self._listening:
+        if self._rollout_paused or self._listening:
             return
         self._logger.debug("Iniciando o rastreamento Farmax...")
 
@@ -185,6 +186,8 @@ class FarmaxStrategy(IConnectableStrategy):
         self._persistence.initialize()
 
     def _start_remote_services(self):
+        if self._rollout_paused or not self._listening:
+            return
         self._source_ready = True
         ownership = self._persistence.journal.journal.__dict__.get("ownership") if self._persistence.journal else None
         if ownership and not self._scope_verified:
@@ -195,7 +198,7 @@ class FarmaxStrategy(IConnectableStrategy):
 
     def on_scope_verified(self):
         self._scope_verified = True
-        if self._listening:
+        if self._listening and not self._rollout_paused:
             self._updater.start()
             if self._source_ready:
                 self._start_remote_services()
@@ -236,6 +239,20 @@ class FarmaxStrategy(IConnectableStrategy):
             self._reconciliation.stop_service()
         self._websockets.stop_service()
 
+    def pause_for_rollout(self):
+        self._resume_listening = self._listening
+        self._rollout_paused = True
+        self._listening = False
+        self._ingestor.stop()
+        self._status_tracker.stop()
+        # The updater remains alive to finish and acknowledge durable ERP work.
+        # GraphQuiescence stops its timer only after all producers are drained.
+
+    def resume_after_rollout(self):
+        self._rollout_paused = False
+        if self._resume_listening:
+            self.start_listening()
+
     def fetch_deliverymen(self, success: Callable, error: Callable) -> None:
         """
         Fetches deliverymen using the standard Worker pattern.
@@ -243,6 +260,8 @@ class FarmaxStrategy(IConnectableStrategy):
         a dedicated service class.
         """
         # We access the global thread pool here for ad-hoc tasks
+        if self._rollout_paused:
+            return
         pool = QThreadPool.globalInstance()
 
         worker = FarmaxWorker.for_fetch_deliverymen(self._repository)

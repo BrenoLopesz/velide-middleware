@@ -33,6 +33,7 @@ var
   // --- Global Variables ---
   SelectedFolderPath: String;
   IsUpgrade: Boolean;
+  IsFreshInstall: Boolean;
   TempInstallerDir: String;
 
 // ---------------------------------------------------------------------------------
@@ -57,6 +58,23 @@ begin
       end;
     end;
   end;
+end;
+
+function InstalledConfigExists(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\resources\config.yml'));
+end;
+
+function HasInstallationEvidence(): Boolean;
+begin
+  // Recognize manual reinstall/repair too, before [Files] creates these paths.
+  // A missing config is never evidence of a new store.
+  Result := InstalledConfigExists() or
+    FileExists(ExpandConstant('{app}\main.exe')) or
+    FileExists(ExpandConstant('{app}\migrate-native.exe')) or
+    FileExists(ExpandConstant('{app}\unins000.exe')) or
+    DirExists(ExpandConstant('{app}\resources')) or
+    DirExists(ExpandConstant('{app}\installer'));
 end;
 
 // ---------------------------------------------------------------------------------
@@ -288,9 +306,11 @@ function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
 
-  if IsUpgrade then
+  // Inno asks about built-in pages while initializing the destination field.
+  // {app} is not available then. Our pages follow directory/task selection.
+  if (PageID = SystemSelectionPage.ID) or (PageID = CDSConfigPage.ID) or (PageID = FarmaxConfigPage.ID) then
   begin
-    if (PageID = SystemSelectionPage.ID) or (PageID = CDSConfigPage.ID) or (PageID = FarmaxConfigPage.ID) then
+    if IsUpgrade or HasInstallationEvidence() then
     begin
       Result := True;
       Exit;
@@ -378,12 +398,11 @@ begin
   begin
     ConfigPath := ExpandConstant('{app}\resources\config.yml');
 
-    // PROTECTION: If upgrade mode is active but config.yml is missing,
-    // we should NOT create a new one because we skipped the UI to configure it.
-    if IsUpgrade and (not FileExists(ConfigPath)) then
+    // The decision was captured BEFORE copying files. Repairs/updates must never
+    // create native onboarding config, even if config disappears during Setup.
+    if (not IsFreshInstall) and (not FileExists(ConfigPath)) then
     begin
-       Log('WARNING: Upgrade mode detected but config.yml is missing. Skipping creation to avoid invalid defaults.');
-       Exit;
+       RaiseException('Existing config.yml is missing. Restore the installation configuration before continuing.');
     end;
 
     // Only create config if it doesn't exist (Standard Install or First Run)
@@ -412,8 +431,7 @@ begin
           end
           else
           begin
-             // If Farmax, clear the folder_to_watch placeholder so it becomes null or empty
-             FileContent[i] := StringReplace(FileContent[i], '{{ FOLDER_TO_WATCH }}', 'null');
+              FileContent[i] := StringReplace(FileContent[i], '"{{ FOLDER_TO_WATCH }}"', 'null');
           end;
         end;
 
@@ -432,13 +450,13 @@ begin
            AddLine(FileContent, '  password: "' + FarmaxPassInput.Text + '"');
         end;
 
-        if SaveStringsToUTF8File(ConfigPath, FileContent, True) then
+        if SaveStringsToUTF8File(ConfigPath, FileContent, False) then
           Log('Config generated successfully.')
         else
-          Log('Error saving config.');
+          RaiseException('Error saving native setup configuration.');
       end
       else
-        Log('Error reading template file');
+        RaiseException('Error reading native setup configuration template.');
     end
     else
     begin
@@ -447,14 +465,66 @@ begin
   end;
 end;
 
-function InstalledConfigExists(): Boolean;
+function ConfigNeedsAutomaticUpgrade(const ConfigPath: String; FreshInstall: Boolean): Boolean;
+var
+  Lines: TArrayOfString;
+  Line, Key, Value: String;
+  I, ColonPos, CommentPos: Integer;
+  NeedsOnboarding: Boolean;
 begin
-  Result := FileExists(ExpandConstant('{app}\resources\config.yml'));
+  Result := (not FreshInstall) and FileExists(ConfigPath);
+  if not Result then Exit;
+  if not LoadStringsFromFile(ConfigPath, Lines) then
+    RaiseException('Cannot read the preserved installation configuration.');
+
+  // The installer writes this top-level scalar marker. Recognize plain/quoted
+  // scalars and inline comments without matching nested keys or commented text.
+  // This is only a helper gate; application startup still validates full YAML.
+  NeedsOnboarding := False;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    Line := Lines[I];
+    if (I = 0) and (Length(Line) > 0) and (Line[1] = #$FEFF) then
+      Delete(Line, 1, 1);
+    if Length(Line) > 0 then
+    begin
+      if (Line[1] <> ' ') and (Line[1] <> #9) then
+      begin
+        ColonPos := Pos(':', Line);
+        if ColonPos > 0 then
+        begin
+          Key := Trim(Copy(Line, 1, ColonPos - 1));
+          if (Key = 'onboarding') or (Key = '"onboarding"') or (Key = '''onboarding''') then
+          begin
+            Value := Trim(Copy(Line, ColonPos + 1, Length(Line)));
+            CommentPos := Pos('#', Value);
+            if CommentPos > 1 then
+              if (Value[CommentPos - 1] = ' ') or (Value[CommentPos - 1] = #9) then
+                Value := Trim(Copy(Value, 1, CommentPos - 1));
+            NeedsOnboarding := (Value = 'native_required') or
+              (Value = '"native_required"') or (Value = '''native_required''');
+          end;
+        end;
+      end;
+    end;
+  end;
+  Result := not NeedsOnboarding;
+end;
+
+function ShouldUpgradeInstalledConfig(): Boolean;
+begin
+  Result := ConfigNeedsAutomaticUpgrade(
+    ExpandConstant('{app}\resources\config.yml'), IsFreshInstall);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
+  IsFreshInstall := (not IsUpgrade) and (not HasInstallationEvidence());
   if IsUpgrade and not InstalledConfigExists() then
-    Result := 'Existing config.yml was not found in the update destination. The installation settings must be preserved.';
+    Result := 'Existing config.yml was not found in the update destination. The installation settings must be preserved.'
+  else if (not IsFreshInstall) and not InstalledConfigExists() then
+    Result := 'Existing installation found without config.yml. Restore its configuration; native setup cannot replace it.'
+  else if IsFreshInstall and WizardSilent() then
+    Result := 'A fresh installation requires interactive ERP configuration before native onboarding.';
 end;

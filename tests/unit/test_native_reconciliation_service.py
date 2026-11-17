@@ -366,3 +366,247 @@ def test_bootstrap_refreshes_preserve_pagination_and_initial_audit(
     QCoreApplication.processEvents()
     assert len(h.workers) == 2
     assert h.journal.count("active_orders") == 1
+
+
+def test_recovery_waits_for_durable_checkpoint_and_retries_failed_save(reconciler, qtbot):
+    h = reconciler
+    recovered = []
+    h.service.recovery_ready.connect(lambda: recovered.append(True))
+    start(h, bootstrapped=False)
+    h.workers[-1].signals.result.emit([])
+    h.journal.complete("native_states", [])
+    h.service.ensure_recovered()
+    assert not recovered and not h.service._bootstrapped
+    h.journal.take("bootstrap_progress").failure("checkpoint unavailable")
+    h.service.ensure_recovered()
+    assert not recovered and not h.service._bootstrapped
+
+    h.service._refresh_timer.stop()
+    h.service._refresh_timer.timeout.emit()
+    assert h.workers[-1].operation == "list_orders"
+    h.workers[-1].signals.result.emit([])
+    h.journal.complete("native_states", [])
+    assert not recovered
+    h.journal.complete("bootstrap_progress", None)
+    assert recovered == [True]
+    qtbot.waitUntil(lambda: h.journal.count("active_orders") == 1)
+
+
+@pytest.mark.parametrize("invalidate", ["mutation", "gateway"])
+def test_invalidated_checkpoint_recovers_durable_boundary_before_ready(reconciler, qtbot, invalidate):
+    h = reconciler
+    recovered = []
+    h.service.recovery_ready.connect(lambda: recovered.append(True))
+    start(h, bootstrapped=False)
+    h.workers[-1].signals.result.emit([])
+    h.journal.complete("native_states", [])
+    checkpoint = h.journal.take("bootstrap_progress")
+    if invalidate == "mutation":
+        h.service.invalidate_pending_reads()
+    else:
+        h.gateway.update_token("refreshed")
+        h.service.trigger_reconciliation()
+    assert len(h.workers) == 1
+    checkpoint.success(None)
+    assert not recovered and not h.service._initialized
+    qtbot.waitUntil(lambda: h.journal.count("bootstrap_status") == 2)
+    h.journal.complete("bootstrap_status", {"after": "", "complete": True})
+    assert recovered == [True]
+    assert h.journal.count("active_orders") == 1
+
+
+def test_retired_checkpoint_cannot_reset_restarted_recovery(reconciler):
+    h = reconciler
+    recovered = []
+    h.service.recovery_ready.connect(lambda: recovered.append(True))
+    start(h, bootstrapped=False)
+    h.workers[-1].signals.result.emit([])
+    h.journal.complete("native_states", [])
+    old = h.journal.take("bootstrap_progress")
+    h.service.stop_service()
+    start(h)
+    ticket = h.service._active_ticket
+    old.success(None)
+    assert h.service._initialized and h.service._bootstrapped
+    assert h.service._active_ticket == ticket and h.service._busy
+    assert recovered == [True]
+
+
+def test_recovery_listener_cannot_release_replacement_pass(reconciler):
+    h = reconciler
+    def restart():
+        h.service.stop_service()
+        start(h, bootstrapped=False)
+    h.service.recovery_ready.connect(restart)
+    start(h, bootstrapped=False)
+    h.workers[-1].signals.result.emit([])
+    h.journal.complete("native_states", [])
+    h.journal.complete("bootstrap_progress", None)
+    assert len(h.workers) == 2
+    assert h.workers[-1].operation == "list_orders"
+    assert h.service._busy and h.service._active_ticket is not None
+    assert not h.service._refresh_timer.isActive()
+    assert not h.service._bootstrapped
+
+
+@pytest.mark.parametrize("phase", ["order_states", "bootstrap_progress"])
+def test_rollout_pause_stops_feed_and_fences_old_callbacks(reconciler, qtbot, phase):
+    h = reconciler
+    feed = []
+    recovered = []
+    h.service.change_feed = SimpleNamespace(
+        start=lambda: feed.append("start"), stop=lambda: feed.append("stop"),
+        busy=False, pending=False, generation=1)
+    h.service.recovery_ready.connect(lambda: recovered.append(True))
+    start(h, bootstrapped=phase == "order_states")
+    if phase == "order_states":
+        h.journal.complete("native_recovery_ready", True)
+        old = load_orders(h)
+    else:
+        h.workers[-1].signals.result.emit([])
+        h.journal.complete("native_states", [])
+        old = h.journal.take("bootstrap_progress")
+    before = len(recovered)
+    h.service.pause_for_rollout()
+    h.service.pause_for_rollout()
+    h.service.invalidate_pending_reads()
+    h.service.trigger_reconciliation()
+    h.service.ensure_recovered()
+    h.service.start_service()
+    if phase == "order_states":
+        old.signals.result.emit([state(1)])
+    else:
+        old.success(None)
+    QCoreApplication.processEvents()
+    assert feed == ["start", "stop"]
+    assert not h.service._running and not h.service._refresh_timer.isActive()
+    assert len(recovered) == before and not h.published
+    h.service.resume_after_rollout()
+    h.journal.complete("bootstrap_status", {"after": "", "complete": True})
+    h.journal.complete("native_recovery_ready", True)
+    assert feed == ["start", "stop", "start"]
+    assert len(recovered) == before + 1
+    complete_read(h, load_orders(h), revision=2)
+    qtbot.waitUntil(lambda: h.published == [state(2)])
+
+
+def attach_feed(h):
+    h.service.change_feed = SimpleNamespace(
+        start=lambda: None, stop=lambda: None,
+        busy=False, pending=False, generation=1)
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure"])
+def test_retired_readiness_callback_cannot_open_or_release_restarted_pass(reconciler, outcome):
+    h = reconciler
+    attach_feed(h)
+    recovered = []
+    h.service.recovery_ready.connect(lambda: recovered.append(True))
+    start(h)
+    old = h.journal.take("native_recovery_ready")
+    h.service.stop_service()
+    start(h)
+    ticket = h.service._active_ticket
+    if outcome == "success":
+        old.success(True)
+    else:
+        old.failure("retired")
+    assert not recovered and not h.errors
+    assert h.service._busy and h.service._active_ticket == ticket
+    h.journal.complete("native_recovery_ready", True)
+    assert recovered == [True]
+
+
+def test_feed_progress_supersedes_pending_readiness_result(reconciler):
+    h = reconciler
+    attach_feed(h)
+    recovered = []
+    h.service.recovery_ready.connect(lambda: recovered.append(True))
+    start(h)
+    old = h.journal.take("native_recovery_ready")
+    h.service.check_recovery()  # A feed cycle committed after the old snapshot.
+    old.success(True)
+    assert not recovered
+    assert h.journal.count("native_recovery_ready") == 2
+    h.journal.complete("native_recovery_ready", False)
+    assert not recovered
+    h.service.check_recovery()
+    h.journal.complete("native_recovery_ready", True)
+    assert recovered == [True]
+    h.service.check_recovery()
+    assert h.journal.count("native_recovery_ready") == 3
+
+
+def test_readiness_reannouncement_rechecks_feed_and_durable_state(reconciler):
+    h = reconciler
+    attach_feed(h)
+    recovered = []
+    h.service.recovery_ready.connect(lambda: recovered.append(True))
+    start(h)
+    h.journal.complete("native_recovery_ready", True)
+    h.service.change_feed.busy = True
+    h.service.ensure_recovered()
+    assert recovered == [True]
+    assert h.journal.count("native_recovery_ready") == 1
+    h.service.change_feed.busy = False
+    h.service.check_recovery()
+    h.journal.complete("native_recovery_ready", False)
+    assert recovered == [True]
+    h.service.check_recovery()
+    h.journal.complete("native_recovery_ready", True)
+    assert recovered == [True, True]
+
+
+def test_readiness_failure_backs_off_without_releasing_scheduler(reconciler, monkeypatch):
+    h = reconciler
+    attach_feed(h)
+    start(h)
+    ticket = h.service._active_ticket
+    for _ in range(20):
+        h.service.check_recovery()
+    h.journal.take("native_recovery_ready").failure("storage unavailable")
+    assert h.errors == ["storage unavailable"]
+    assert h.service._busy and h.service._active_ticket == ticket
+    for _ in range(20):
+        h.service.check_recovery()
+    assert h.journal.count("native_recovery_ready") == 1
+    monkeypatch.setattr("services.native_reconciliation_service.time.monotonic",
+                        lambda: h.service._recovery_retry_after + 1)
+    h.service.check_recovery()
+    assert h.journal.count("native_recovery_ready") == 2
+
+
+def test_feed_readiness_listener_can_pause_before_old_pass_continues(reconciler):
+    h = reconciler
+    attach_feed(h)
+    h.service.recovery_ready.connect(h.service.pause_for_rollout)
+    start(h)
+    h.journal.complete("native_recovery_ready", True)
+    assert h.service._rollout_paused and not h.service._running
+    assert not h.service._refresh_timer.isActive()
+    h.journal.take("active_orders").success([])
+    assert not h.service._busy and not h.service._refresh_timer.isActive()
+
+
+@pytest.mark.parametrize("invalidate", ["mutation", "gateway"])
+@pytest.mark.parametrize("outcome", ["ready", "failed"])
+def test_invalidated_readiness_result_rechecks_without_releasing_pass(reconciler, invalidate, outcome):
+    h = reconciler
+    attach_feed(h)
+    recovered = []
+    h.service.recovery_ready.connect(lambda: recovered.append(True))
+    start(h)
+    old = h.journal.take("native_recovery_ready")
+    ticket = h.service._active_ticket
+    if invalidate == "mutation":
+        h.service.invalidate_pending_reads()
+    else:
+        h.gateway.update_token("replacement")
+    if outcome == "ready":
+        old.success(True)
+    else:
+        old.failure("retired")
+    assert not recovered and not h.errors
+    assert h.service._busy and h.service._active_ticket == ticket
+    h.journal.complete("native_recovery_ready", False)
+    assert not recovered

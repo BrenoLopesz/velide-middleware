@@ -29,6 +29,14 @@ class DeliveryDispatcher(QObject):
         self._gateway = gateway
         self._queue: Deque[dict] = collections.deque()
         self._is_processing = False
+        self._rollout_paused = False
+
+    def pause_for_rollout(self):
+        self._rollout_paused = True
+
+    def resume_after_rollout(self):
+        self._rollout_paused = False
+        self._try_process_next()
 
     def queue_add(self, internal_id: str, order: Order):
         self._queue.append({"type": TASK_ADD, "id": internal_id, "payload": order})
@@ -49,7 +57,7 @@ class DeliveryDispatcher(QObject):
         return False
 
     def _try_process_next(self):
-        if self._is_processing or not self._queue:
+        if self._rollout_paused or self._is_processing or not self._queue:
             return
 
         self._is_processing = True

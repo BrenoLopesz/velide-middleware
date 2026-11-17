@@ -14,6 +14,9 @@ jobs:
     runs-on: "windows-latest"
     permissions:
       contents: write
+    env:
+      # Required repository/organization Actions variable; no production fallback.
+      MIDDLEWARE_SERVICE_BASE_URL: ${{ vars.MIDDLEWARE_SERVICE_BASE_URL }}
 
     steps:
       - name: "01. Checkout code"
@@ -31,6 +34,14 @@ jobs:
         # --frozen ensures we use the EXACT versions from uv.lock
         run: uv sync --frozen
 
+      - name: "Validate deployment setting and release packaging"
+        shell: pwsh
+        run: |
+          uv run python installer/src/cli/release_resources.py generate output/release-resources/middleware-service.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run pytest tests/unit/test_rollout_packaging.py tests/integration/test_upgrade_installer_resources.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: "04. Create version.txt file"
         # Saves version to a file. The 'shell: bash' is needed for this syntax.
         run: echo "${{ github.ref_name }}" > installer/resources/version.txt
@@ -38,9 +49,16 @@ jobs:
 
       - name: "05. Build Python executables"
         # We use 'uv run' to execute commands inside the environment created by 'uv sync'
+        shell: pwsh
         run: |
           uv run python installer/src/cli/setup_installer.py build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           uv run python installer/src/cli/setup.py build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run python installer/src/cli/release_resources.py check output/middleware
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run python installer/src/cli/release_resources.py check output/installer --updater
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: "06. Download Microsoft VC++ Redistributables"
         shell: bash
@@ -76,7 +94,7 @@ jobs:
             /DMyAppVersion=v${{ github.ref_name }}
 
       - name: "09. Clean up build artifacts"
-        run: Remove-Item -Path './output/installer', './output/middleware' -Recurse -Force -ErrorAction SilentlyContinue
+        run: Remove-Item -Path './output/installer', './output/middleware', './output/release-resources' -Recurse -Force -ErrorAction Stop
 
       - name: "10. Generate and Sign Hashes"
         env:

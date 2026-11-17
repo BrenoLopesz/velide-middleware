@@ -78,6 +78,7 @@ class VelideWebsocketsWorker(QRunnable):
         self._is_running = True
         self._transport: Optional[WebsocketsTransport] = None
         self._loop = None
+        self._task = None
         
         # Retry logic state
         self._retry_delay = 2
@@ -127,12 +128,13 @@ class VelideWebsocketsWorker(QRunnable):
         self._is_running = False
         self.logger.info("Solicitação de parada do WebSocket recebida.")
         
-        if self._transport:
+        if self._loop and self._task:
             try:
-                if self._loop and self._loop.is_running():
-                    asyncio.run_coroutine_threadsafe(self._transport.close(), self._loop)
-            except Exception:
-                # Ignore errors during shutdown sequence
+                # Interrupt read-only token wait/connect/backoff as well as an
+                # open subscription. Async context managers still close cleanly;
+                # the pool does not finish until that cleanup has returned.
+                self._loop.call_soon_threadsafe(self._task.cancel)
+            except RuntimeError:
                 pass
 
     def run(self):
@@ -142,6 +144,9 @@ class VelideWebsocketsWorker(QRunnable):
         try:
             self.logger.debug("Iniciando thread do WebSocket Velide...")
             asyncio.run(self._run_main_loop())
+        except asyncio.CancelledError:
+            if self._is_running:
+                raise
         except Exception as e:
             self.logger.exception("Falha fatal no WebSocket.")
             self.signals.error_occurred.emit(str(e))
@@ -156,6 +161,7 @@ class VelideWebsocketsWorker(QRunnable):
         """
         self._retry_delay = 2
         self._loop = asyncio.get_running_loop()
+        self._task = asyncio.current_task()
 
         while self._is_running:
             try:
